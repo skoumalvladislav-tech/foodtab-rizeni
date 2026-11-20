@@ -10,7 +10,7 @@
  * nabídla jako jistou a někdo by klikl potvrdit bez přečtení.
  */
 
-const { jistotaShody, navrhnoutParovani, PRAH_NAVRHU, vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, stavPoVraceni, protistranaSedi, normalizovatVs, jeVracena, kandidatiProNavrhy, jeVKorunach, autoTransakceZRadku, platbaZBanky } = await import('../lib/finance-parovani.ts')
+const { jistotaShody, navrhnoutParovani, PRAH_NAVRHU, vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, stavPoVraceni, protistranaSedi, normalizovatVs, jeVracena, kandidatiProNavrhy, jeVKorunach, autoTransakceZRadku, platbaZBanky, SLOUPCE_AUTOMATICKEHO_PAROVANI, SLOUPCE_POTVRZENEHO_PAROVANI, SLOUPCE_PRIJMU_PRO_VRACENI, SLOUPCE_NAVRHU_POZORNOSTI, sloupceSeznamuPlateb } = await import('../lib/finance-parovani.ts')
 const { readFileSync } = await import('node:fs')
 
 let chyb = 0
@@ -235,20 +235,70 @@ console.log('\n== Protiúčet ve vlastním sloupci (Finance Fáze 0, krok 1): pr
   // pohyby čte i s protiúčtem a převádí je touhle funkcí (přesně tady
   // byla chyba: sloupec se nevybíral).
   const uloha = readFileSync('lib/finance-automaticke-parovani.ts', 'utf8')
-  const dotazUlohy = /from\('transakce'\)\s*\.select\('([^']*)'\)/.exec(uloha)?.[1] ?? ''
-  ok('úloha párování: dotaz na pohyby nalezen a čte protiucet', dotazUlohy.includes('protistrana') && /\bprotiucet\b/.test(dotazUlohy))
+  ok('úloha párování: dotaz na pohyby čte výčet SLOUPCE_AUTOMATICKEHO_PAROVANI',
+    /from\('transakce'\)\s*\.select\(SLOUPCE_AUTOMATICKEHO_PAROVANI\)/.test(uloha))
   ok('úloha párování: pohyby převádí autoTransakceZRadku i s potvrzeními banky',
     /transakce\.map\(\(t\) => autoTransakceZRadku\(t, potvrzeneBankou\)\)/.test(uloha))
   ok('úloha párování: potvrzení čte z transakce_potvrzeni_banky (transakce_id) své firmy',
     /from\('transakce_potvrzeni_banky'\)\.select\('transakce_id'\)\s*\.eq\('tenant_id', tenantId\)/.test(uloha)
       && /potvrzeneBankou\.add\(r\.transakce_id\)/.test(uloha))
   const strankaPlateb = readFileSync('app/[rozsah]/finance/platby/page.tsx', 'utf8')
-  ok('Platby: vrácení a seznam čtou protiucet a protistranu doplní číslem účtu',
-    (strankaPlateb.match(/protistranaNeboUcet\(/g) ?? []).length >= 3 &&
-      /select\('vs, castka_haleru, datum, protistrana, protiucet'\)/.test(strankaPlateb) &&
-      /protiucet: t\.protiucet/.test(strankaPlateb))
+  ok('Platby: vrácení a seznam protistranu doplní číslem účtu',
+    (strankaPlateb.match(/protistranaNeboUcet\(/g) ?? []).length >= 3 && /protiucet: t\.protiucet/.test(strankaPlateb))
+  ok('Platby: potvrzená párování čtou výčet SLOUPCE_POTVRZENEHO_PAROVANI',
+    /from\('transakce'\)\s*\.select\(SLOUPCE_POTVRZENEHO_PAROVANI\)/.test(strankaPlateb))
+  ok('Platby: příjmy pro vrácení čtou výčet SLOUPCE_PRIJMU_PRO_VRACENI',
+    /from\('transakce'\)\.select\(SLOUPCE_PRIJMU_PRO_VRACENI\)/.test(strankaPlateb))
+  ok('Platby: seznam plateb čte výčet sloupceSeznamuPlateb (firma i pobočka)',
+    /const sloupceTransakci: string = sloupceSeznamuPlateb\(Boolean\(pobocka\)\)/.test(strankaPlateb)
+      && /from\('transakce'\)\.select\(sloupceTransakci\)/.test(strankaPlateb))
   const exportUcetni = readFileSync('app/api/ucetni/export/route.ts', 'utf8')
   ok('účetní export: protistrana = jméno, jinak číslo účtu', /protistrana: protistranaNeboUcet\(t\.protistrana, t\.protiucet\)/.test(exportUcetni))
+  ok('účetní export: čte výčet sloupceTransakciExportu', /from\('transakce'\)\s*\.select\(sloupceTransakciExportu\(Boolean\(pobocka\)\)\)/.test(exportUcetni))
+  const pozornost = readFileSync('lib/finance-pozornost.ts', 'utf8')
+  ok('Přehled (pozornost): návrhy čtou výčet SLOUPCE_NAVRHU_POZORNOSTI',
+    /from\('transakce'\)\s*\.select\(SLOUPCE_NAVRHU_POZORNOSTI\)/.test(pozornost))
+  ok('Přehled (pozornost): protistrana pro návrh = jméno, jinak číslo účtu',
+    /const protistrana = protistranaNeboUcet\(t\.protistrana, t\.protiucet\)/.test(pozornost)
+      && /navrhnoutParovani\(\{[^}]*\bprotistrana\b[^}]*\}/.test(pozornost) && !/protistrana: t\.protistrana/.test(pozornost))
+}
+
+console.log('\n== Výčty sloupců s protistranou nesou i protiúčet ==')
+{
+  // Každý výčet, který čte protistranu, musí číst i protiúčet — jinak
+  // platba bez jména ukáže prázdno (nález N11/N12 druhé revize kroku 1).
+  const { sloupceTransakciExportu } = await import('../lib/ucetni-export.ts')
+  const vycty = {
+    SLOUPCE_AUTOMATICKEHO_PAROVANI, SLOUPCE_POTVRZENEHO_PAROVANI, SLOUPCE_PRIJMU_PRO_VRACENI, SLOUPCE_NAVRHU_POZORNOSTI,
+    'sloupceSeznamuPlateb(firma)': sloupceSeznamuPlateb(false), 'sloupceSeznamuPlateb(pobočka)': sloupceSeznamuPlateb(true),
+    'sloupceTransakciExportu(firma)': sloupceTransakciExportu(false), 'sloupceTransakciExportu(pobočka)': sloupceTransakciExportu(true),
+  }
+  for (const [jmeno, vycet] of Object.entries(vycty)) {
+    const sloupce = String(vycet).split(',').map((s) => s.trim())
+    ok(`${jmeno}: čte protistranu i protiúčet`, sloupce.includes('protistrana') && sloupce.includes('protiucet'))
+  }
+  ok('sloupceSeznamuPlateb: na pobočce jen platby účtů pobočky (!inner), za firmu bez', /platebni_ucty!inner\(branch_id\)/.test(sloupceSeznamuPlateb(true)) && !/platebni_ucty/.test(sloupceSeznamuPlateb(false)))
+  ok('sloupceTransakciExportu: na pobočce !inner, za firmu jen účet', /platebni_ucty!inner\(branch_id\)/.test(sloupceTransakciExportu(true)) && /platebni_ucty\(branch_id\)/.test(sloupceTransakciExportu(false)))
+
+  // Nikde v appce dotaz, který si protistranu vypisuje sám a protiúčet
+  // vynechá (nový dotaz má sáhnout po výčtu výš).
+  const { readdirSync, statSync } = await import('node:fs')
+  const soubory = []
+  const projit = (adresar) => {
+    for (const jmeno of readdirSync(adresar)) {
+      const cesta = `${adresar}/${jmeno}`
+      if (statSync(cesta).isDirectory()) { if (jmeno !== 'node_modules') projit(cesta) } else if (/\.(ts|tsx)$/.test(jmeno)) soubory.push(cesta)
+    }
+  }
+  projit('app'); projit('lib')
+  const bezProtiuctu = []
+  for (const soubor of soubory) {
+    const text = readFileSync(soubor, 'utf8')
+    for (const m of text.matchAll(/\.select\(\s*(['"`])([^'"`]*)\1/g)) {
+      if (/\bprotistrana\b/.test(m[2]) && !/\bprotiucet\b/.test(m[2])) bezProtiuctu.push(`${soubor}: ${m[2]}`)
+    }
+  }
+  ok(`žádný dotaz v app/ a lib/ nečte protistranu bez protiúčtu${bezProtiuctu.length ? ' — ' + bezProtiuctu.join(' | ') : ''}`, soubory.length > 100 && bezProtiuctu.length === 0)
 }
 
 console.log('\n== Dorovnání stavu ve Fakturách podle párování ==')

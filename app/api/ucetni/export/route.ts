@@ -10,6 +10,7 @@ import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
 import {
   popisFaktury,
   sestavitRadkyExportu,
+  sloupceTransakciExportu,
   vygenerovatCsvExportu,
   type ZdrojovaTransakce,
   type ZdrojovaPlatba,
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
   // jiných poboček v exportu nejsou.
   let dotazTransakci = supabase
     .from('transakce')
-    .select(`id, datum, smer, castka_haleru, protistrana, protiucet, vs, kategorie, zdroj, platebni_ucty${pobocka ? '!inner' : ''}(branch_id)`)
+    .select(sloupceTransakciExportu(Boolean(pobocka)))
     .eq('tenant_id', tenantId)
     .gte('datum', od)
     .lte('datum', doData)
@@ -84,7 +85,9 @@ export async function GET(request: Request) {
     platebni_ucty: { branch_id: string | null } | { branch_id: string | null }[]
   }
 
-  const transakce: ZdrojovaTransakce[] = ((transakceRes.data ?? []) as RadekTransakceSDotazem[]).map((t) => {
+  // Přes `unknown`: výčet sloupců je `string` (sloupceTransakciExportu) a typový
+  // parser supabase-js z něj tvar řádku nevyčte; tvar hlídá ten výčet.
+  const transakce: ZdrojovaTransakce[] = ((transakceRes.data ?? []) as unknown as RadekTransakceSDotazem[]).map((t) => {
     const ucet = Array.isArray(t.platebni_ucty) ? t.platebni_ucty[0] : t.platebni_ucty
     return {
       id: t.id,

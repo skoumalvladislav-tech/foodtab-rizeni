@@ -11,7 +11,18 @@ import { naFaktury, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { jeNezaplacena, type Faktura } from '@/lib/faktury-types'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
-import { jeVKorunach, jeVracena, kandidatiProNavrhy, navrhnoutParovani, type KandidatFaktura, type KandidatTransakce, type Navrh } from '@/lib/finance-parovani'
+import {
+  jeVKorunach,
+  jeVracena,
+  kandidatiProNavrhy,
+  navrhnoutParovani,
+  SLOUPCE_POTVRZENEHO_PAROVANI,
+  SLOUPCE_PRIJMU_PRO_VRACENI,
+  sloupceSeznamuPlateb,
+  type KandidatFaktura,
+  type KandidatTransakce,
+  type Navrh,
+} from '@/lib/finance-parovani'
 import { protistranaNeboUcet } from '@/lib/banka/ucet'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { CELA_FIRMA, nazevPobockyUctu, volbyPobockyUctu, type PobockaFirmy } from '@/lib/finance-platby-pobocka'
@@ -143,7 +154,7 @@ async function nactiPotvrzeneAlokace(
   const transakceIds = [...new Set(alokace.map((a) => a.transakce_id))]
   const { data: transakceData } = await supabase
     .from('transakce')
-    .select('id, datum, protistrana, protiucet, vs, castka_haleru')
+    .select(SLOUPCE_POTVRZENEHO_PAROVANI)
     .in('id', transakceIds)
   const transakceRadky = (transakceData ?? []) as { id: string; datum: string; protistrana: string; protiucet: string; vs: string; castka_haleru: number }[]
   // Protistrana = jméno, jinak číslo účtu (dřív stálo přímo v protistraně).
@@ -159,7 +170,7 @@ async function nactiPotvrzeneAlokace(
   await Promise.all(alokace.filter((a) => a.zpusob === 'automaticky').map(async (a) => {
     const t = transakceMapa.get(a.transakce_id)
     if (!t) return
-    const { data: prijmyData } = await supabase.from('transakce').select('vs, castka_haleru, datum, protistrana, protiucet')
+    const { data: prijmyData } = await supabase.from('transakce').select(SLOUPCE_PRIJMU_PRO_VRACENI)
       .eq('tenant_id', tenantId).eq('smer', 'prijem')
       .gte('datum', t.datum).lte('datum', plusDny(t.datum, 30))
       .gte('castka_haleru', Math.floor(t.castka_haleru * 0.97)).lte('castka_haleru', t.castka_haleru)
@@ -305,10 +316,8 @@ export default async function FinancePlatby({
   // přestal být aktivní. Za celou firmu dotaz beze změny.
   // `string`, ne sjednocení dvou literálů — typový parser supabase-js
   // takové sjednocení v `select` neumí přečíst; řádky se proto níž
-  // přetypují přes `unknown` (tvar hlídá výčet sloupců tady).
-  const sloupceTransakci: string = pobocka
-    ? 'id, smer, castka_haleru, datum, protistrana, protiucet, vs, zdroj, platebni_ucty!inner(branch_id)'
-    : 'id, smer, castka_haleru, datum, protistrana, protiucet, vs, zdroj'
+  // přetypují přes `unknown` (tvar hlídá výčet sloupců v sloupceSeznamuPlateb).
+  const sloupceTransakci: string = sloupceSeznamuPlateb(Boolean(pobocka))
   let dotazTransakci = supabase.from('transakce').select(sloupceTransakci).eq('tenant_id', tenantId)
   if (pobocka) dotazTransakci = dotazTransakci.eq('platebni_ucty.branch_id', pobocka)
 

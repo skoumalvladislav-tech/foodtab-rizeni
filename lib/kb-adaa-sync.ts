@@ -16,8 +16,10 @@ import { zapsatVypis } from './banka/zapis.ts'
  * Zápis jde společnou cestou všech bank (lib/banka/zapis.ts):
  *   * pohyby `importovat_vypis` se zdrojem `banka_api` (migrace
  *     20261119100000) — smí ho zapsat jen service_role, automatické
- *     párování mu věří; dedup `(ucet_id, externi_id)` s `externi_id =
- *     references.accountServicer`;
+ *     párování mu věří; pohyb se pozná podle id od banky
+ *     (`(ucet_id, zdroj, externi_id)`, `externi_id =
+ *     references.accountServicer`); stejný pohyb z nahraného výpisu
+ *     stažení „zabere" a podruhé ho nezapíše;
  *   * zůstatky `bankovni_zustatky` se stejným zdrojem.
  *
  * Okno stahování: od uloženého postupu (`externi_ucet.stazeno_do`)

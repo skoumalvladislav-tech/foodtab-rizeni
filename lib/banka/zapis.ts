@@ -62,8 +62,8 @@ export async function zapsatVypis(
  * banku, ale zůstatek databáze odmítne (42501).
  *
  * `synchronizaceZapojena`: běží pro tuhle banku pravidelná synchronizace
- * (služba, ta zůstatek zapíše)? Enable Banking dnes ne — tam by slib
- * „ukáže se po synchronizaci" nebyl pravda.
+ * (služba, ta zůstatek zapíše)? U banky, kterou úloha synchronizace
+ * nestahuje, by slib „ukáže se po synchronizaci" nebyl pravda.
  */
 export function hlaskaPrvnihoZustatku(
   chyba: { code?: string | null } | null | undefined,

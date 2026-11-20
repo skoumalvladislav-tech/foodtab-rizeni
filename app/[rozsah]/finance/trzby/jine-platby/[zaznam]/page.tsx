@@ -26,7 +26,19 @@ import Nadpis from '../../../../nadpis'
 import { aliasyPripojeni, kalendarPobocky, katalogPripojeni } from './akce-zaklad'
 import type { PolozkaEditoru } from './editor-navrhu'
 import Kroky from './kroky'
-import { autorZaznamu, coZkontrolovat, datumCesky, jednotkaCesky, jeUuid, katalogJeStary, nevyresenePolozkyDolozeni, rozpoznaniNavrhu, type PokusRozpoznani } from './logika'
+import {
+  autorZaznamu,
+  coZkontrolovat,
+  datumCesky,
+  jednotkaCesky,
+  jeUuid,
+  katalogJeStary,
+  nevyresenePolozkyDolozeni,
+  platbaUhradyZRadku,
+  rozpoznaniNavrhu,
+  SLOUPCE_PLATBY_UHRADY,
+  type PokusRozpoznani,
+} from './logika'
 import { metadataPokladny } from './nacteni'
 import Originaly from './originaly'
 import SekceKontrola from './sekce-kontrola'
@@ -279,19 +291,13 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
   /* ---------- Úhrada (bankovní platby jen s finance.read za firmu) ---------- */
   let platby: PlatbaBanky[] | null = null
   let naparovana: PlatbaBanky | null = null
-  const naPlatbu = (t: Record<string, unknown>): PlatbaBanky => ({
-    id: String(t.id),
-    datum: String(t.datum),
-    castkaHaleru: Number(t.castka_haleru),
-    mena: String(t.mena),
-    protistrana: String(t.protistrana ?? ''),
-    vs: String(t.vs ?? ''),
-  })
+  // Protistrana = jméno, jinak číslo účtu (platbaUhradyZRadku).
+  const naPlatbu = (t: Record<string, unknown>): PlatbaBanky => platbaUhradyZRadku(t)
   if (financeFirmy) {
     if (prava.has('jine_platby.faktura') && z.mena) {
       const { data } = await supabase
         .from('transakce')
-        .select('id, datum, castka_haleru, mena, protistrana, vs')
+        .select(SLOUPCE_PLATBY_UHRADY)
         .eq('tenant_id', tenantId)
         .eq('smer', 'prijem')
         .eq('mena', z.mena)
@@ -305,7 +311,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
       platby = []
     }
     if (z.uhradaTransakceId) {
-      const { data } = await supabase.from('transakce').select('id, datum, castka_haleru, mena, protistrana, vs').eq('id', z.uhradaTransakceId).eq('tenant_id', tenantId).maybeSingle()
+      const { data } = await supabase.from('transakce').select(SLOUPCE_PLATBY_UHRADY).eq('id', z.uhradaTransakceId).eq('tenant_id', tenantId).maybeSingle()
       naparovana = data ? naPlatbu(data as Record<string, unknown>) : null
     }
   }

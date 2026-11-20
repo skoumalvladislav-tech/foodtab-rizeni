@@ -18,7 +18,7 @@ import { zapsatVypis } from './banka/zapis.ts'
  * pokračuje, dokud API vrací další stránku, a KAŽDOU stránku zapíše
  * zvlášť (bezpečné pokračování po chybě: když appka spadne na třetí
  * stránce, první dvě zůstávají uložené, příští běh navazuje odtud díky
- * dedupu na `externi_id`, ne že by se musely stahovat znovu).
+ * id od banky (`externi_id`) — co už zapsané je, podruhé se nezapíše).
  */
 
 const MINUT_NEZ_JE_BEH_ZASEKNUTY = 10

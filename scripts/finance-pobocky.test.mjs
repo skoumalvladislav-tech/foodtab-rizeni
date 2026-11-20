@@ -608,8 +608,10 @@ console.log('\n== Faktury a exporty: firma, ne rozsah z adresy ==')
     /const pobocka = pobockaFinanci\(pristup\.scope\)/.test(s))
   ok('  pobočka jen s finance.read za celou firmu, jinak 403',
     /if \(pobocka && !\(await hasAccess\(tenantId, 'finance\.read', null\)\)\) \{\s*return new Response\([^)]*\{ status: 403 \}\)/.test(s))
+  // Výčet sloupců je od kroku 1 v lib/ucetni-export.ts (sloupceTransakciExportu).
   ok('  na pobočce jen platby z jejích účtů (!inner + filtr)',
-    /platebni_ucty\$\{pobocka \? '!inner' : ''\}\(branch_id\)/.test(s) &&
+    /\.select\(sloupceTransakciExportu\(Boolean\(pobocka\)\)\)/.test(s) &&
+      /platebni_ucty\$\{naPobocce \? '!inner' : ''\}\(branch_id\)/.test(zdroj('lib/ucetni-export.ts')) &&
       /if \(pobocka\) dotazTransakci = dotazTransakci\.eq\('platebni_ucty\.branch_id', pobocka\)/.test(s))
 }
 

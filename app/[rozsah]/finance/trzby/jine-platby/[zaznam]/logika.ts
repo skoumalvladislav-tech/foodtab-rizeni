@@ -45,6 +45,7 @@ import { normalizovatUcet } from '../../../../../../lib/jine-platby-duplicity.ts
 import { STAVY_OPERACE, type OperacePos, type StavOperace, type VysledekDohledani } from '../../../../../../lib/jine-platby-pos-operace.ts'
 import { oknoProvoznihoDne, posunoutDen } from '../../../../../../lib/pokladna-cas.ts'
 import type { UcetPos } from '../../../../../../lib/pos-provider-contract.ts'
+import { protistranaNeboUcet } from '../../../../../../lib/banka/ucet.ts'
 
 /* ------------------------------------------------------------------ */
 /* Výsledek serverové akce                                              */
@@ -1468,4 +1469,32 @@ export function textPlanovaneOperace(
 export function datumCesky(iso: string | null): string {
   const m = iso ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso) : null
   return m ? `${Number(m[3])}. ${Number(m[2])}. ${m[1]}` : ''
+}
+
+/* ------------------------------------------------------------------ */
+/* Úhrada: bankovní platby k napárování                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Sloupce `transakce` pro sekci Úhrada. Od kroku 1 Finance leží číslo
+ * účtu protistrany ve vlastním sloupci `protiucet` (dřív stálo
+ * v `protistrana`, když jméno chybělo) — bez něj by platba bez jména
+ * v nabídce neměla u čeho poznat, od koho přišla.
+ */
+export const SLOUPCE_PLATBY_UHRADY = 'id, datum, castka_haleru, mena, protistrana, protiucet, vs'
+
+/** Bankovní platba v sekci Úhrada; `protistrana` = jméno, jinak číslo účtu. */
+export type PlatbaUhrady = { id: string; datum: string; castkaHaleru: number; mena: string; protistrana: string; vs: string }
+
+/** Řádek `transakce` (SLOUPCE_PLATBY_UHRADY) → platba pro sekci Úhrada. */
+export function platbaUhradyZRadku(t: Record<string, unknown>): PlatbaUhrady {
+  const text = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v))
+  return {
+    id: String(t.id),
+    datum: String(t.datum),
+    castkaHaleru: Number(t.castka_haleru),
+    mena: String(t.mena),
+    protistrana: protistranaNeboUcet(text(t.protistrana), text(t.protiucet)),
+    vs: text(t.vs),
+  }
 }

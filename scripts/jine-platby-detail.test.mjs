@@ -2440,7 +2440,11 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
     ],
     pos_mapovani: [],
     kontakty: [{ id: '44444444-2222-4333-8444-555555555555', nazev: 'Firma s.r.o.', ico: '12345678', dic: null }],
-    transakce: [{ id: '55555555-2222-4333-8444-555555555555', datum: '2026-10-15', castka_haleru: 45000, mena: 'CZK', protistrana: 'Firma s.r.o.', vs: '1234' }],
+    transakce: [
+      { id: '55555555-2222-4333-8444-555555555555', datum: '2026-10-15', castka_haleru: 45000, mena: 'CZK', protistrana: 'Firma s.r.o.', protiucet: '', vs: '1234' },
+      // Platba bez jména: protistrana jen jako číslo účtu (Finance Fáze 0, krok 1).
+      { id: '55555555-2222-4333-8444-666666666666', datum: '2026-10-14', castka_haleru: 12000, mena: 'CZK', protistrana: '', protiucet: 'CZ6508000000192000145399', vs: '' },
+    ],
     profiles: [{ user_id: 'U1', full_name: 'Kateřina Nováková' }],
     branches: { timezone: 'Europe/Prague', day_starts_at: '05:00' },
     tenants: { timezone: 'Europe/Prague' },
@@ -2455,7 +2459,7 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
       return tabulka === 'jine_platby_rozpoznani' ? pole.filter((r) => podleId.every((id) => r.id === id)) : pole
     }
     const q = {
-      select: () => q, eq: (k, v) => (k === 'id' && podleId.push(v), q), neq: () => q, is: () => q, in: (k, v) => (globalThis.__jpStranka.filtry.push([tabulka, k, v]), q), gte: () => q, lte: () => q, order: () => q, limit: () => q, range: () => q,
+      select: (s) => ((globalThis.__jpStranka.sloupce ??= []).push([tabulka, s]), q), eq: (k, v) => (k === 'id' && podleId.push(v), q), neq: () => q, is: () => q, in: (k, v) => (globalThis.__jpStranka.filtry.push([tabulka, k, v]), q), gte: () => q, lte: () => q, order: () => q, limit: () => q, range: () => q,
       maybeSingle: () => Promise.resolve({ data: Array.isArray(tabulky[tabulka]) ? (radky()[0] ?? null) : (tabulky[tabulka] ?? null), error: null }),
       then: (a, b) =>
         Promise.resolve(
@@ -2511,6 +2515,13 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
   ok('panel skladu: jednotka produktu z katalogu česky (Piece → „2 ks“), ne natvrdo', text.includes('Pivo 0,5 — 2 ks (jednotka prodeje pokladny)'))
   ok('s finance.read ZA FIRMU: bankovní platby a kontakty se načtou a platba jde vybrat',
     globalThis.__jpStranka.dotazy.includes('transakce') && globalThis.__jpStranka.dotazy.includes('kontakty') && /<select[^>]*name="transakce"/.test(html))
+  // Od kroku 1 Finance je číslo účtu protistrany ve vlastním sloupci —
+  // platba bez jména musí v nabídce ukázat aspoň účet, ne prázdno.
+  const sloupceTransakci = (globalThis.__jpStranka.sloupce ?? []).filter(([tab]) => tab === 'transakce').map(([, s]) => String(s))
+  ok('Úhrada: dotaz na bankovní platby čte i protiúčet',
+    sloupceTransakci.length >= 1 && sloupceTransakci.every((s) => /\bprotistrana\b/.test(s) && /\bprotiucet\b/.test(s)))
+  ok('Úhrada: platba bez jména se v nabídce ukáže číslem účtu',
+    (html.match(/<select[^>]*name="transakce"[\s\S]*?<\/select>/)?.[0] ?? '').includes('CZ6508000000192000145399'))
 
   // finance.read jen NA POBOČCE (ne za firmu): RLS transakcí a kontaktů je za celou firmu → nečíst, jen věta.
   globalThis.__jpStranka.pravaFirmy = new Set(VSECHNA_PRAVA.filter((p) => p !== 'finance.read'))
@@ -2634,6 +2645,14 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
 console.log('\n== 12. Katalog pokladny v editoru návrhu ==')
 {
   const L = await import(`../${ZAZNAM}/logika.ts`)
+
+  // Úhrada: protistrana platby = jméno, jinak číslo účtu (Finance Fáze 0, krok 1).
+  const radekPlatby = { id: 'T1', datum: '2026-10-14', castka_haleru: 12000, mena: 'CZK', protistrana: '', protiucet: 'CZ6508000000192000145399', vs: null }
+  ok('platbaUhradyZRadku: bez jména → protistrana = číslo účtu', L.platbaUhradyZRadku(radekPlatby).protistrana === 'CZ6508000000192000145399')
+  ok('platbaUhradyZRadku: se jménem → jméno, ne účet', L.platbaUhradyZRadku({ ...radekPlatby, protistrana: 'Firma s.r.o.' }).protistrana === 'Firma s.r.o.')
+  ok('platbaUhradyZRadku: prázdné VS ani chybějící protiúčet nedají „null"',
+    L.platbaUhradyZRadku({ ...radekPlatby, protiucet: null }).protistrana === '' && L.platbaUhradyZRadku(radekPlatby).vs === '')
+  ok('SLOUPCE_PLATBY_UHRADY nese protistranu i protiúčet', /\bprotistrana\b/.test(L.SLOUPCE_PLATBY_UHRADY) && /\bprotiucet\b/.test(L.SLOUPCE_PLATBY_UHRADY))
   const DEN = 24 * 60 * 60 * 1000
   const ted = Date.parse('2026-10-25T12:00:00Z')
 

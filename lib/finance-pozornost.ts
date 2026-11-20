@@ -4,7 +4,8 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
 import { naFaktury, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { jeNezaplacena, potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
-import { jeVKorunach, kandidatiProNavrhy, navrhnoutParovani } from '@/lib/finance-parovani'
+import { jeVKorunach, kandidatiProNavrhy, navrhnoutParovani, SLOUPCE_NAVRHU_POZORNOSTI } from '@/lib/finance-parovani'
+import { protistranaNeboUcet } from '@/lib/banka/ucet'
 import { prazdnoPozornosti } from '@/lib/faktury-brana'
 import { koruny } from '@/lib/mzdy'
 
@@ -87,7 +88,7 @@ export async function nactiPolozkyKPozornosti(
     const [transakceRes, sparovaneRes] = await Promise.all([
       supabase
         .from('transakce')
-        .select('id, castka_haleru, datum, protistrana, vs, platebni_ucty(branch_id, nazev)')
+        .select(SLOUPCE_NAVRHU_POZORNOSTI)
         .eq('tenant_id', tenantId)
         .eq('smer', 'vydaj')
         .order('datum', { ascending: false })
@@ -101,14 +102,18 @@ export async function nactiPolozkyKPozornosti(
       id: string
       castka_haleru: number
       datum: string
-      protistrana: string
+      protistrana: string | null
+      protiucet: string | null
       vs: string
       platebni_ucty: { branch_id: string | null; nazev: string } | { branch_id: string | null; nazev: string }[] | null
     }
 
     for (const t of (transakceRes.data ?? []) as RadekTransakce[]) {
       if (jizSparovane.has(t.id)) continue
-      const navrh = navrhnoutParovani({ id: t.id, vs: t.vs, castkaHaleru: t.castka_haleru, protistrana: t.protistrana, datum: t.datum }, kandidati)
+      // Protistrana = jméno, jinak číslo účtu — stejně jako v Platbách
+      // (do kroku 1 stálo číslo účtu přímo v protistraně).
+      const protistrana = protistranaNeboUcet(t.protistrana, t.protiucet)
+      const navrh = navrhnoutParovani({ id: t.id, vs: t.vs, castkaHaleru: t.castka_haleru, protistrana, datum: t.datum }, kandidati)
       if (!navrh) continue
       const faktura = kandidati.find((k) => k.id === navrh.fakturaId)
       if (!faktura) continue

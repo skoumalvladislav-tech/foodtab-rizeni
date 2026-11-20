@@ -7,7 +7,7 @@ import { PanelHlava } from '../../../../dnes/prvky'
 import { evidovatUhradu, faktura } from '../akce'
 import ZnackaStavu from '../znacka-stavu'
 import FormularAkce from './formular-akce'
-import { datumCesky, HLASKA_BEZ_FINANCI_FIRMY } from './logika'
+import { datumCesky, HLASKA_BEZ_FINANCI_FIRMY, type PlatbaUhrady } from './logika'
 import { MRIZKA_POLI, Oddil, PoleDuvodu, Udaj, Udaje, VSTUP, Vysvetleni } from './prvky'
 
 type Zakl = { zaznam: string; verze: number; rozsah: string }
@@ -151,7 +151,8 @@ export function SekceFaktura({
   )
 }
 
-export type PlatbaBanky = { id: string; datum: string; castkaHaleru: number; mena: string; protistrana: string; vs: string }
+/** Bankovní platba k napárování; `protistrana` = jméno, jinak číslo účtu (platbaUhradyZRadku v logika.ts). */
+export type PlatbaBanky = PlatbaUhrady
 
 /**
  * Sekce (e) Úhrada. „Úhrada neověřena“, dokud k záznamu není napárovaná

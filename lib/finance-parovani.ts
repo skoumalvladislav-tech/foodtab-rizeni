@@ -173,6 +173,33 @@ export type AutoTransakce = KandidatTransakce & {
   potvrzenoBankou?: boolean
 }
 
+/*
+ * Výčty sloupců `transakce` pro místa, která protistranu ukazují nebo
+ * s ní párují. Od kroku 1 leží číslo účtu protistrany ve vlastním sloupci
+ * `protiucet` (dřív stálo v `protistrana`, když jméno chybělo). Výčet bez
+ * něj by u platby bez jména ukázal prázdno a párování by přišlo o signál.
+ * Proto jsou tady, na jednom místě; že každý nese i protiúčet a že je
+ * appka opravdu používá, hlídá scripts/finance-parovani.test.mjs.
+ */
+
+/** Úloha automatického párování (lib/finance-automaticke-parovani.ts). */
+export const SLOUPCE_AUTOMATICKEHO_PAROVANI = 'id, vs, castka_haleru, protistrana, protiucet, datum, zdroj, mena, smer, import_davka_id'
+
+/** Platby → potvrzená párování: platba u faktury. */
+export const SLOUPCE_POTVRZENEHO_PAROVANI = 'id, datum, protistrana, protiucet, vs, castka_haleru'
+
+/** Platby → příjmy, mezi kterými se hledá vrácení spárované platby. */
+export const SLOUPCE_PRIJMU_PRO_VRACENI = 'vs, castka_haleru, datum, protistrana, protiucet'
+
+/** Finance → Přehled, „Co vyžaduje pozornost": návrhy párování. */
+export const SLOUPCE_NAVRHU_POZORNOSTI = 'id, castka_haleru, datum, protistrana, protiucet, vs, platebni_ucty(branch_id, nazev)'
+
+/** Platby → seznam plateb; na pobočce jen platby účtů pobočky (`!inner`). */
+export function sloupceSeznamuPlateb(naPobocce: boolean): string {
+  const zaklad = 'id, smer, castka_haleru, datum, protistrana, protiucet, vs, zdroj'
+  return naPobocce ? `${zaklad}, platebni_ucty!inner(branch_id)` : zaklad
+}
+
 /** Řádek `transakce` tak, jak ho čte automatické párování. */
 export type RadekTransakceParovani = {
   id: string; vs: string | null; castka_haleru: number; protistrana: string | null; protiucet: string | null; datum: string

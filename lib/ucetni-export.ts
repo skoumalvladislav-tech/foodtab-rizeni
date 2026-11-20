@@ -32,6 +32,16 @@ export type ZdrojovaTransakce = {
   branchId: string | null
 }
 
+/**
+ * Sloupce `transakce` pro export (app/api/ucetni/export). Na pobočce
+ * `!inner` na účet pobočky — platby firemních účtů a jiných poboček
+ * v exportu nejsou. `protiucet` kvůli platbě bez jména: protistrana
+ * v exportu je jméno, jinak číslo účtu (scripts/ucetni-export.test.mjs).
+ */
+export function sloupceTransakciExportu(naPobocce: boolean): string {
+  return `id, datum, smer, castka_haleru, protistrana, protiucet, vs, kategorie, zdroj, platebni_ucty${naPobocce ? '!inner' : ''}(branch_id)`
+}
+
 /** Popis faktury do exportu: „číslo (dodavatel)", bez čísla jen dodavatel. */
 export function popisFaktury(cislo: string | null | undefined, dodavatel: string | null | undefined): string {
   const c = (cislo ?? '').trim()

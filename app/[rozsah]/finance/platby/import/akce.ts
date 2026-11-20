@@ -58,7 +58,8 @@ export async function potvrditImport(formData: FormData): Promise<void> {
   // se zapsaly řádky — a když zápis spadl, zůstala a stejný soubor pak
   // náhled navždy odmítal jako „už importovaný". Teď po chybě nezůstane
   // nic a soubor jde nahrát znovu. Dvojí import téhož pohybu hlídá
-  // databáze (id od banky, jinak otisk pohybu i s pořadím stejného řádku).
+  // databáze: řádek s id podle id, řádek bez id podle obsahu (zapíše se
+  // tolik stejných řádků, o kolik jich je v souboru víc než na účtu).
   // Protiúčet znovu normalizuje `radkyProImport` — řádky přišly z prohlížeče.
   const zapis = await zapsatVypis(supabase, {
     tenantId,

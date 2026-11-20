@@ -44,7 +44,7 @@ export type PohybBanky = {
   protiucet: string
   vs: string
   poznamka: string
-  /** Id pohybu od banky. Null = bez id; dvojí import pak hlídá otisk. */
+  /** Id pohybu od banky. Null = bez id; dvojí import pak hlídá obsah pohybu (otisk) a počet stejných řádků. */
   externiId: string | null
 }
 
@@ -148,7 +148,7 @@ export function popisNabidky(registr: Pick<RegistrBanky, 'nazvyKNabidce'>): stri
   return `${nazvy.slice(0, -1).join(', ')} a ${nazvy[nazvy.length - 1]}`
 }
 
-/** Řádky pro `importovat_vypis` — klíče v snake_case, protiúčet v jednom tvaru, pořadí i stejné řádky beze změny. */
+/** Řádky pro `importovat_vypis` — klíče v snake_case, protiúčet v jednom tvaru, stejné řádky zůstanou (kolik z nich je nových, spočítá databáze podle obsahu). */
 export function radkyProImport(pohyby: readonly PohybBanky[]) {
   return pohyby.map((p) => ({
     datum: p.datum,

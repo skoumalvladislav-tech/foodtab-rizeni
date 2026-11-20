@@ -110,7 +110,7 @@ zkus('druhé stejné id = chyba řádku, první projde', () => {
   const v = naparsovatCsv('Datum;Částka;Externí ID\n1.1.2026;10;a-1\n2.1.2026;20;a-1\n3.1.2026;30;a-2')
   return v.radky.length === 2 && v.chyby.length === 1 && v.chyby[0].radek === 3
 })
-zkus('dva stejné řádky BEZ id zůstanou oba (rozliší je pořadí v otisku)', () => {
+zkus('dva stejné řádky BEZ id zůstanou oba (kolik jich zapsat, spočítá databáze podle obsahu)', () => {
   const v = naparsovatCsv('Datum;Částka;Protistrana\n1.1.2026;10;Káva\n1.1.2026;10;Káva')
   return v.chyby.length === 0 && v.radky.length === 2
 })

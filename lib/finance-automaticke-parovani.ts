@@ -37,6 +37,7 @@ import {
   autoTransakceZRadku,
   cilovyStavPodlePlateb,
   dorovnatStavy,
+  SLOUPCE_AUTOMATICKEHO_PAROVANI,
   vybratAutomatickaParovani,
   type AutoFaktura,
   type AutoTransakce,
@@ -120,7 +121,7 @@ export async function automatickyParovatPlatby(
     // --- 1. data ------------------------------------------------------------
     const od = new Date(Date.now() - DNI_ZPET * 86_400_000).toISOString().slice(0, 10)
     const transakce = await vsechnyStranky<RadekTransakce>((a, b) => supabase.from('transakce')
-      .select('id, vs, castka_haleru, protistrana, protiucet, datum, zdroj, mena, smer, import_davka_id')
+      .select(SLOUPCE_AUTOMATICKEHO_PAROVANI)
       .eq('tenant_id', tenantId).in('smer', ['vydaj', 'prijem']).gte('datum', od)
       .order('datum', { ascending: true }).order('id', { ascending: true }).range(a, b), 'Platby')
     const alokace = await vsechnyStranky<RadekAlokace>((a, b) => supabase.from('platby_faktury')

@@ -166,8 +166,11 @@ ok('import/page.tsx: na pobočce nic nenačítá',
 
 const stranka = zdroj('app/[rozsah]/finance/platby/page.tsx')
 ok('stránka: účty na pobočce jen té pobočky', /if \(pobocka\) dotazUctu = dotazUctu\.eq\('branch_id', pobocka\)/.test(stranka))
+// Výčet sloupců je od kroku 1 v lib/finance-parovani.ts (sloupceSeznamuPlateb).
+const { sloupceSeznamuPlateb } = await import('../lib/finance-parovani.ts')
 ok('stránka: platby na pobočce přes !inner a pobočku účtu',
-  /platebni_ucty!inner\(branch_id\)/.test(stranka) && /dotazTransakci\.eq\('platebni_ucty\.branch_id', pobocka\)/.test(stranka))
+  /sloupceSeznamuPlateb\(Boolean\(pobocka\)\)/.test(stranka) && /platebni_ucty!inner\(branch_id\)/.test(sloupceSeznamuPlateb(true))
+  && /dotazTransakci\.eq\('platebni_ucty\.branch_id', pobocka\)/.test(stranka))
 ok('stránka: návrhy i potvrzená párování se na pobočce nenačítají',
   /pobocka\s*\?\s*\{ navrhy: \[\], faktury: \[\](, zavreno: null)? \}\s*:\s*await nactiNavrhyParovani\(/.test(stranka)
   && /pobocka\s*\?\s*\[\]\s*:\s*await nactiPotvrzeneAlokace\(/.test(stranka))

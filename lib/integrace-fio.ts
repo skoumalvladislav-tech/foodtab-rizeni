@@ -37,7 +37,8 @@ const ZAKLAD = 'https://fioapi.fio.cz/v1/rest'
 /** Appka žádá jen posledních ~14 dní na jedno volání — hluboko pod
  * limitem 90 dní (HTTP 422 bez dočasného odemčení) a pod stropem
  * 50 000 pohybů (HTTP 413). Opakovaný/přesahující se dotaz nezdvojí
- * nic — dedup je na `(ucet_id, externi_id)` v `importovat_transakce`. */
+ * nic — pohyb se pozná podle id od banky (`(ucet_id, zdroj, externi_id)`
+ * v `importovat_transakce`). */
 export const POCET_DNU_ZPATKY = 14
 
 export type FioInfo = {
