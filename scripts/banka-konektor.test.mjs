@@ -218,8 +218,10 @@ await zkus('„Synchronizovat teď": žádná mapa poskytovatel → funkce napsa
   synchronizovatTeto !== null && !/\{\s*[a-z_]+\s*:\s*synchronizovat[A-Z]\w*Pripojeni/.test(synchronizovatTeto))
 
 console.log('\n== Synchronizace bank zapisují přes zapsatVypis se zdrojem banka_api ==')
-// Synchronizace samy v Node nejdou pustit (importují next/server) — proto
-// text. Každé volání zapsatVypis v souboru musí mít zdroj ZDROJ_BANKY_API;
+// Synchronizace se tu nepouštějí: KB a Salt Edge se v Node nenačtou
+// (next/server přes lib/supabase/uloha.ts) a Fio si klienta služby skládá
+// z proměnných prostředí — proto text. Každé volání zapsatVypis v souboru
+// musí mít zdroj ZDROJ_BANKY_API;
 // jiný zdroj by pohyb od banky vydával za výpis a obešel párování podle id.
 const volaniZapisu = (text) => {
   const vysledek = []
