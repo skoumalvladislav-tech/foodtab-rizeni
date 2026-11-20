@@ -271,8 +271,9 @@ select pg_temp.check('prázdné id od banky se bere jako žádné (dostane otisk
 -- Starý podpis (stará appka během nasazení, scénář krok76) dál funguje.
 insert into public.import_davky (tenant_id, typ, soubor_nazev, soubor_hash, stav)
 values (:'firma_a', 'banka_csv', 'stary.csv', 'krok111-stary', 'zpracovano') returning id as d_stary \gset
-select public.importovat_transakce(:'firma_a', :'u_p2', :'d_stary', 'csv_banka',
-  '[{"datum":"2033-01-14","smer":"vydaj","castka_haleru":321,"protistrana":"Bez protiúčtu","vs":"","poznamka":""}]'::jsonb) as stary \gset
+select coalesce(pg_temp.hodnota(format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
+  :'firma_a', :'u_p2', :'d_stary', 'csv_banka',
+  '[{"datum":"2033-01-14","smer":"vydaj","castka_haleru":321,"protistrana":"Bez protiúčtu","vs":"","poznamka":""}]')), '-1') as stary \gset
 select pg_temp.check('starý podpis importovat_transakce: řádek bez protiúčtu projde (prázdný protiúčet, otisk)',
   :'stary'::int = 1
   and (select protiucet = '' and otisk is not null from public.transakce where ucet_id = :'u_p2' and protistrana = 'Bez protiúčtu'));
