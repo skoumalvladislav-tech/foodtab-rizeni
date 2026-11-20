@@ -2287,8 +2287,9 @@ nikdo).
 **Vzniklo:** 19. 11. 2026 (audit kroku 0, větve).
 
 - **Teď:** nic s ní nedělám. Je z 2. 10., bez PR a bez vzdálené větve, a opravuje pád při mazání pobočky
-  nebo firmy, která má řádek v audit logu. Její migrace `20261002120000` v main není. Jestli problém v main
-  trvá, jsem neověřoval.
+  nebo firmy, která má řádek v audit logu. Její migrace `20261002120000` v main není. Podle kódu chyba
+  v main trvá: `audit_log.branch_id` má `on delete set null` a pravidlo proti změně auditu tu změnu odmítne.
+  Ověřeno čtením migrací, ne spuštěním.
 - **Proč:** sloučit cizí větev zadání zakazuje a razítko je starší než poslední migrace v main.
 - **Když to má být jinak:** oprava se dá převzít s novým razítkem a scénářem, který mazání pobočky s audit
   záznamem zkusí.

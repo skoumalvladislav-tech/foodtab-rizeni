@@ -94,8 +94,10 @@ Nic jsem neměnil, nic neslučoval a nic nenasazoval. Do ostré databáze jsem p
 - **`foodtab-rizeni` je 577 commitů za main** (poslední migrace `20260917060000`). Zadání :29 a návrh :25 tvrdí, že
   novější práce je v jiných kopiích. To neplatí: stavět na kterékoli jiné kopii by znamenalo stavět na starém stavu.
 - Mimo zadání jsem našel jedinou zajímavou větev: **`oprava-audit-log-fk-pravidlo`** (2. 10., bez PR).
-  Opravuje pád při mazání pobočky, která má řádek v audit logu. Její migrace v main není a jestli problém trvá,
-  jsem neověřoval. Otázka 106.
+  Opravuje pád při mazání pobočky, která má řádek v audit logu. Její migrace v main není. Podle kódu chyba v main
+  trvá: `audit_log.branch_id` má `on delete set null` (`20260823120000_foundation.sql:313`) a pravidlo, které
+  zakazuje měnit audit (`:325`), tu změnu odmítne. Samotné zápisy do auditu kvůli tomu neselžou, jen mazání
+  pobočky. Otázka 106.
 - Otevřené PR (#180, #153, #152, #133, #2) se Fáze 0 netýkají. PR #153 nese migraci se starším razítkem, než je
   poslední v main, a před sloučením ji bude potřeba přerazítkovat.
 - Dokumenty se zadáním (`finance-faze0-zadani.md`, `finance-erp-navrh.md`, `faktury-modul-zadani.md`) nebyly v gitu.
@@ -476,6 +478,14 @@ U každého kroku tu jsou jen nejdůležitější nálezy. Všechny jsou v pří
 - `lib/pokladna-dotykacka.ts:33–36` — ukládá se tržba, nejspíš s DPH (naživo neověřeno). Hodnota bez DPH se zahazuje.
 - `app/[rozsah]/finance/rozpocty/page.tsx:161–164` — Rozpočty tržby z pokladny nepoužívají (proto „chybí tržby").
 - `lib/pokladna-dotykacka.ts:499–500` — skladové pohyby, stav skladu ani spotřebu aplikace nečte.
+- `lib/pokladna-cas.ts:131–138` — každá synchronizace přepisuje jen poslední 3 provozní dny. Storno nebo oprava
+  uzávěrky starší než 3 dny se do Foodtabu nepropíše nikdy, takže měsíční tržby se mohou trvale lišit od Dotykačky.
+- `lib/pokladna-dotykacka.ts:237–240` — produkt se záporným denním součtem (vratka, sleva, záloha) se zahodí.
+  Uložená tržba pak může být vyšší než čistá tržba. Jestli Dotykačka slevy takhle posílá, je neověřené.
+- `lib/finance-kpi-vypocet.ts:198`, `:217–218` — „Náklady práce %" dělí mzdy tržbou z pokladny, která je podle
+  kontraktu s DPH. Procento je tak podhodnocené zhruba o sazbu DPH.
+- `lib/finance-kpi-vypocet.ts:113–124` — až vzniknou první receptury, foodcost % vydělí jen spočítané náklady celou
+  tržbou druhu. Ukáže se podhodnocené číslo nebo „0,0 %" a ukazatel pokrytí, který se už počítá, žádná obrazovka neukazuje.
 
 **Co z toho plyne:**
 - Pro Fázi 2 jsou použitelné prodané položky po dnech a receptury v `pos_katalog`.
@@ -493,8 +503,12 @@ U každého kroku tu jsou jen nejdůležitější nálezy. Všechny jsou v pří
 - Jestli jsou na Vercelu nastavené proměnné pro přímé API KB, nevím. Proměnné jsem nečetl.
 - Jestli tržba z Dotykačky je s DPH, nevím. Potvrdit to umí jen denní uzávěrka (otázka 104).
 - Obrazovky jsem v prohlížeči neviděl. Všechno je z kódu a z databáze.
-- Ověření dvou oblastí, větví a pokladny, druhý ověřovatel do uzávěrky tohoto dokumentu nedokončil. V příloze jsou
-  označené jako neověřené. Ostatních devět oblastí ověřil: 203 tvrzení potvrdil, 99 upřesnil, žádné nevyvrátil.
+- Druhý ověřovatel prošel všech jedenáct oblastí: 234 tvrzení potvrdil, 115 upřesnil a 2 vyvrátil.
+  Obě vyvrácená tvrzení byla o větvích („zadání není v gitu" a „dokument auditu neexistuje"). Mezi auditem a ověřením
+  přestala platit, protože jsem obojí commitnul.
+- Ověřovatel větví upozornil, že **commitnutý mezistav kroku 1 se nedá nasadit samostatně**. Migrace už zakazuje číst
+  přístupy k bance přes RPC, ale commitnutý kód to tak ve třech místech pořád dělá. Opravu dodělává právě běžící
+  krok 1. Nasazovat se smí jen celý krok.
 
 ---
 
