@@ -29,21 +29,30 @@
 --      banky: sha256 z účtu, data, směru, částky, měny, VS, protiúčtu,
 --      protistrany a POŘADÍ stejného řádku v jednom výpisu (dvě stejné
 --      platby v jednom výpisu zůstanou dvě). Počítá ho jen databáze
---      (app.otisk_pohybu), jedna implementace pro všechny cesty.
+--      (app.otisk_pohybu), jedna implementace pro všechny cesty. Má ho
+--      KAŽDÝ importovaný pohyb (i s id od banky), aby se poznal týž
+--      pohyb z výpisu (bez id) a ze stažení přes API (s id) — zadání:
+--      „stejný pohyb se nikdy nezapíše dvakrát".
 --   4. `public.importovat_vypis` — dávka a pohyby v JEDNÉ transakci.
 --      Dřív appka založila dávku a teprve potom zapsala řádky; když
 --      zápis spadl, dávka zůstala a blokovala opakovaný import téhož
 --      souboru (unikátní hash).
---   5. RLS podle POBOČKY ÚČTU: pohyby a zůstatky vidí (a zapisuje) jen
---      ten, kdo má právo k pobočce účtu; firemní účet (bez pobočky)
---      jen člověk s rozsahem celé firmy. Dřív stačilo `finance.read`
---      kdekoli ve firmě (app.can_read_scoped s branch null kontroluje
---      jen právo, ne rozsah). Druhá linie: pobočka účtu musí patřit
---      téže firmě.
+--   5. RLS podle POBOČKY ÚČTU: pohyby a zůstatky vidí jen ten, kdo má
+--      právo k pobočce účtu; firemní účet (bez pobočky) jen člověk
+--      s rozsahem celé firmy. Dřív stačilo `finance.read` kdekoli ve
+--      firmě (app.can_read_scoped s branch null kontroluje jen právo,
+--      ne rozsah). Totéž párování plateb s fakturami a součet plateb
+--      zakázky. ZÁPIS pohybů a zůstatků zůstává jen za celou firmu
+--      (beze změny, viz oddíl 4 — ROZHODNOUT). Druhá linie: pobočka
+--      účtu musí patřit téže firmě a účet se mezi firmami nestěhuje.
 --   6. Přístupové údaje k bance už nevydává RPC přihlášenému
 --      (`integrace_precti_tajemstvi` pro oblast `banka` odmítne);
 --      server si je čte až po ověření v databázi
---      (`integrace_overit_spravu`, lib/banka/tajemstvi.ts).
+--      (`integrace_overit_spravu`, lib/banka/tajemstvi.ts). Oblast
+--      bankovního připojení se nedá přepnout (jinak by RPC šifru vydala).
+--   7. Připojení pobočky smí synchronizovat jen do účtu TÉ pobočky
+--      (synchronizace zapisuje jako služba a pohybům z banky věří
+--      párování faktur).
 --
 -- POŘADÍ NASAZENÍ (narazil, nepřehlédnout)
 --
@@ -362,15 +371,33 @@ comment on column public.transakce.protiucet is
   'písmeny bez mezer, český tvar předčíslí-číslo/kód banky převedený na IBAN, '
   'jinak očištěný text. Jméno protistrany je v `protistrana`.';
 comment on column public.transakce.otisk is
-  'Jen u importovaného pohybu BEZ id od banky: sha256 z app.otisk_pohybu. '
-  'Unikátní na účtu — opakovaný nebo překrývající se výpis pohyb nezdvojí.';
+  'U každého importovaného pohybu: sha256 z app.otisk_pohybu. Pohyb bez id '
+  'od banky ho má unikátní na účtu (opakovaný nebo překrývající se výpis '
+  'pohyb nezdvojí); u pohybu s id slouží k poznání téhož pohybu z výpisu.';
 
--- Otisk jen u pohybu z importu (dávka). Ruční zápis ho nemá a nemá ho
--- jak „zabrat" dopředu cizímu řádku výpisu.
+-- Otisk jen u pohybu z importu (dávka).
 alter table public.transakce add constraint transakce_otisk_jen_z_importu
   check (otisk is null or import_davka_id is not null);
 
+-- Ruční zápis nemá nic z importu: id od banky ani dávku (a tím ani
+-- otisk). Jinak by si ho někdo s právem zápisu „zabral" dopředu —
+-- skutečný pohyb se stejným id nebo otiskem by import přeskočil jako
+-- už zapsaný a v knize by zůstal jen ruční řádek, kterému párování
+-- faktur ani úhrady Jiných plateb nevěří (kontrola kroku 1, 20. 11.).
+-- Appka ruční platbu bez id i dávky zapisuje vždycky (platby/akce.ts,
+-- zakazky/akce.ts); kdyby takový řádek v databázi byl, migrace spadne
+-- nahlas — chyba dat, kterou je potřeba vidět (19. 11. žádný pohyb).
+alter table public.transakce add constraint transakce_rucni_bez_importu
+  check (zdroj <> 'rucni' or (externi_id is null and import_davka_id is null));
+
+-- Unikátní jen u pohybů BEZ id (u nich je otisk jediná ochrana před
+-- dvojím zápisem, i při souběhu dvou importů). Pohyby s id hlídá id —
+-- dva různé pohyby od banky smí mít shodný otisk (banka u dvou stejných
+-- plateb změní pořadí mezi staženími).
 create unique index transakce_otisk
+  on public.transakce (ucet_id, otisk)
+  where otisk is not null and externi_id is null;
+create index transakce_otisk_hledani
   on public.transakce (ucet_id, otisk)
   where otisk is not null;
 
@@ -383,6 +410,15 @@ create unique index transakce_otisk
   Normalizace jen lehká (mezery, velikost písmen) — protiúčet už
   normalizuje appka. Poznámka do otisku nepatří (zadání, rozhodnutí 3):
   banky ji u téhož pohybu mezi exporty mění.
+
+  Datum přes to_char, ne `::text` — převod data na text řídí nastavení
+  relace (DateStyle), takže by týž pohyb dal v jiném klientovi jiný
+  otisk. VS jen číslice bez úvodních nul (jako normalizovatVs
+  v lib/finance-parovani.ts): Excel při uložení výpisu nuly smaže
+  („0012345" → „12345") a týž výpis by se zapsal podruhé.
+
+  Pořadí 0 = otisk OBSAHU (bez pořadí) — podle něj se stejné řádky
+  číslují; stejná funkce, takže číslování a otisk normalizují stejně.
 */
 create function app.otisk_pohybu(
   p_ucet          uuid,
@@ -400,11 +436,11 @@ language sql stable set search_path = ''
 as $$
   select encode(sha256(convert_to(concat_ws('|',
     p_ucet::text,
-    p_datum::text,
+    to_char(p_datum, 'YYYY-MM-DD'),
     p_smer,
     p_castka_haleru::text,
     upper(btrim(coalesce(p_mena, 'CZK'))),
-    btrim(coalesce(p_vs, '')),
+    ltrim(regexp_replace(coalesce(p_vs, ''), '\D', '', 'g'), '0'),
     upper(regexp_replace(coalesce(p_protiucet, ''), '\s', '', 'g')),
     lower(regexp_replace(btrim(coalesce(p_protistrana, '')), '\s+', ' ', 'g')),
     p_poradi::text
@@ -412,8 +448,8 @@ as $$
 $$;
 
 comment on function app.otisk_pohybu(uuid, date, text, integer, text, text, text, text, bigint) is
-  'Otisk importovaného pohybu bez id od banky (transakce.otisk). Pořadí = '
-  'kolikátý stejný řádek v jednom výpisu.';
+  'Otisk importovaného pohybu (transakce.otisk). Pořadí = kolikátý stejný '
+  'řádek v jednom výpisu; 0 = otisk obsahu bez pořadí (klíč číslování).';
 
 revoke all on function app.otisk_pohybu(uuid, date, text, integer, text, text, text, text, bigint) from public, anon;
 grant execute on function app.otisk_pohybu(uuid, date, text, integer, text, text, text, text, bigint) to authenticated, service_role;
@@ -423,30 +459,35 @@ grant execute on function app.otisk_pohybu(uuid, date, text, integer, text, text
 -- databázi žádné nejsou — ale migrace má sedět i nad daty). Pořadí v
 -- původním souboru se neuložilo; u STEJNÝCH řádků na pořadí nezáleží,
 -- vyjde stejná sada otisků. Dřív se ale řádky bez id nehlídaly vůbec, takže
--- dvakrát importovaný výpis má stejný otisk dvakrát — dostane ho jen první
--- (distinct on), ostatní zůstanou bez otisku (unikátní index by jinak
--- migraci shodil). Jméno protistrany staré importy občas plnily číslem
--- účtu — takový řádek se s novým importem téhož výpisu nepozná (narazil).
+-- dvakrát importovaný výpis má stejný otisk dvakrát — u pohybů bez id ho
+-- dostane jen první (distinct on), ostatní zůstanou bez otisku (unikátní
+-- index by jinak migraci shodil). Pohyby s id dostanou otisk všechny
+-- (hlídá je id, otisk u nich není unikátní). Jméno protistrany staré
+-- importy občas plnily číslem účtu — takový řádek se s novým importem
+-- téhož výpisu nepozná (narazil).
 drop rule transakce_no_update on public.transakce;
 with ocislovane as (
-  select t.id, t.ucet_id,
+  select t.id, t.ucet_id, t.externi_id,
          app.otisk_pohybu(t.ucet_id, t.datum, t.smer, t.castka_haleru, t.mena, t.vs, t.protiucet, t.protistrana,
            row_number() over (
-             partition by t.import_davka_id, t.ucet_id, t.datum, t.smer, t.castka_haleru,
-                          upper(btrim(t.mena)), btrim(t.vs),
-                          lower(regexp_replace(btrim(t.protistrana), '\s+', ' ', 'g'))
+             partition by t.import_davka_id,
+                          app.otisk_pohybu(t.ucet_id, t.datum, t.smer, t.castka_haleru, t.mena, t.vs, t.protiucet, t.protistrana, 0)
              order by t.created_at, t.id)) as otisk
     from public.transakce t
-   where t.externi_id is null
-     and t.import_davka_id is not null
+   where t.import_davka_id is not null
      and t.otisk is null
 ),
-prvni as (
-  select distinct on (o.ucet_id, o.otisk) o.id, o.otisk
+k_zapisu as (
+  (select distinct on (o.ucet_id, o.otisk) o.id, o.otisk
+     from ocislovane o
+    where o.externi_id is null
+    order by o.ucet_id, o.otisk, o.id)
+  union all
+  select o.id, o.otisk
     from ocislovane o
-   order by o.ucet_id, o.otisk, o.id
+   where o.externi_id is not null
 )
-update public.transakce t set otisk = p.otisk from prvni p where t.id = p.id;
+update public.transakce t set otisk = k.otisk from k_zapisu k where t.id = k.id;
 create rule transakce_no_update as
   on update to public.transakce do instead nothing;
 
@@ -458,12 +499,22 @@ create rule transakce_no_update as
 /*
   Stávající podpis zůstává (volá ho stará appka během nasazení
   a scénář krok76). Nově:
+    * jen zdroje importu (výpis, stažení z banky, pokladna) — ruční
+      zápis importem nevzniká (jinak by dostal otisk a dávku);
     * `protiucet` v řádku (chybí-li, je prázdný),
-    * řádek s id od banky (`externi_id`, prázdný text = bez id) se
-      hlídá podle id jako dosud,
-    * řádek bez id dostane otisk a hlídá se podle něj,
-    * pořadí = kolikátý stejný řádek BEZ id v tomhle volání (pořadí
-      v poli = pořadí ve výpisu).
+    * každý řádek dostane otisk; pořadí = kolikátý stejný řádek
+      v tomhle volání (pořadí v poli = pořadí ve výpisu);
+    * řádek BEZ id od banky (`externi_id`, prázdný text = bez id) se
+      přeskočí, když na účtu už je pohyb se stejným otiskem — z výpisu
+      i ze stažení přes API;
+    * řádek S id se přeskočí, když na účtu už je pohyb s tím id, nebo
+      pohyb BEZ id se stejným otiskem (týž pohyb dřív z výpisu). Proti
+      pohybům s id se otisk neporovnává: dva stejné pohyby od banky
+      s různým id jsou dva (banka mezi staženími mění pořadí stejných
+      řádků — porovnání otisků by druhý zahodilo).
+  Mez (narazil): když banka mezi staženími přehází dvě stejné platby
+  a teprve potom přijde výpis téhož dne, druhá platba z výpisu se zapíše
+  podruhé. Dvojí zápis je vidět a dá se stornovat; zahozená platba ne.
   Anti-join, ne ON CONFLICT: `transakce` má pravidlo na UPDATE
   a PostgreSQL proto ON CONFLICT na ní odmítá (20261003170000).
   SECURITY INVOKER — politiky platí jako u přímého zápisu.
@@ -481,6 +532,10 @@ as $$
 declare
   v_pocet integer;
 begin
+  if p_zdroj is null or p_zdroj not in ('banka_api', 'csv_banka', 'csv_pokladna') then
+    raise exception 'Import tohohle zdroje neexistuje.' using errcode = 'check_violation';
+  end if;
+
   with radky as (
     select x.poradi_v_poli,
            r.datum::date as datum, r.smer, r.castka_haleru, coalesce(r.mena, 'CZK') as mena,
@@ -495,27 +550,26 @@ begin
         protistrana text, protiucet text, vs text, poznamka text, externi_id text
       )
   ),
-  s_otiskem as (
+  s_klicem as (
     select r.*,
-           case when r.externi_id is null then
-             app.otisk_pohybu(p_ucet, r.datum, r.smer, r.castka_haleru, r.mena, r.vs, r.protiucet, r.protistrana,
-               row_number() over (
-                 partition by r.externi_id is null, r.datum, r.smer, r.castka_haleru,
-                              upper(btrim(r.mena)), btrim(r.vs),
-                              upper(regexp_replace(r.protiucet, '\s', '', 'g')),
-                              lower(regexp_replace(btrim(r.protistrana), '\s+', ' ', 'g'))
-                 order by r.poradi_v_poli))
-           end as otisk
+           app.otisk_pohybu(p_ucet, r.datum, r.smer, r.castka_haleru, r.mena, r.vs, r.protiucet, r.protistrana, 0) as klic
       from radky r
+  ),
+  s_otiskem as (
+    select k.*,
+           app.otisk_pohybu(p_ucet, k.datum, k.smer, k.castka_haleru, k.mena, k.vs, k.protiucet, k.protistrana,
+             row_number() over (partition by k.klic order by k.poradi_v_poli)) as otisk
+      from s_klicem k
   ),
   nove as (
     select s.* from s_otiskem s
-     where (s.externi_id is not null and not exists (
-              select 1 from public.transakce t
-               where t.ucet_id = p_ucet and t.externi_id = s.externi_id))
-        or (s.externi_id is null and not exists (
-              select 1 from public.transakce t
-               where t.ucet_id = p_ucet and t.otisk = s.otisk))
+     where not exists (
+             select 1 from public.transakce t
+              where t.ucet_id = p_ucet and t.otisk = s.otisk
+                and (s.externi_id is null or t.externi_id is null))
+       and (s.externi_id is null or not exists (
+             select 1 from public.transakce t
+              where t.ucet_id = p_ucet and t.externi_id = s.externi_id))
   ),
   vlozene as (
     insert into public.transakce (
@@ -538,11 +592,13 @@ begin
 end $$;
 
 comment on function public.importovat_transakce(uuid, uuid, uuid, text, jsonb) is
-  'Hromadný zápis importu do existující dávky. Dedup: řádek s id od banky '
-  'podle (ucet_id, externi_id), řádek bez id podle (ucet_id, otisk) — otisk '
-  'počítá app.otisk_pohybu i s pořadím stejného řádku ve výpisu. Anti-join, '
-  'ne ON CONFLICT (pravidlo na UPDATE). Zapisuje import_davky.pocet_novych. '
-  'Nová appka volá importovat_vypis (dávka i řádky v jedné transakci).';
+  'Hromadný zápis importu do existující dávky (jen zdroje importu). Dedup: '
+  'řádek bez id podle (ucet_id, otisk) proti všem pohybům účtu; řádek s id '
+  'podle (ucet_id, externi_id) a proti pohybům BEZ id podle otisku (týž '
+  'pohyb z výpisu i ze stažení). Otisk počítá app.otisk_pohybu i s pořadím '
+  'stejného řádku ve výpisu. Anti-join, ne ON CONFLICT (pravidlo na UPDATE). '
+  'Zapisuje import_davky.pocet_novych. Nová appka volá importovat_vypis '
+  '(dávka i řádky v jedné transakci).';
 
 revoke all on function public.importovat_transakce(uuid, uuid, uuid, text, jsonb) from public, anon;
 grant execute on function public.importovat_transakce(uuid, uuid, uuid, text, jsonb) to authenticated, service_role;
@@ -647,32 +703,32 @@ drop policy transakce_read on public.transakce;
 create policy transakce_read on public.transakce for select to authenticated
   using (ucet_id in (select app.platebni_ucty_s_pravem('finance.read')));
 
--- Zápis podle pobočky účtu (finance.manage na pobočce účtu, u firemního
--- za celou firmu). Rozsah JEN pobočky ale smí zapsat jen RUČNÍ platbu:
--- výpisu z banky (`csv_banka`) věří párování faktur i úhrady Jiných
--- plateb jako důkazu „zaplaceno v bance" a import výpisu je jen za celou
--- firmu (app/[rozsah]/finance/platby/import/layout.tsx) — vedoucí pobočky
--- by si jinak „výpis" napsal sám přímým zápisem. Pokladní zdroje taky jen
--- celá firma (importy pokladen jsou firemní). `banka_api` přihlášený
--- nezapíše vůbec (app.hlida_zdroj_transakce).
--- ROZHODNOUT: smí člověk s rozsahem jen pobočky zapisovat ruční platby na
--- účet své pobočky? Databáze to od téhle migrace pustí (pravidlo „zápis
--- podle pobočky účtu"), appka zatím ne — Finance na pobočce chtějí
--- finance.read za celou firmu (platby/akce.ts, pripravit; otázka 47).
-drop policy transakce_insert on public.transakce;
-create policy transakce_insert on public.transakce for insert to authenticated
-  with check (
-    ucet_id in (select app.platebni_ucty_s_pravem('finance.manage'))
-    and (zdroj = 'rucni' or app.has_access(tenant_id, 'finance.manage', null))
-  );
+-- ZÁPIS se tu NEMĚNÍ: `transakce_insert` (20261003120000) i
+-- `bankovni_zustatky_insert` (20261004100000) zůstávají jen pro rozsah
+-- celé firmy — `app.has_access(tenant_id, 'finance.manage', null)`. To je
+-- přísnější než „podle pobočky účtu" (na účet pobočky i firemní účet smí
+-- jen celá firma), takže zápis na cizí účet nepustí ani tak. Rozšíření na
+-- pobočku (ruční platba na účet své pobočky) by otevřelo zápis lidem,
+-- kterým ho appka nedává — Finance na pobočce chtějí finance.read za
+-- celou firmu (lib/finance-pristup.ts, otázka 47) — a s ním cesty, jak
+-- „zabrat" id nebo otisk pohybu z banky, stornovat platbu firemního
+-- účtu (storno_of) nebo podstrčit zůstatek, který vypadá jako od banky
+-- (kontrola kroku 1, 20. 11.). Proto nejopatrnější varianta.
+-- ROZHODNOUT: smí člověk s rozsahem jen pobočky zapisovat ruční platby
+-- (a zůstatky) na účet své pobočky? Dnes ne.
 
 drop policy bankovni_zustatky_select on public.bankovni_zustatky;
 create policy bankovni_zustatky_select on public.bankovni_zustatky for select to authenticated
   using (platebni_ucet_id in (select app.platebni_ucty_s_pravem('finance.read')));
 
-drop policy bankovni_zustatky_insert on public.bankovni_zustatky;
-create policy bankovni_zustatky_insert on public.bankovni_zustatky for insert to authenticated
-  with check (platebni_ucet_id in (select app.platebni_ucty_s_pravem('finance.manage')));
+-- Párování plateb s fakturami: vidí ho jen ten, kdo vidí PLATBU (politika
+-- transakce_read v poddotazu platí i tady). Dřív stačilo finance.read
+-- v jakémkoli rozsahu — pobočka tak viděla id, částky a faktury plateb
+-- firemního účtu, které sama vidět nesmí. Appka párování čte jen ve
+-- Financích za celou firmu, té se nic nemění.
+drop policy platby_faktury_read on public.platby_faktury;
+create policy platby_faktury_read on public.platby_faktury for select to authenticated
+  using (exists (select 1 from public.transakce t where t.id = platby_faktury.transakce_id));
 
 -- Dávka pobočku nemá (import výpisu je jen za celou firmu,
 -- app/[rozsah]/finance/platby/import/layout.tsx) — čtení jen s rozsahem
@@ -680,6 +736,29 @@ create policy bankovni_zustatky_insert on public.bankovni_zustatky for insert to
 drop policy import_davky_read on public.import_davky;
 create policy import_davky_read on public.import_davky for select to authenticated
   using (app.has_access(tenant_id, 'finance.read', null));
+
+
+-- Uhrazeno na zakázku (20261003220000) je SECURITY DEFINER a sčítal
+-- VŠECHNY platby zakázky, i z účtů, které volající vidět nesmí (záloha na
+-- firemní účet u zakázky pobočky). Tělo beze změny kromě filtru účtu —
+-- stejně jako politika transakce_read. Appka ho volá jen ve Financích za
+-- celou firmu, té se součet nemění.
+create or replace function app.zakazka_uhrazeno(p_tenant uuid, p_zakazka uuid)
+returns bigint
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(sum(
+    case when x.smer = 'prijem' then x.castka_haleru
+         when x.smer = 'vydaj' then -x.castka_haleru
+         else 0 end
+  ), 0)::bigint
+  from public.transakce x
+  join public.zakazky z on z.id = x.zakazka_id
+  where x.zakazka_id = p_zakazka
+    and z.tenant_id = p_tenant
+    and app.has_access(p_tenant, 'finance.read', z.branch_id)
+    and x.ucet_id in (select app.platebni_ucty_s_pravem('finance.read'));
+$$;
 
 
 -- ---------------------------------------------------------------------
@@ -827,11 +906,20 @@ grant execute on function public.pokladna_prehled_trzeb(uuid, date, date, text) 
 -- DRUHÁ LINIE: pobočka účtu musí patřit téže firmě. has_access s rozsahem
 -- celé firmy pustí JAKOUKOLI pobočku (i cizí firmy) — bez spouště by šel
 -- účet „přestěhovat" pod cizí pobočku.
+--
+-- A účet se mezi firmami nestěhuje vůbec: politiky pohybů a zůstatků se
+-- ptají jen na účet (ne na firmu řádku), takže majitel dvou firem by
+-- přestěhováním účtu ukázal celou historii pohybů firmy A lidem firmy B
+-- (kontrola kroku 1, 20. 11.). Pohyby i zůstatky nesou firmu účtu
+-- (app.hlida_firmu_transakce), účet jiné firmy = nový účet.
 create function app.hlida_firmu_platebniho_uctu()
 returns trigger
 language plpgsql security definer set search_path = ''
 as $$
 begin
+  if tg_op = 'UPDATE' and new.tenant_id is distinct from old.tenant_id then
+    raise exception 'Platební účet nejde převést do jiné firmy.' using errcode = 'check_violation';
+  end if;
   if new.branch_id is not null and not exists (
     select 1 from public.branches b
      where b.id = new.branch_id and b.tenant_id = new.tenant_id
@@ -842,7 +930,8 @@ begin
 end $$;
 
 comment on function app.hlida_firmu_platebniho_uctu() is
-  'Spoušť: platebni_ucty.branch_id musí být pobočka téže firmy.';
+  'Spoušť: platebni_ucty.branch_id musí být pobočka téže firmy a účet se '
+  'nepřevádí do jiné firmy.';
 
 revoke all on function app.hlida_firmu_platebniho_uctu() from public, anon, authenticated;
 
@@ -862,6 +951,77 @@ begin
     raise exception 'Platební účet je přiřazený pobočce jiné firmy — opravit data před nasazením.';
   end if;
 end $$;
+
+
+-- DRUHÁ LINIE U PŘIPOJENÍ: připojení pobočky jen k účtu TÉ pobočky.
+--
+-- Politika zápisu připojení (20261007110000) se ptá na pobočku
+-- PŘIPOJENÍ, spoušť z 20261004100000 na firmu účtu — ne na jeho pobočku.
+-- Člověk s integrace.manage jen na pobočce by tak namířil připojení své
+-- pobočky na firemní účet (nebo účet jiné pobočky) a synchronizace by
+-- tam jako služba zapisovala pohyby `banka_api`, kterým věří párování
+-- faktur (kontrola kroku 1, 20. 11.). Připojení za celou firmu (bez
+-- pobočky — jen tak je dnes zakládá appka) smí ke kterémukoli účtu firmy.
+-- Spoušť běží jen při změně firmy, pobočky nebo účtu — stávající
+-- připojení (appka žádnému pobočku nedává) se nekontrolují znovu.
+create or replace function app.hlida_firmu_integrace_pripojeni()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_firma   uuid;
+  v_pobocka uuid;
+begin
+  if new.platebni_ucet_id is null then
+    return new;
+  end if;
+  select u.tenant_id, u.branch_id into v_firma, v_pobocka
+    from public.platebni_ucty u
+   where u.id = new.platebni_ucet_id;
+  if v_firma is distinct from new.tenant_id then
+    raise exception 'Platební účet nepatří této firmě.' using errcode = 'check_violation';
+  end if;
+  if new.branch_id is not null and v_pobocka is distinct from new.branch_id then
+    raise exception 'Připojení pobočky smí jen k platebnímu účtu té pobočky.' using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+revoke all on function app.hlida_firmu_integrace_pripojeni() from public, anon, authenticated;
+
+drop trigger trg_firma_integrace_pripojeni on public.integrace_pripojeni;
+create trigger trg_firma_integrace_pripojeni
+  before insert or update of tenant_id, branch_id, platebni_ucet_id on public.integrace_pripojeni
+  for each row execute function app.hlida_firmu_integrace_pripojeni();
+
+
+-- Oblast bankovního připojení se nepřepíná. RPC integrace_precti_tajemstvi
+-- (oddíl 5) odmítne šifru podle oblasti `banka` — a oblast smí měnit každý
+-- s integrace.manage (politika integrace_pripojeni_write je `for all`).
+-- Bez spouště by si majitel přepnul oblast na `pokladna`, přečetl šifru
+-- banky přes /rest/v1/rpc a oblast vrátil (kontrola kroku 1, 20. 11.).
+-- Stejný vzor jako u e-mailové schránky (app.hlida_schranku_prijmu).
+create function app.hlida_oblast_banky()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if (old.oblast = 'banka') is distinct from (new.oblast = 'banka') then
+    raise exception 'Oblast bankovního připojení nejde změnit — připojení odpojte a založte znovu.'
+      using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end $$;
+
+comment on function app.hlida_oblast_banky() is
+  'Spoušť: připojení banky nejde přepnout na jinou oblast ani jiné na banku '
+  '(šifru banky RPC nevydává podle oblasti).';
+
+revoke all on function app.hlida_oblast_banky() from public, anon, authenticated;
+
+create trigger trg_hlida_oblast_banky
+  before update of oblast on public.integrace_pripojeni
+  for each row execute function app.hlida_oblast_banky();
 
 
 -- ---------------------------------------------------------------------

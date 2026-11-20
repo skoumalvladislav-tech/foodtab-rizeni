@@ -75,6 +75,10 @@ zkus('kód banky ve zvláštním sloupci se připojí k číslu', () => {
   const v = naparsovatCsv('Datum;Částka;Číslo protiúčtu;Kód banky\n1.1.2026;10;19-2000145399;0800')
   return v.chyby.length === 0 && v.radky[0]?.protiucet === 'CZ6508000000192000145399'
 })
+zkus('kód banky bez úvodní nuly (výpis uložený v Excelu: 0800 → 800) → týž IBAN', () => {
+  const v = naparsovatCsv('Datum;Částka;Číslo protiúčtu;Kód banky\n1.1.2026;10;19-2000145399;800')
+  return v.chyby.length === 0 && v.radky[0]?.protiucet === 'CZ6508000000192000145399'
+})
 zkus('sloupec IBAN se pozná jako protiúčet', () => {
   const v = naparsovatCsv('Datum;Částka;IBAN\n1.1.2026;10;CZ65 0800 0000 1920 0014 5399')
   return v.radky[0]?.protiucet === 'CZ6508000000192000145399'

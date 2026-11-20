@@ -104,6 +104,24 @@ console.log('\n== Chybějící protiúčet i název → protistrana je prázdný
 const v6 = naparsovatOdpovedFio(odpoved(vzorovaTransakce({ column10: null, column2: null })))
 ok('protistrana je prázdný string', v6.stav === 'ok' && v6.radky[0].protistrana === '')
 
+console.log('\n== Protiúčet bez jména: číslo jde do protiúčtu, ne do jména (krok 1 Financí) ==')
+
+const VZOROVY_IBAN = 'CZ6508000000192000145399'
+const v8 = naparsovatOdpovedFio(odpoved(vzorovaTransakce({
+  column10: null,
+  column2: sloupec('19-2000145399', 'Protiúčet', 2),
+  column3: sloupec('0800', 'Kód banky', 3),
+})))
+ok('jméno zůstane prázdné (číslo účtu v něm není)', v8.stav === 'ok' && v8.radky[0].protistrana === '')
+ok('protiúčet = IBAN z čísla a kódu banky', v8.stav === 'ok' && v8.radky[0].protiucet === VZOROVY_IBAN)
+// Fio posílá kód banky jako text; kdyby přišel číslem, úvodní nula zmizí.
+const v9 = naparsovatOdpovedFio(odpoved(vzorovaTransakce({
+  column2: sloupec('19-2000145399', 'Protiúčet', 2),
+  column3: sloupec(800, 'Kód banky', 3),
+})))
+ok('kód banky číslem (800) → týž IBAN', v9.stav === 'ok' && v9.radky[0].protiucet === VZOROVY_IBAN)
+ok('… a jméno z Názvu protiúčtu zůstane', v9.stav === 'ok' && v9.radky[0].protistrana === 'ABC s.r.o.')
+
 console.log('\n== Poškozený řádek (chybí ID pohybu) se přeskočí, ne spadne celý import ==')
 
 const v7 = naparsovatOdpovedFio(odpoved([vzorovaTransakce(), vzorovaTransakce({ column22: null })]))

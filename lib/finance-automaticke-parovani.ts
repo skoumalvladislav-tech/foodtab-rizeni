@@ -34,11 +34,13 @@ import 'server-only'
 import { klientUlohy } from './supabase/uloha.ts'
 import { fakturyFirmy, pristupKFakturamUlohy } from './faktury-pristup.ts'
 import {
+  autoTransakceZRadku,
   cilovyStavPodlePlateb,
   dorovnatStavy,
   vybratAutomatickaParovani,
   type AutoFaktura,
   type AutoTransakce,
+  type RadekTransakceParovani,
 } from './finance-parovani.ts'
 
 export type VysledekParovani = {
@@ -55,10 +57,7 @@ const DNI_ZPET = 180
 const STRANKA = 1000
 const MAX_STRANEK = 20
 
-type RadekTransakce = {
-  id: string; vs: string | null; castka_haleru: number; protistrana: string | null; datum: string
-  zdroj: string; mena: string | null; smer: string; import_davka_id: string | null
-}
+type RadekTransakce = RadekTransakceParovani
 type RadekAlokace = { transakce_id: string; faktura: string | null; faktura_id: string; castka_haleru: number; stav: string; zpusob: string }
 type RadekFaktury = {
   id: string
@@ -119,7 +118,7 @@ export async function automatickyParovatPlatby(
     // --- 1. data ------------------------------------------------------------
     const od = new Date(Date.now() - DNI_ZPET * 86_400_000).toISOString().slice(0, 10)
     const transakce = await vsechnyStranky<RadekTransakce>((a, b) => supabase.from('transakce')
-      .select('id, vs, castka_haleru, protistrana, datum, zdroj, mena, smer, import_davka_id')
+      .select('id, vs, castka_haleru, protistrana, protiucet, datum, zdroj, mena, smer, import_davka_id')
       .eq('tenant_id', tenantId).in('smer', ['vydaj', 'prijem']).gte('datum', od)
       .order('datum', { ascending: true }).order('id', { ascending: true }).range(a, b), 'Platby')
     const alokace = await vsechnyStranky<RadekAlokace>((a, b) => supabase.from('platby_faktury')
@@ -140,11 +139,9 @@ export async function automatickyParovatPlatby(
       if (!error && count === d.pocet) duveryhodneDavky.add(d.id)
     }
 
-    const autoTransakce: AutoTransakce[] = transakce.map((t) => ({
-      id: t.id, vs: t.vs ?? '', castkaHaleru: t.castka_haleru, protistrana: t.protistrana ?? '', datum: t.datum,
-      alokovanoHaleru: 0, zdroj: t.zdroj, mena: t.mena ?? 'CZK',
-      smer: t.smer === 'prijem' ? 'prijem' : 'vydaj', davkaId: t.import_davka_id,
-    }))
+    // Protistrana = jméno, jinak číslo účtu (autoTransakceZRadku) — pravidla
+    // párování stojí na neprázdné protistraně.
+    const autoTransakce: AutoTransakce[] = transakce.map(autoTransakceZRadku)
     // I faktury bez přečtené částky (castkaHaleru 0) — pravidlo je počítá jako soupeře.
     const autoFaktury: AutoFaktura[] = fakturyRadky.map((f) => ({
       id: String(f.id), vs: f.variabilni_symbol,

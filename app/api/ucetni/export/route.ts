@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { hasAccess } from '@/lib/authz'
+import { protistranaNeboUcet } from '@/lib/banka/ucet'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
@@ -57,7 +58,7 @@ export async function GET(request: Request) {
   // jiných poboček v exportu nejsou.
   let dotazTransakci = supabase
     .from('transakce')
-    .select(`id, datum, smer, castka_haleru, protistrana, vs, kategorie, zdroj, platebni_ucty${pobocka ? '!inner' : ''}(branch_id)`)
+    .select(`id, datum, smer, castka_haleru, protistrana, protiucet, vs, kategorie, zdroj, platebni_ucty${pobocka ? '!inner' : ''}(branch_id)`)
     .eq('tenant_id', tenantId)
     .gte('datum', od)
     .lte('datum', doData)
@@ -76,6 +77,7 @@ export async function GET(request: Request) {
     smer: ZdrojovaTransakce['smer']
     castka_haleru: number
     protistrana: string
+    protiucet: string
     vs: string
     kategorie: string | null
     zdroj: string
@@ -89,7 +91,9 @@ export async function GET(request: Request) {
       datum: t.datum,
       smer: t.smer,
       castkaHaleru: t.castka_haleru,
-      protistrana: t.protistrana,
+      // Jméno, jinak číslo účtu — do kroku 1 stálo číslo účtu přímo
+      // v protistraně a sloupec exportu se tím nemění.
+      protistrana: protistranaNeboUcet(t.protistrana, t.protiucet),
       vs: t.vs,
       kategorie: t.kategorie,
       zdroj: t.zdroj,

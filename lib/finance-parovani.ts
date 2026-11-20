@@ -13,6 +13,7 @@
  */
 
 import { ZDROJ_BANKY_API } from './banka/konektor.ts'
+import { protistranaNeboUcet } from './banka/ucet.ts'
 
 export type KandidatTransakce = {
   id: string
@@ -155,11 +156,35 @@ export function navrhnoutParovani(
  * ------------------------------------------------------------------ */
 
 export type AutoTransakce = KandidatTransakce & {
+  /** Účet protistrany (normalizovaný), prázdný, když ho banka nedala. */
+  protiucet?: string
   alokovanoHaleru: number
   zdroj: string
   mena: string
   smer: 'vydaj' | 'prijem'
   davkaId: string | null
+}
+
+/** Řádek `transakce` tak, jak ho čte automatické párování. */
+export type RadekTransakceParovani = {
+  id: string; vs: string | null; castka_haleru: number; protistrana: string | null; protiucet: string | null; datum: string
+  zdroj: string; mena: string | null; smer: string; import_davka_id: string | null
+}
+
+/**
+ * Řádek z databáze → tvar pro `vybratAutomatickaParovani`. Protistrana
+ * je jméno, a když chybí, číslo účtu (protistranaNeboUcet) — přesně
+ * jak to pravidla níž dostávala před rozdělením na dva sloupce: pohyb
+ * bez jména s cizím účtem se dodavateli sám nespáruje a vrácená platba
+ * bez VS z téhož účtu se pozná.
+ */
+export function autoTransakceZRadku(t: RadekTransakceParovani): AutoTransakce {
+  return {
+    id: t.id, vs: t.vs ?? '', castkaHaleru: t.castka_haleru,
+    protistrana: protistranaNeboUcet(t.protistrana, t.protiucet), protiucet: t.protiucet ?? '',
+    datum: t.datum, alokovanoHaleru: 0, zdroj: t.zdroj, mena: t.mena ?? 'CZK',
+    smer: t.smer === 'prijem' ? 'prijem' : 'vydaj', davkaId: t.import_davka_id,
+  }
 }
 export type AutoFaktura = KandidatFaktura & {
   stav: string | null
@@ -270,16 +295,22 @@ export function protistranaSedi(protistrana: string, dodavatel: string | null): 
 /**
  * Vrátila banka tuhle platbu? Příjem nejvýš 30 dní po ní, částka stejná
  * nebo menší nejvýš o 3 % (strhnutý poplatek), se stejným VS — nebo bez
- * VS od stejné protistrany. Příjem s JINÝM VS je vrácení jiné platby.
+ * VS od stejné protistrany (stejný účet protistrany, nebo stejné jméno).
+ * Příjem s JINÝM VS je vrácení jiné platby.
  */
-export function jeVracena(platba: Pick<AutoTransakce, 'vs' | 'castkaHaleru' | 'datum' | 'protistrana'>, prijmy: readonly Pick<AutoTransakce, 'vs' | 'castkaHaleru' | 'datum' | 'protistrana'>[]): boolean {
+type PohybVraceni = Pick<AutoTransakce, 'vs' | 'castkaHaleru' | 'datum' | 'protistrana' | 'protiucet'>
+export function jeVracena(platba: PohybVraceni, prijmy: readonly PohybVraceni[]): boolean {
   const v = normalizovatVs(platba.vs)
+  const ucetPlatby = (platba.protiucet ?? '').trim()
   return prijmy.some((p) => {
     if (p.castkaHaleru > platba.castkaHaleru || p.castkaHaleru < Math.floor(platba.castkaHaleru * 0.97)) return false
     const po = dnyOd(p.datum, platba.datum)
     if (!Number.isFinite(po) || po < 0 || po > DNI_NA_VRACENI) return false
     const vsPrijmu = normalizovatVs(p.vs)
     if (vsPrijmu !== null) return vsPrijmu === v
+    // Účet protistrany je jistější než jméno (to se mezi bankou a výpisem liší
+    // a vrácení ho často nemá vůbec).
+    if (ucetPlatby !== '' && (p.protiucet ?? '').trim() === ucetPlatby) return true
     return p.protistrana.trim() !== '' && platba.protistrana.trim() !== '' && protistranaSedi(p.protistrana, platba.protistrana)
   })
 }

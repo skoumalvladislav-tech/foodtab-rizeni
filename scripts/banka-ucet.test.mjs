@@ -60,6 +60,11 @@ zkus('IBAN se špatnou kontrolní číslicí se nedomýšlí — zůstane, jak p
 zkus('český účet se špatným součtem zůstane jako text', () => normalizovatUcet('19-2000145398/0800') === '19-2000145398/0800')
 zkus('účet bez kódu banky zůstane jako text (sražené mezery)', () => normalizovatUcet('  2000145399   x ') === '2000145399 x')
 zkus('cizí platný IBAN → velkými bez mezer', () => normalizovatUcet('de89 3704 0044 0532 0130 00') === 'DE89370400440532013000')
+// Excel při uložení výpisu smaže úvodní nulu kódu banky — týž pohyb by
+// jinak měl jiný protiúčet a jiný otisk (zapsal by se podruhé).
+zkus('„19-2000145399/800" (Excel smazal nulu kódu banky) → vzorový IBAN', () => normalizovatUcet('19-2000145399/800') === VZOR_IBAN)
+zkus('… i se špatným součtem: kód banky doplněný na 4 číslice', () => normalizovatUcet('19-2000145398/800') === '19-2000145398/0800')
+zkus('dvoučíslicový „kód banky" se nedomýšlí — zůstane jako text', () => normalizovatUcet('2000145399/80') === '2000145399/80')
 
 console.log('\n== overitCisloUctu: vlastní účet z formuláře ==')
 zkus('prázdné = účet bez čísla', () => {
@@ -77,6 +82,10 @@ zkus('IBAN s překlepem → chyba s vysvětlením (kontrolní číslice)', () =>
 zkus('český účet s překlepem → chyba (kontrolní součet)', () => {
   const v = overitCisloUctu('19-2000145398/0800')
   return v.stav === 'chyba' && v.text.includes('Číslo účtu nesedí')
+})
+zkus('český účet s kódem banky bez úvodní nuly → uloží se jako IBAN', () => {
+  const v = overitCisloUctu('19-2000145399/800')
+  return v.stav === 'ok' && v.ucet === VZOR_IBAN
 })
 zkus('jiný text (účet bez kódu banky) projde očištěný', () => {
   const v = overitCisloUctu('  123456789  ')

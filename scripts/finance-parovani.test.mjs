@@ -10,7 +10,7 @@
  * nabídla jako jistou a někdo by klikl potvrdit bez přečtení.
  */
 
-const { jistotaShody, navrhnoutParovani, PRAH_NAVRHU, vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, stavPoVraceni, protistranaSedi, normalizovatVs, jeVracena, kandidatiProNavrhy, jeVKorunach } = await import('../lib/finance-parovani.ts')
+const { jistotaShody, navrhnoutParovani, PRAH_NAVRHU, vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, stavPoVraceni, protistranaSedi, normalizovatVs, jeVracena, kandidatiProNavrhy, jeVKorunach, autoTransakceZRadku } = await import('../lib/finance-parovani.ts')
 const { readFileSync } = await import('node:fs')
 
 let chyb = 0
@@ -186,6 +186,44 @@ console.log('\n== Jméno protistrany a vrácené platby (kolo 3) ==')
   ok('příjem PŘED platbou → ne', !jeVracena(platba, [prijem(500000, '2026-10-04')]))
   ok('bez VS od stejné protistrany → vrácená', jeVracena(platba, [prijem(500000, '2026-10-08', '', 'ABC VELKOOBCHOD')]))
   ok('příjem s JINÝM VS od stejné protistrany → ne (vrácení jiné platby, kolo 4)', !jeVracena(platba, [prijem(500000, '2026-10-08', '2026002', 'ABC VELKOOBCHOD')]))
+}
+
+console.log('\n== Protiúčet ve vlastním sloupci (Finance Fáze 0, krok 1): pravidla platí jako dřív ==')
+{
+  // Do kroku 1 banka psala číslo účtu do `protistrana`, když jméno chybělo.
+  // Teď je v `protiucet` — a pravidla párování stojí na neprázdné protistraně.
+  const UCET = 'CZ6508000000192000145399'
+  const radek = (id, smer, castka, datum, jine = {}) => ({ id, vs: '', castka_haleru: castka, protistrana: '', protiucet: '', datum, zdroj: 'banka_api', mena: 'CZK', smer, import_davka_id: null, ...jine })
+  const makro = { id: 'fm', vs: '2026001', castkaHaleru: 500000, dodavatel: 'Makro Cash & Carry ČR s.r.o.', datum: '2026-09-20', stav: 'Ke kontrole úhrady', alokovanoHaleru: 0, duplicita: false, archivovana: false, mena: 'CZK' }
+
+  const bezJmena = autoTransakceZRadku(radek('t1', 'vydaj', 500000, '2026-10-05', { vs: '2026001', protiucet: UCET }))
+  ok('pohyb bez jména: protistrana pro párování = číslo účtu (jak dřív)', bezJmena.protistrana === UCET && bezJmena.protiucet === UCET)
+  ok('výdaj bez jména z cizího účtu se dodavateli sám nespáruje (pravidlo protistrany platí dál)',
+    vybratAutomatickaParovani([bezJmena], [makro]).length === 0)
+
+  const platbaMakro = autoTransakceZRadku(radek('t2', 'vydaj', 500000, '2026-10-05', { vs: '2026001', protistrana: 'MAKRO CASH', protiucet: UCET }))
+  const vraceniBezJmena = autoTransakceZRadku(radek('t3', 'prijem', 500000, '2026-10-07', { protiucet: UCET }))
+  ok('kontrolní: platba se jménem dodavatele bez vrácení se spáruje', vybratAutomatickaParovani([platbaMakro], [makro]).length === 1)
+  ok('vrácení bez VS a bez jména z téhož účtu se pozná → platba se sama nespáruje',
+    vybratAutomatickaParovani([platbaMakro, vraceniBezJmena], [makro]).length === 0)
+  ok('… i když jméno nemá ani platba (oba pohyby jen s číslem účtu)', jeVracena(bezJmena, [vraceniBezJmena]))
+  ok('příjem bez VS a bez jména z JINÉHO účtu vrácením není',
+    !jeVracena(platbaMakro, [autoTransakceZRadku(radek('t4', 'prijem', 500000, '2026-10-07', { protiucet: 'DE89370400440532013000' }))]))
+
+  // Úloha párování je `server-only` a Node ji nespustí — hlídá se, že
+  // pohyby čte i s protiúčtem a převádí je touhle funkcí (přesně tady
+  // byla chyba: sloupec se nevybíral).
+  const uloha = readFileSync('lib/finance-automaticke-parovani.ts', 'utf8')
+  const dotazUlohy = /from\('transakce'\)\s*\.select\('([^']*)'\)/.exec(uloha)?.[1] ?? ''
+  ok('úloha párování: dotaz na pohyby nalezen a čte protiucet', dotazUlohy.includes('protistrana') && /\bprotiucet\b/.test(dotazUlohy))
+  ok('úloha párování: pohyby převádí autoTransakceZRadku', /transakce\.map\(autoTransakceZRadku\)/.test(uloha))
+  const strankaPlateb = readFileSync('app/[rozsah]/finance/platby/page.tsx', 'utf8')
+  ok('Platby: vrácení a seznam čtou protiucet a protistranu doplní číslem účtu',
+    (strankaPlateb.match(/protistranaNeboUcet\(/g) ?? []).length >= 3 &&
+      /select\('vs, castka_haleru, datum, protistrana, protiucet'\)/.test(strankaPlateb) &&
+      /protiucet: t\.protiucet/.test(strankaPlateb))
+  const exportUcetni = readFileSync('app/api/ucetni/export/route.ts', 'utf8')
+  ok('účetní export: protistrana = jméno, jinak číslo účtu', /protistrana: protistranaNeboUcet\(t\.protistrana, t\.protiucet\)/.test(exportUcetni))
 }
 
 console.log('\n== Dorovnání stavu ve Fakturách podle párování ==')

@@ -19,7 +19,17 @@
  */
 
 const IBAN = /^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/
-const CESKY_UCET = /^(?:(\d{1,6})-)?(\d{2,10})\/(\d{4})$/
+const CESKY_UCET = /^(?:(\d{1,6})-)?(\d{2,10})\/(\d{3,4})$/
+
+/**
+ * Kód banky má vždy 4 číslice. Excel ale při uložení výpisu úvodní nulu
+ * smaže (0800 → 800, 0100 → 100) a týž pohyb by pak měl jiný protiúčet
+ * — a jiný otisk. Žádný kód banky nezačíná dvěma nulami, takže se
+ * doplňuje jen u tříčíslicového a jen jedna.
+ */
+function ctyrmistnyKod(kod: string): string {
+  return kod.length === 3 ? `0${kod}` : kod
+}
 
 const VAHY_PREDCISLI = [10, 5, 8, 4, 2, 1]
 const VAHY_CISLA = [6, 3, 7, 9, 10, 5, 8, 4, 2, 1]
@@ -83,9 +93,26 @@ export function normalizovatUcet(text: string | null | undefined): string {
   if (IBAN.test(bezMezer)) return jePlatnyIban(bezMezer) ? bezMezer : ocisteny
 
   const cesky = CESKY_UCET.exec(ocisteny.replace(/\s+/g, ''))
-  if (cesky) return ceskyUcetNaIban(cesky[1] ?? '', cesky[2], cesky[3]) ?? ocisteny
+  if (cesky) {
+    const kod = ctyrmistnyKod(cesky[3])
+    const iban = ceskyUcetNaIban(cesky[1] ?? '', cesky[2], kod)
+    if (iban) return iban
+    // Nesedí součet — text beze změny, jen kód banky doplněný na 4 číslice.
+    return kod === cesky[3] ? ocisteny : `${cesky[1] ? `${cesky[1]}-` : ''}${cesky[2]}/${kod}`
+  }
 
   return ocisteny
+}
+
+/**
+ * Protistrana pro lidi a pro pravidla párování: jméno, a když ho banka
+ * nedala, číslo účtu protistrany. Do kroku 1 (migrace 20261119100000)
+ * stálo číslo účtu přímo v `protistrana`; seznam plateb, export
+ * i párování (protistrana proti dodavateli, vrácená platba) s tím počítají
+ * — bez náhrady by pohyb bez jména prošel kontrolou dodavatele vždycky.
+ */
+export function protistranaNeboUcet(protistrana: string | null | undefined, protiucet: string | null | undefined): string {
+  return String(protistrana ?? '').trim() || String(protiucet ?? '').trim()
 }
 
 export type OvereniCislaUctu = { stav: 'ok'; ucet: string } | { stav: 'chyba'; text: string }
@@ -113,7 +140,7 @@ export function overitCisloUctu(text: string): OvereniCislaUctu {
     return { stav: 'chyba', text: 'IBAN nesedí (kontrolní číslice) — zkontrolujte ho, prosím.' }
   }
   const cesky = CESKY_UCET.exec(bezMezer)
-  if (cesky && ceskyUcetNaIban(cesky[1] ?? '', cesky[2], cesky[3]) === null) {
+  if (cesky && ceskyUcetNaIban(cesky[1] ?? '', cesky[2], ctyrmistnyKod(cesky[3])) === null) {
     return { stav: 'chyba', text: 'Číslo účtu nesedí (kontrolní součet) — zkontrolujte ho, prosím.' }
   }
   return { stav: 'ok', ucet: normalizovatUcet(ocisteny) }

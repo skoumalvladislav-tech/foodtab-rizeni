@@ -217,6 +217,29 @@ await zkus('„Synchronizovat teď": mapa z REGISTR_BANK.synchronizatory()', () 
 await zkus('„Synchronizovat teď": žádná mapa poskytovatel → funkce napsaná ručně', () =>
   synchronizovatTeto !== null && !/\{\s*[a-z_]+\s*:\s*synchronizovat[A-Z]\w*Pripojeni/.test(synchronizovatTeto))
 
+console.log('\n== Synchronizace bank zapisují přes zapsatVypis se zdrojem banka_api ==')
+// Synchronizace samy v Node nejdou pustit (importují next/server) — proto
+// text. Každé volání zapsatVypis v souboru musí mít zdroj ZDROJ_BANKY_API;
+// jiný zdroj by pohyb od banky vydával za výpis a obešel párování podle id.
+const volaniZapisu = (text) => {
+  const vysledek = []
+  let i = text.indexOf('zapsatVypis(')
+  while (i !== -1) {
+    const konec = text.indexOf('})', i)
+    vysledek.push(text.slice(i, konec === -1 ? undefined : konec))
+    i = text.indexOf('zapsatVypis(', i + 1)
+  }
+  // Jen opravdová volání (klient, { … }), ne zmínky v komentářích.
+  return vysledek.filter((v) => /^zapsatVypis\(\s*\w+\s*,\s*\{/.test(v))
+}
+for (const soubor of ['lib/integrace-fio-sync.ts', 'lib/integrace-saltedge-sync.ts', 'lib/kb-adaa-sync.ts']) {
+  const volani = volaniZapisu(cist(soubor))
+  await zkus(`${soubor}: zapisuje přes zapsatVypis (aspoň jedno volání)`, () => volani.length >= 1)
+  await zkus(`${soubor}: každé volání má zdroj: ZDROJ_BANKY_API`, () =>
+    volani.length >= 1 && volani.every((v) => /\bzdroj\s*:\s*ZDROJ_BANKY_API\b/.test(v)))
+}
+await zkus('ZDROJ_BANKY_API je „banka_api"', () => ZDROJ_BANKY_API === 'banka_api')
+
 console.log('\n== Import výpisu v appce jde stejnou cestou ==')
 // Dřív akce založila dávku samostatným zápisem a pohyby až po ní — spadlý
 // zápis pohybů nechal dávku a stejný soubor pak šel odmítnout napořád.
