@@ -171,6 +171,8 @@ async function nactiTransakce(ucetId: string, token: string, od: string, doData:
         castkaHaleru: Math.round(Math.abs(castka) * 100),
         mena: t.transaction_amount.currency,
         protistrana: t.creditor?.name || t.debtor?.name || '',
+        // Účet protistrany appka z téhle odpovědi zatím nečte — nedomýšlí se.
+        protiucet: '',
         vs: '', // PSD2 feed nedává VS jako vlastní pole — appka ho nezkouší regexem vytáhnout.
         poznamka: (t.remittance_information ?? []).join(' '),
         externiId: t.entry_reference,

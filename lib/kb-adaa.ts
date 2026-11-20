@@ -46,6 +46,7 @@
 import { createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
 
 import type { RadekImportu } from './finance-csv-import.ts'
+import { normalizovatUcet } from './banka/ucet.ts'
 import type { BodZustatku } from './bank-provider-contract.ts'
 
 export type ProstrediKb = 'sandbox' | 'produkce'
@@ -424,7 +425,9 @@ export function prevestTransakci(t: Record<string, unknown>, menaUctu: string): 
     smer,
     castkaHaleru,
     mena: (text(amount.currency) || menaUctu || 'CZK').toUpperCase(),
-    protistrana: jmeno || ucetProtistrany,
+    // Jméno a číslo účtu zvlášť — číslo dřív zastupovalo chybějící jméno.
+    protistrana: jmeno,
+    protiucet: normalizovatUcet(ucetProtistrany),
     vs: text(reference.variable),
     poznamka: poznamka.slice(0, 500),
     externiId,

@@ -249,6 +249,8 @@ export async function nactiTransakceSaltEdge(connectionId: string, accountId: st
       castkaHaleru: Math.round(Math.abs(t.amount) * 100),
       mena: t.currency_code,
       protistrana: t.description ?? '',
+      // Číslo účtu protistrany tahle odpověď jako vlastní pole nemá — nedomýšlí se.
+      protiucet: '',
       // Salt Edge nemá dedikované pole pro VS — appka si ho nedomýšlí z popisu.
       vs: '',
       poznamka: t.description ?? '',

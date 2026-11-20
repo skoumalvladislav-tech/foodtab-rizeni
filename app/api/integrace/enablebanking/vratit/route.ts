@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 import { getServerSupabase } from '@/lib/supabase/server'
 import { enableBankingProvider, podepsatJwt } from '@/lib/integrace-enablebanking'
+import { ZDROJ_BANKY_API } from '@/lib/banka/konektor'
 
 /**
  * Návrat z Enable Banking po souhlasu PSU (PSD2 redirect).
@@ -82,7 +83,7 @@ export async function GET(request: NextRequest) {
           castka_haleru: z.castkaHaleru,
           mena: z.mena,
           platny_k: z.platnyK,
-          zdroj: 'bankovni_agregator',
+          zdroj: ZDROJ_BANKY_API,
           integrace_pripojeni_id: pripojeni.id,
         })
       }

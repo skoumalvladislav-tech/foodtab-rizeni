@@ -5,17 +5,19 @@ import { rozsifrovat } from './integrace-klice.ts'
 import { kbJeNaCase, konfiguraceKb, nactiZustatky, stahnoutPohyby, ziskatAccessToken, type ChybaKb, type ExterniUcetKb, type TajemstviKb } from './kb-adaa.ts'
 import type { VysledekSynchronizaceBanky } from './banka-synchronizace.ts'
 import type { RadekImportu } from './finance-csv-import.ts'
+import { ZDROJ_BANKY_API } from './banka/konektor.ts'
+import { zapsatVypis } from './banka/zapis.ts'
 
 /**
  * Synchronizace JEDNOHO připojení Komerční banky (ADAA) — stejná cesta
  * pro naplánovanou úlohu `banka-synchronizace` i tlačítko „Synchronizovat
  * teď" (přes `lib/banka-synchronizace.ts`). Vzor `lib/integrace-fio-sync.ts`.
  *
- * Zápis jde stávajícími cestami bez migrace:
- *   * pohyby `importovat_transakce` se zdrojem `bankovni_agregator` —
- *     ten v databázi znamená „platby z bankovního API mimo Fio" (smí ho
- *     zapsat jen service_role, automatické párování mu věří); dedup
- *     `(ucet_id, externi_id)` s `externi_id = references.accountServicer`;
+ * Zápis jde společnou cestou všech bank (lib/banka/zapis.ts):
+ *   * pohyby `importovat_vypis` se zdrojem `banka_api` (migrace
+ *     20261119100000) — smí ho zapsat jen service_role, automatické
+ *     párování mu věří; dedup `(ucet_id, externi_id)` s `externi_id =
+ *     references.accountServicer`;
  *   * zůstatky `bankovni_zustatky` se stejným zdrojem.
  *
  * Okno stahování: od uloženého postupu (`externi_ucet.stazeno_do`)
@@ -115,32 +117,17 @@ export async function synchronizovatKbPripojeni(pripojeniId: string): Promise<Vy
   /** Zapíše stažené pohyby a posune `stazeno_do` (`null` = bez posunu) — přerušený běh příště pokračuje odtud. */
   const ulozitPohyby = async (radky: RadekImportu[], stazenoDo: Date | null): Promise<ChybaKb | null> => {
     if (radky.length > 0) {
-      const { data: davka, error: chybaDavky } = await supabase
-        .from('import_davky')
-        .insert({
-          tenant_id: pripojeni.tenant_id,
-          typ: 'bankovni_agregator',
-          soubor_nazev: `kb-adaa-sync-${new Date().toISOString().slice(0, 10)}`,
-          soubor_hash: `kb-adaa-${pripojeniId}-${Date.now()}`,
-          pocet_radku: radky.length,
-          stav: 'zpracovano',
-        })
-        .select('id')
-        .single()
-      if (chybaDavky || !davka) return { stav: 'chyba', druh: 'jina', duvod: 'Dávku importu se nepodařilo založit.' }
-
-      const { data: pocet, error: chybaImportu } = await supabase.rpc('importovat_transakce', {
-        p_tenant: pripojeni.tenant_id,
-        p_ucet: pripojeni.platebni_ucet_id,
-        p_davka: davka.id,
-        p_zdroj: 'bankovni_agregator',
-        p_radky: radky.map((r) => ({
-          datum: r.datum, smer: r.smer, castka_haleru: r.castkaHaleru, mena: r.mena,
-          protistrana: r.protistrana, vs: r.vs, poznamka: r.poznamka, externi_id: r.externiId,
-        })),
+      // Dávka i pohyby v jedné transakci (lib/banka/zapis.ts).
+      const zapis = await zapsatVypis(supabase, {
+        tenantId: pripojeni.tenant_id,
+        ucetId: pripojeni.platebni_ucet_id,
+        zdroj: ZDROJ_BANKY_API,
+        souborNazev: `kb-adaa-sync-${new Date().toISOString().slice(0, 10)}`,
+        souborHash: `kb-adaa-${pripojeniId}-${Date.now()}`,
+        pohyby: radky,
       })
-      if (chybaImportu) return { stav: 'chyba', druh: 'jina', duvod: `Pohyby se nepodařilo zapsat: ${chybaImportu.message}` }
-      pocetNovych += (pocet as number | null) ?? 0
+      if (zapis.stav === 'chyba') return { stav: 'chyba', druh: 'jina', duvod: `Pohyby se nepodařilo zapsat: ${zapis.duvod}` }
+      pocetNovych += zapis.pocetNovych
     }
 
     if (!stazenoDo) return null
@@ -203,7 +190,7 @@ export async function synchronizovatKbPripojeni(pripojeniId: string): Promise<Vy
         castka_haleru: z.castkaHaleru,
         mena: z.mena,
         platny_k: z.platnyK,
-        zdroj: 'bankovni_agregator',
+        zdroj: ZDROJ_BANKY_API,
         integrace_pripojeni_id: pripojeniId,
       })
       if (error) {

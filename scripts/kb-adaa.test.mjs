@@ -147,7 +147,16 @@ console.log('\n== Převod pohybu ==')
   ok('blokace PDNG se nezapisuje (přijde později jako BOOK)', prevestTransakci({ ...zakl, status: 'PDNG' }, 'CZK') === null)
   ok('bez accountServicer se nezapisuje (zdvojilo by se)', prevestTransakci({ ...zakl, references: { variable: '1' } }, 'CZK') === null)
   ok('nulová částka se nezapisuje', prevestTransakci({ ...zakl, amount: { value: 0, currency: 'CZK' } }, 'CZK') === null)
-  ok('bez jména protistrany → číslo účtu/kód banky', prevestTransakci({ ...zakl, counterParty: { accountNo: '19-2000145399', bankCode: '0800' } }, 'CZK')?.protistrana === '19-2000145399/0800')
+  {
+    // Od 20261119100000 jméno a účet zvlášť: číslo účtu nezastupuje chybějící jméno.
+    const bezJmena = prevestTransakci({ ...zakl, counterParty: { accountNo: '19-2000145399', bankCode: '0800' } }, 'CZK')
+    ok('bez jména protistrany: jméno prázdné, číslo účtu/kód banky v protiúčtu jako IBAN',
+      bezJmena?.protistrana === '' && bezJmena.protiucet === 'CZ6508000000192000145399')
+  }
+  ok('se jménem: protiúčet zvlášť (neplatné číslo zůstane jako text, nic se nedomýšlí)',
+    r?.protistrana === 'Makro Cash & Carry' && r.protiucet === '123456789/0300')
+  ok('protistrana jen s IBAN: IBAN v protiúčtu bez mezer',
+    prevestTransakci({ ...zakl, counterParty: { iban: 'CZ65 0800 0000 1920 0014 5399' } }, 'CZK')?.protiucet === 'CZ6508000000192000145399')
   ok('neznámý směr → nezapisovat', prevestTransakci({ ...zakl, creditDebitIndicator: 'X' }, 'CZK') === null)
   ok('storno (reversalIndicator) má vlastní klíč — nezahodí se jako duplicita původní platby', prevestTransakci({ ...zakl, reversalIndicator: true }, 'CZK')?.externiId === 'SGWD000000653288:storno')
   ok('částka přes 21 mil. Kč (mimo sloupec integer) se vynechá, nezasekne zápis okna', prevestTransakci({ ...zakl, amount: { value: 25_000_000, currency: 'CZK' } }, 'CZK') === null

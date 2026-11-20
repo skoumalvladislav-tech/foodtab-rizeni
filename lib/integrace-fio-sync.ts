@@ -3,6 +3,8 @@ import 'server-only'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { rozsifrovat } from './integrace-klice.ts'
 import { nactiPosledniPohybyFio } from './integrace-fio.ts'
+import { ZDROJ_BANKY_API } from './banka/konektor.ts'
+import { zapsatVypis } from './banka/zapis.ts'
 
 /**
  * Jedno provedení synchronizace JEDNOHO bankovního připojení (Fio).
@@ -115,39 +117,18 @@ export async function synchronizovatFioPripojeni(integracePripojeniId: string): 
     return dokoncit({ stav: 'chyba', duvod: vysledekFio.duvod })
   }
 
-  let pocetNovych = 0
-  if (vysledekFio.radky.length > 0) {
-    const { data: davka, error: chybaDavky } = await supabase
-      .from('import_davky')
-      .insert({
-        tenant_id: pripojeni.tenant_id,
-        typ: 'fio_api',
-        soubor_nazev: `fio-sync-${new Date().toISOString().slice(0, 10)}`,
-        soubor_hash: `fio-${integracePripojeniId}-${Date.now()}`,
-        pocet_radku: vysledekFio.radky.length,
-        stav: 'zpracovano',
-      })
-      .select('id')
-      .single()
-
-    if (chybaDavky || !davka) {
-      return dokoncit({ stav: 'chyba', duvod: 'Dávku importu se nepodařilo založit.' })
-    }
-
-    const { data: pocet, error: chybaImportu } = await supabase.rpc('importovat_transakce', {
-      p_tenant: pripojeni.tenant_id,
-      p_ucet: pripojeni.platebni_ucet_id,
-      p_davka: davka.id,
-      p_zdroj: 'fio_api',
-      p_radky: vysledekFio.radky.map((r) => ({
-        datum: r.datum, smer: r.smer, castka_haleru: r.castkaHaleru, mena: r.mena,
-        protistrana: r.protistrana, vs: r.vs, poznamka: r.poznamka, externi_id: r.externiId,
-      })),
-    })
-
-    if (chybaImportu) return dokoncit({ stav: 'chyba', duvod: `Import pohybů se nepodařilo zapsat: ${chybaImportu.message}` })
-    pocetNovych = pocet ?? 0
-  }
+  // Dávka i pohyby v jedné transakci, zdroj bez jména banky
+  // (lib/banka/zapis.ts, migrace 20261119100000).
+  const zapis = await zapsatVypis(supabase, {
+    tenantId: pripojeni.tenant_id,
+    ucetId: pripojeni.platebni_ucet_id,
+    zdroj: ZDROJ_BANKY_API,
+    souborNazev: `fio-sync-${new Date().toISOString().slice(0, 10)}`,
+    souborHash: `fio-${integracePripojeniId}-${Date.now()}`,
+    pohyby: vysledekFio.radky,
+  })
+  if (zapis.stav === 'chyba') return dokoncit({ stav: 'chyba', duvod: `Import pohybů se nepodařilo zapsat: ${zapis.duvod}` })
+  const pocetNovych = zapis.pocetNovych
 
   await supabase.from('bankovni_zustatky').insert({
     tenant_id: pripojeni.tenant_id,
@@ -156,7 +137,7 @@ export async function synchronizovatFioPripojeni(integracePripojeniId: string): 
     castka_haleru: vysledekFio.info.zustatekHaleru,
     mena: vysledekFio.info.mena,
     platny_k: new Date().toISOString(),
-    zdroj: 'fio_api',
+    zdroj: ZDROJ_BANKY_API,
     integrace_pripojeni_id: integracePripojeniId,
   })
 

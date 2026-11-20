@@ -255,8 +255,9 @@ export const KBELIK_JINYCH_PLATEB = 'jine-platby'
  * stejné jako `jine_platby_evidovat_uhradu` (migrace 20261021100000)
  * a automatické párování faktur. Ručně zapsaná platba ani platba
  * z pokladny úhradu „ověřenou v bance“ neprokáže (ověření 21. 10.).
+ * Od 20261119100000 jeden zdroj pro všechny banky (`banka_api`).
  */
-export const ZDROJE_UHRADY = ['fio_api', 'bankovni_agregator', 'csv_banka'] as const
+export const ZDROJE_UHRADY = ['banka_api', 'csv_banka'] as const
 export const TYPY_SOUBORU = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] as const
 export type TypSouboru = (typeof TYPY_SOUBORU)[number]
 export const MAX_BAJTU_SOUBORU = 10 * 1024 * 1024

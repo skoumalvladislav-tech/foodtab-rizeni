@@ -3,21 +3,20 @@
  * synchronizaci spustit, rozhoduje POSKYTOVATEL připojení.
  *
  * Nález 11. 10. 2026: tlačítko volalo u KAŽDÉHO připojení synchronizaci
- * Fio. U připojení přes agregátor (Salt Edge) ta nenašla token Fio,
- * přepnula připojení na „chyba" a naplánovaná úloha ho pak už nikdy
- * nevzala (bere jen „pripojeno"). Jedno kliknutí tak připojení rozbilo.
+ * jedné konkrétní banky. U připojení přes agregátor ta nenašla svůj
+ * token, přepnula připojení na „chyba" a naplánovaná úloha ho pak už
+ * nikdy nevzala (bere jen „pripojeno"). Jedno kliknutí tak připojení
+ * rozbilo.
  *
  * Čistý modul — synchronizace se předávají jako funkce, takže pravidlo
  * jde ověřit bez databáze a sítě (`scripts/banka-synchronizace.test.mjs`).
- * Nový poskytovatel (KB ADAA) = nový řádek v mapě u volajícího.
+ * Mapu dává registr konektorů (`lib/banka/konektor.ts`,
+ * `registr.synchronizatory()`); nová banka = nový konektor v registru.
  */
 
-export type VysledekSynchronizaceBanky =
-  | { stav: 'ok'; pocetNovychRadku: number }
-  | { stav: 'preskoceno'; duvod: string }
-  | { stav: 'chyba'; duvod: string }
+import type { Synchronizatory, VysledekSynchronizaceBanky } from './banka/konektor.ts'
 
-export type Synchronizatory = Readonly<Record<string, (pripojeniId: string) => Promise<VysledekSynchronizaceBanky>>>
+export type { Synchronizatory, VysledekSynchronizaceBanky } from './banka/konektor.ts'
 
 export async function synchronizovatPodlePoskytovatele(
   pripojeni: { id: string; poskytovatel: string },

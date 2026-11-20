@@ -3,6 +3,8 @@ import 'server-only'
 import { klientUlohy } from './supabase/uloha.ts'
 import { jeNaCaseSynchronizovat } from './integrace-fio-sync.ts'
 import { nactiTransakceSaltEdge, nactiZustatkySaltEdge } from './integrace-saltedge.ts'
+import { ZDROJ_BANKY_API } from './banka/konektor.ts'
+import { zapsatVypis } from './banka/zapis.ts'
 
 /**
  * Jedno provedení synchronizace JEDNOHO Salt Edge připojení — stejný
@@ -92,36 +94,17 @@ export async function synchronizovatSaltEdgePripojeni(integracePripojeniId: stri
       return dokoncit({ stav: 'chyba', duvod: vysledekStranky.duvod })
     }
 
-    if (vysledekStranky.radky.length > 0) {
-      const { data: davka, error: chybaDavky } = await supabase
-        .from('import_davky')
-        .insert({
-          tenant_id: pripojeni.tenant_id,
-          typ: 'bankovni_agregator',
-          soubor_nazev: `saltedge-sync-${new Date().toISOString().slice(0, 10)}`,
-          soubor_hash: `saltedge-${integracePripojeniId}-${Date.now()}-${odId ?? 'p1'}`,
-          pocet_radku: vysledekStranky.radky.length,
-          stav: 'zpracovano',
-        })
-        .select('id')
-        .single()
-
-      if (chybaDavky || !davka) return dokoncit({ stav: 'chyba', duvod: 'Dávku importu se nepodařilo založit.' })
-
-      const { data: pocet, error: chybaImportu } = await supabase.rpc('importovat_transakce', {
-        p_tenant: pripojeni.tenant_id,
-        p_ucet: pripojeni.platebni_ucet_id,
-        p_davka: davka.id,
-        p_zdroj: 'bankovni_agregator',
-        p_radky: vysledekStranky.radky.map((r) => ({
-          datum: r.datum, smer: r.smer, castka_haleru: r.castkaHaleru, mena: r.mena,
-          protistrana: r.protistrana, vs: r.vs, poznamka: r.poznamka, externi_id: r.externiId,
-        })),
-      })
-
-      if (chybaImportu) return dokoncit({ stav: 'chyba', duvod: `Import pohybů se nepodařilo zapsat: ${chybaImportu.message}` })
-      pocetCelkem += pocet ?? 0
-    }
+    // Každá stránka zvlášť, dávka i pohyby v jedné transakci (lib/banka/zapis.ts).
+    const zapis = await zapsatVypis(supabase, {
+      tenantId: pripojeni.tenant_id,
+      ucetId: pripojeni.platebni_ucet_id,
+      zdroj: ZDROJ_BANKY_API,
+      souborNazev: `saltedge-sync-${new Date().toISOString().slice(0, 10)}`,
+      souborHash: `saltedge-${integracePripojeniId}-${Date.now()}-${odId ?? 'p1'}`,
+      pohyby: vysledekStranky.radky,
+    })
+    if (zapis.stav === 'chyba') return dokoncit({ stav: 'chyba', duvod: `Import pohybů se nepodařilo zapsat: ${zapis.duvod}` })
+    pocetCelkem += zapis.pocetNovych
 
     odId = vysledekStranky.dalsiId
   } while (odId)
@@ -141,7 +124,7 @@ export async function synchronizovatSaltEdgePripojeni(integracePripojeniId: stri
           castka_haleru: z.castkaHaleru,
           mena: z.mena,
           platny_k: z.platnyK,
-          zdroj: 'bankovni_agregator',
+          zdroj: ZDROJ_BANKY_API,
           integrace_pripojeni_id: integracePripojeniId,
         })
         if (chybaZustatku) poznamkaZustatku = 'Pohyby jsou uložené, zůstatek se nepodařilo zapsat.'

@@ -86,7 +86,7 @@ ok('prázdný seznam faktur dá null, ne spadne', prazdnySeznam === null)
 
 console.log('\n== Automatické párování: jen jednoznačná shoda ==')
 {
-  const t = (id, vs, castka, datum = '2026-10-05', jine = {}) => ({ id, vs, castkaHaleru: castka, protistrana: 'ABC Velkoobchod', datum, alokovanoHaleru: 0, zdroj: 'fio_api', mena: 'CZK', smer: 'vydaj', davkaId: null, ...jine })
+  const t = (id, vs, castka, datum = '2026-10-05', jine = {}) => ({ id, vs, castkaHaleru: castka, protistrana: 'ABC Velkoobchod', datum, alokovanoHaleru: 0, zdroj: 'banka_api', mena: 'CZK', smer: 'vydaj', davkaId: null, ...jine })
   const f = (id, vs, castka, stav = 'Ke kontrole úhrady', datum = '2026-09-20', jine = {}) => ({ id, vs, castkaHaleru: castka, dodavatel: 'ABC Velkoobchod s.r.o.', datum, stav, alokovanoHaleru: 0, duplicita: false, archivovana: false, mena: 'CZK', ...jine })
   const auto = (tt, ff, moznosti) => vybratAutomatickaParovani(tt, ff, moznosti)
 
@@ -135,7 +135,9 @@ console.log('\n== Automatické párování: jen jednoznačná shoda ==')
   for (const zdroj of ['rucni', 'csv_pokladna', 'pos_adapter']) {
     ok(`platba „${zdroj}" (ne z banky) → nic`, auto([t('t1', '1', 100, '2026-10-05', { zdroj })], [f('f1', '1', 100)]).length === 0)
   }
-  ok('platba z agregátoru → smí', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'bankovni_agregator' })], [f('f1', '1', 100)]).length === 1)
+  ok('platba z banky přes API (banka_api) → smí', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'banka_api' })], [f('f1', '1', 100)]).length === 1)
+  ok('staré jméno zdroje (fio_api, bankovni_agregator) už jako platba z banky neprojde', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'fio_api' })], [f('f1', '1', 100)]).length === 0
+    && auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'bankovni_agregator' })], [f('f1', '1', 100)]).length === 0)
   ok('výpis CSV bez důvěryhodné dávky → nic (CSV si může napsat kdokoli)', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd1' })], [f('f1', '1', 100)]).length === 0)
   ok('výpis CSV z dávky, kterou nahrál správce Faktur → smí', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd1' })], [f('f1', '1', 100)], { duveryhodneDavky: new Set(['d1']) }).length === 1)
   ok('… ale jen ta dávka', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd2' })], [f('f1', '1', 100)], { duveryhodneDavky: new Set(['d1']) }).length === 0)

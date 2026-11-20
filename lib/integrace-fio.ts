@@ -29,6 +29,7 @@
 import 'server-only'
 
 import type { RadekImportu } from './finance-csv-import.ts'
+import { normalizovatUcet } from './banka/ucet.ts'
 import type { BankDataProvider, VysledekOvereni, VysledekTransakci, VysledekZustatku } from './bank-provider-contract.ts'
 
 const ZAKLAD = 'https://fioapi.fio.cz/v1/rest'
@@ -59,6 +60,7 @@ const SLOUPEC = {
   datum: 0,
   objem: 1,
   protiucet: 2,
+  kodBanky: 3,
   nazevProtiuctu: 10,
   vs: 5,
   ks: 4,
@@ -130,6 +132,9 @@ export function naparsovatOdpovedFio(telo: unknown): FioVysledek {
 
     const nazevProtiuctu = hodnotaSloupce(t, SLOUPEC.nazevProtiuctu)
     const protiucet = hodnotaSloupce(t, SLOUPEC.protiucet)
+    const kodBanky = hodnotaSloupce(t, SLOUPEC.kodBanky)
+    const cisloProtiuctu = typeof protiucet === 'string' ? protiucet.trim() : ''
+    const kod = typeof kodBanky === 'string' || typeof kodBanky === 'number' ? String(kodBanky).trim() : ''
 
     radky.push({
       datum,
@@ -141,7 +146,10 @@ export function naparsovatOdpovedFio(telo: unknown): FioVysledek {
       // přepočtená do měny účtu (appka si tohle nevymýšlí, jen ho
       // nedomýšlí jako CZK natvrdo, jak appka dřív dělala).
       mena: info.currency,
-      protistrana: (typeof nazevProtiuctu === 'string' && nazevProtiuctu) || (typeof protiucet === 'string' && protiucet) || '',
+      // Jméno protistrany a číslo jejího účtu zvlášť (číslo dřív padalo do
+      // jména, když jméno chybělo) — otisk a párování čtou protiúčet sám.
+      protistrana: (typeof nazevProtiuctu === 'string' && nazevProtiuctu) || '',
+      protiucet: normalizovatUcet(cisloProtiuctu && kod && !cisloProtiuctu.includes('/') ? `${cisloProtiuctu}/${kod}` : cisloProtiuctu),
       vs: String(hodnotaSloupce(t, SLOUPEC.vs) ?? ''),
       poznamka: String(hodnotaSloupce(t, SLOUPEC.zprava) ?? ''),
       externiId: String(idPohybu),

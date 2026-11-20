@@ -12,6 +12,8 @@
  * Faktury) natáhne sama a sem předá jen tenhle tvar.
  */
 
+import { ZDROJ_BANKY_API } from './banka/konektor.ts'
+
 export type KandidatTransakce = {
   id: string
   vs: string
@@ -128,7 +130,7 @@ export function navrhnoutParovani(
  * Sama se potvrdí jen JEDNOZNAČNÁ shoda — vše ostatní zůstává návrhem
  * k ručnímu potvrzení (`navrhnoutParovani` výš). Jednoznačná znamená
  * všechno najednou (pravidla zpřísněná po dvou kolech kontroly kódu):
- *   - platba přišla Z BANKY přes API (Fio, agregátor) — ty zapisuje jen
+ *   - platba přišla Z BANKY přes API (zdroj `banka_api`) — ty zapisuje jen
  *     synchronizace (pojistka v databázi). Výpis CSV jen z dávky, kterou
  *     nahrál člověk s právem spravovat Faktury (volající ji předá);
  *     ruční zápis ani pokladna nikdy;
@@ -170,8 +172,12 @@ export type AutoFaktura = KandidatFaktura & {
 /** Stavy faktury, které se smí zaplatit samy (schválené k úhradě). */
 export const STAVY_PRO_AUTOMATICKE_PAROVANI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno']
 
-/** Platby z banky přes API — zapisuje je jen synchronizace (trigger hlida_zdroj_transakce). */
-export const ZDROJE_Z_API: readonly string[] = ['fio_api', 'bankovni_agregator']
+/**
+ * Platby z banky přes API — zapisuje je jen synchronizace (trigger
+ * hlida_zdroj_transakce). Jeden zdroj pro všechny banky (migrace
+ * 20261119100000) — která banka to byla, ví jen připojení.
+ */
+export const ZDROJE_Z_API: readonly string[] = [ZDROJ_BANKY_API]
 
 const NEJVIC_DNI_PRED_FAKTUROU = 30
 const NEJVIC_DNI_PO_FAKTURE = 90

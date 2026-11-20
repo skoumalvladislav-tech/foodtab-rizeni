@@ -13,22 +13,30 @@
  * Očekávané sloupce (hlavička, názvy se poznají bez diakritiky/velikosti
  * písma — tolerantní k tomu, jak si je kdo pojmenuje v tabulkovém
  * procesoru): Datum, Částka, Směr (volitelný — bez něj rozhoduje
- * znaménko částky), Protistrana, VS, Poznámka, Externí ID (volitelný —
- * bez něj se řádek nikdy nepozná jako duplicitní re-import).
+ * znaménko částky), Protistrana, Protiúčet (volitelný, s kódem banky
+ * buď v buňce, nebo ve sloupci Kód banky), VS, Poznámka, Externí ID
+ * (volitelný — bez něj dvojí import téhož řádku pozná databáze podle
+ * otisku pohybu, migrace 20261119100000).
+ *
+ * Částka snese mezeru nebo tečku jako oddělovač tisíců a čárku jako
+ * desetinnou (`1 234,50`, `1.234,50`); tečka s jednou či dvěma
+ * číslicemi za ní je desetinná (`-1234.5`). Co nejde přečíst jednoznačně
+ * (`1,234.50`, tři desetinná místa), je chyba řádku — nic se nedomýšlí.
+ *
+ * Nativní exporty konkrétních bank appka nezná a nehádá: kdo má jiný
+ * tvar, přejmenuje sloupce podle téhle šablony.
  */
 
-export type SmerPohybu = 'prijem' | 'vydaj'
+import type { PohybBanky, SmerPohybu } from './banka/konektor.ts'
+import { normalizovatUcet } from './banka/ucet.ts'
 
-export type RadekImportu = {
-  datum: string
-  smer: SmerPohybu
-  castkaHaleru: number
-  mena: string
-  protistrana: string
-  vs: string
-  poznamka: string
-  externiId: string | null
-}
+export type { SmerPohybu } from './banka/konektor.ts'
+
+/** Řádek importu = společný pohyb banky (lib/banka/konektor.ts). */
+export type RadekImportu = PohybBanky
+
+/** Největší částka, kterou sloupec `castka_haleru` (integer) pojme. */
+const MAX_HALERU = 2_147_483_647
 
 export type ChybaImportu = {
   radek: number
@@ -54,7 +62,11 @@ const ALIASY: Record<string, string[]> = {
   datum: ['datum', 'date'],
   castka: ['castka', 'amount', 'suma'],
   smer: ['smer', 'typ', 'direction'],
-  protistrana: ['protistrana', 'nazev', 'partner', 'protiucet', 'popis', 'description'],
+  protistrana: ['protistrana', 'nazev', 'nazevprotiuctu', 'partner', 'popis', 'description'],
+  // Číslo účtu patří do vlastního sloupce, ne do jména protistrany
+  // (otisk pohybu i párování ho čtou zvlášť).
+  protiucet: ['protiucet', 'cisloprotiuctu', 'ucetprotistrany', 'iban'],
+  kod_banky: ['kodbanky', 'kodbankyprotiuctu', 'bankcode'],
   vs: ['vs', 'variabilnisymbol', 'variablesymbol'],
   poznamka: ['poznamka', 'note', 'zprava', 'memo'],
   externi_id: ['externiid', 'id', 'cislopohybu', 'transactionid', 'referencnicislo'],
@@ -104,17 +116,49 @@ export function naDatum(text: string): string | null {
   return null
 }
 
+/** Celá část s volitelným oddělovačem tisíců: `1234`, `1 234` (mezery už pryč), `1.234.567`. */
+function celaCast(text: string, oddelovacTisicu: string | null): string | null {
+  if (/^\d+$/.test(text)) return text
+  if (!oddelovacTisicu) return null
+  const skupiny = text.split(oddelovacTisicu)
+  if (!/^\d{1,3}$/.test(skupiny[0]) || !skupiny.slice(1).every((s) => /^\d{3}$/.test(s))) return null
+  return skupiny.join('')
+}
+
 /**
- * `'1 234,50'`, `'-1234.5'`, `'1234'` → haléře (celé číslo), se znaménkem.
- * Null, když to není číslo — nikdy netiše nezaokrouhlí na nejbližší smysl.
+ * `'1 234,50'`, `'1.234,50'`, `'-1234.5'`, `'1.234'`, `'1234'` → haléře
+ * (celé číslo), se znaménkem. Mezera (i pevná) a tečka oddělují tisíce,
+ * čárka je desetinná; tečka je desetinná jen s jednou či dvěma číslicemi
+ * za sebou a bez čárky. Null, když to není číslo nebo to jde přečíst
+ * dvojím způsobem — nikdy netiše nezaokrouhlí na nejbližší smysl.
  */
 export function naHalereSeZnamenkem(text: string): number | null {
-  const t = text.replace(/[\s ]/g, '').replace(',', '.')
-  if (!/^-?\d+(\.\d{1,2})?$/.test(t)) return null
+  let t = text.replace(/[\s  ]/g, '')
   const zaporne = t.startsWith('-')
-  const bez = zaporne ? t.slice(1) : t
-  const [cela, des = ''] = bez.split('.')
+  if (zaporne || t.startsWith('+')) t = t.slice(1)
+  if (!t) return null
+
+  let cela: string | null
+  let des = ''
+  const carka = t.lastIndexOf(',')
+  if (carka !== -1) {
+    // Čárka je desetinná — jen jedna, za ní nejvýš dvě číslice, před ní
+    // tisíce jen s tečkou (`1,234.50` je anglický zápis, ten se nehádá).
+    if (t.indexOf(',') !== carka) return null
+    des = t.slice(carka + 1)
+    if (!/^\d{1,2}$/.test(des)) return null
+    cela = celaCast(t.slice(0, carka), '.')
+  } else if (/^\d+\.\d{1,2}$/.test(t)) {
+    const [c, d] = t.split('.')
+    cela = c
+    des = d
+  } else {
+    cela = celaCast(t, '.')
+  }
+  if (cela === null) return null
+
   const haleru = Number(cela) * 100 + Number(des.padEnd(2, '0'))
+  if (!Number.isSafeInteger(haleru)) return null
   return zaporne ? -haleru : haleru
 }
 
@@ -141,6 +185,8 @@ export function naparsovatCsv(obsah: string): VysledekImportu {
     castka: indexSloupce('castka'),
     smer: indexSloupce('smer'),
     protistrana: indexSloupce('protistrana'),
+    protiucet: indexSloupce('protiucet'),
+    kodBanky: indexSloupce('kod_banky'),
     vs: indexSloupce('vs'),
     poznamka: indexSloupce('poznamka'),
     externiId: indexSloupce('externi_id'),
@@ -153,6 +199,9 @@ export function naparsovatCsv(obsah: string): VysledekImportu {
   if (chyby.length > 0) return { radky: [], chyby }
 
   const radky: RadekImportu[] = []
+  // Dvě stejná id v jednom souboru by shodila zápis celého souboru na
+  // unikátním indexu — druhé se ohlásí jako chyba řádku.
+  const videnaId = new Set<string>()
 
   for (let i = 1; i < radkySouboru.length; i++) {
     const cislo = i + 1
@@ -168,6 +217,19 @@ export function naparsovatCsv(obsah: string): VysledekImportu {
     const castkaSeZnamenkem = naHalereSeZnamenkem(castkaText)
     if (castkaSeZnamenkem === null) { chyby.push({ radek: cislo, zprava: `Nerozpoznaná částka „${castkaText}".` }); continue }
     if (castkaSeZnamenkem === 0) { chyby.push({ radek: cislo, zprava: 'Nulová částka.' }); continue }
+    if (Math.abs(castkaSeZnamenkem) > MAX_HALERU) { chyby.push({ radek: cislo, zprava: `Částka „${castkaText}" je větší, než appka umí uložit.` }); continue }
+
+    const externiId = idx.externiId !== -1 && bunky[idx.externiId] ? bunky[idx.externiId] : null
+    if (externiId !== null) {
+      if (videnaId.has(externiId)) { chyby.push({ radek: cislo, zprava: `Externí ID „${externiId}" je v souboru podruhé.` }); continue }
+      videnaId.add(externiId)
+    }
+
+    // Protiúčet: buď celý v jedné buňce (`19-2000145399/0800`, IBAN), nebo
+    // číslo a kód banky ve dvou sloupcích.
+    const ucetText = idx.protiucet !== -1 ? (bunky[idx.protiucet] ?? '') : ''
+    const kodText = idx.kodBanky !== -1 ? (bunky[idx.kodBanky] ?? '').trim() : ''
+    const protiucet = normalizovatUcet(ucetText && kodText && !ucetText.includes('/') ? `${ucetText}/${kodText}` : ucetText)
 
     const smerText = idx.smer !== -1 ? normalizovatNazev(bunky[idx.smer] ?? '') : ''
     let smer: SmerPohybu
@@ -187,9 +249,10 @@ export function naparsovatCsv(obsah: string): VysledekImportu {
       castkaHaleru: Math.abs(castkaSeZnamenkem),
       mena: menaText || 'CZK',
       protistrana: idx.protistrana !== -1 ? (bunky[idx.protistrana] ?? '') : '',
+      protiucet,
       vs: idx.vs !== -1 ? (bunky[idx.vs] ?? '') : '',
       poznamka: idx.poznamka !== -1 ? (bunky[idx.poznamka] ?? '') : '',
-      externiId: idx.externiId !== -1 && bunky[idx.externiId] ? bunky[idx.externiId] : null,
+      externiId,
     })
   }
 

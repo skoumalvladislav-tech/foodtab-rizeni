@@ -44,7 +44,10 @@ const MIGRACE_CESTA = process.env.JP_TEST_MIGRACE ?? new URL('../supabase/migrat
 const MIGRACE_OPRAVA_CESTA = process.env.JP_TEST_MIGRACE_OPRAVA ?? new URL('../supabase/migrations/20261021100000_jine_platby_pojistky_pokladny.sql', import.meta.url)
 const cist = (c) => (existsSync(c) ? readFileSync(c, 'utf8').replace(/\r\n/g, '\n') : '')
 const textOpravy = () => cist(MIGRACE_OPRAVA_CESTA)
-const textMigrace = () => cist(MIGRACE_CESTA) + '\n' + textOpravy()
+// Neutrální bankovní vrstva (20261119100000) předefinuje jine_platby_evidovat_uhradu
+// (zdroj banka_api místo jmen bank) — zrcadla čtou poslední definici.
+const MIGRACE_BANKA_CESTA = new URL('../supabase/migrations/20261119100000_banka_neutralni_vrstva.sql', import.meta.url)
+const textMigrace = () => cist(MIGRACE_CESTA) + '\n' + textOpravy() + '\n' + cist(MIGRACE_BANKA_CESTA)
 /** Tělo POSLEDNÍ definice funkce (create function / create or replace function). */
 const teloFunkce = (sql, jmeno) => {
   const od = Math.max(sql.lastIndexOf(`create function ${jmeno}(`), sql.lastIndexOf(`create or replace function ${jmeno}(`))
@@ -1075,7 +1078,7 @@ console.log('\n== Dostupné akce ==')
           /if app\.jp_nalez_pokladny\(v_z\.pokladna_skladu, 'sklad'\) then/.test(teloFunkce(sqlP, f))))
     const zdrojeSql = /v_t\.zdroj not in \(([^)]*)\)/.exec(teloFunkce(sqlP, 'public.jine_platby_evidovat_uhradu'))?.[1] ?? ''
     ok(`ZDROJE_UHRADY = zdroje v jine_platby_evidovat_uhradu (${zdrojeSql || '?'})`,
-      JSON.stringify([...zdrojeSql.matchAll(/'(\w+)'/g)].map((x) => x[1])) === JSON.stringify([...T.ZDROJE_UHRADY]) && T.ZDROJE_UHRADY.length === 3)
+      JSON.stringify([...zdrojeSql.matchAll(/'(\w+)'/g)].map((x) => x[1])) === JSON.stringify([...T.ZDROJE_UHRADY]) && T.ZDROJE_UHRADY.length === 2)
     ok('cesta C: nová tržba a schválení výdeje hlídají i jiné záznamy téhož dokladu nebo prodeje (app.jp_souvisejici: fotka, nebo pobočka + den + částka + měna)',
       /if exists \(select 1 from app\.jp_souvisejici\(v_z\) s where app\.jp_nalez_pokladny\(s\.pokladna_trzby, 'trzba'\)\)/.test(teloFunkce(sqlP, 'public.jine_platby_potvrdit_trzbu')) &&
         /where s\.nedohledana_operace is not null or app\.jp_nalez_pokladny\(s\.pokladna_skladu, 'sklad'\)/.test(teloFunkce(sqlP, 'public.jine_platby_rozhodnout_vydej')) &&

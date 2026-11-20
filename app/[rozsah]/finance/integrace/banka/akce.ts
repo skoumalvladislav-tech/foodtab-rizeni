@@ -137,7 +137,7 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
     castka_haleru: overeni.info.zustatekHaleru,
     mena: overeni.info.mena,
     platny_k: new Date().toISOString(),
-    zdroj: 'fio_api',
+    zdroj: ZDROJ_BANKY_API,
     integrace_pripojeni_id: pripojeni.id,
   })
 

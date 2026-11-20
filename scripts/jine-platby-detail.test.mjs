@@ -2491,8 +2491,8 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
   const text = textHtml(html)
   ok('stránka se s podvrženými daty vykreslí', html.length > 1000)
   const zdrojePlateb = globalThis.__jpStranka.filtry.filter(([t, k]) => t === 'transakce' && k === 'zdroj').map(([, , v]) => JSON.stringify(v))
-  ok('platby k napárování úhrady jen z banky: dotaz filtruje zdroj na fio_api, bankovni_agregator, csv_banka (ověření 21. 10.)',
-    zdrojePlateb.length === 1 && zdrojePlateb[0] === JSON.stringify(['fio_api', 'bankovni_agregator', 'csv_banka']))
+  ok('platby k napárování úhrady jen z banky: dotaz filtruje zdroj na banka_api, csv_banka (ověření 21. 10., zdroj bez jména banky od 20261119100000)',
+    zdrojePlateb.length === 1 && zdrojePlateb[0] === JSON.stringify(['banka_api', 'csv_banka']))
   ok('nadpis s očima „Finance · Tržby · Jiné platby“ a názvem záznamu', text.includes('Finance · Tržby · Jiné platby') && /<h1[^>]*>Stůl 4<\/h1>/.test(html))
   const kroky = [...html.matchAll(/<li\b[^>]*>/g)].filter((m) => html.slice(m.index - 400, m.index).includes('Průvodce záznamem'))
   ok('ukazatel kroků: 9 kroků v <ol> a právě jeden aria-current="step"', /aria-label="Průvodce záznamem"/.test(html) && (html.match(/aria-current="step"/g) ?? []).length === 1 && (html.match(/<nav aria-label="Průvodce záznamem"[\s\S]*?<\/nav>/)?.[0].match(/<li\b/g) ?? []).length === 9 && kroky !== null)
