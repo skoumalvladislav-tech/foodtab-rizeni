@@ -647,9 +647,24 @@ drop policy transakce_read on public.transakce;
 create policy transakce_read on public.transakce for select to authenticated
   using (ucet_id in (select app.platebni_ucty_s_pravem('finance.read')));
 
+-- Zápis podle pobočky účtu (finance.manage na pobočce účtu, u firemního
+-- za celou firmu). Rozsah JEN pobočky ale smí zapsat jen RUČNÍ platbu:
+-- výpisu z banky (`csv_banka`) věří párování faktur i úhrady Jiných
+-- plateb jako důkazu „zaplaceno v bance" a import výpisu je jen za celou
+-- firmu (app/[rozsah]/finance/platby/import/layout.tsx) — vedoucí pobočky
+-- by si jinak „výpis" napsal sám přímým zápisem. Pokladní zdroje taky jen
+-- celá firma (importy pokladen jsou firemní). `banka_api` přihlášený
+-- nezapíše vůbec (app.hlida_zdroj_transakce).
+-- ROZHODNOUT: smí člověk s rozsahem jen pobočky zapisovat ruční platby na
+-- účet své pobočky? Databáze to od téhle migrace pustí (pravidlo „zápis
+-- podle pobočky účtu"), appka zatím ne — Finance na pobočce chtějí
+-- finance.read za celou firmu (platby/akce.ts, pripravit; otázka 47).
 drop policy transakce_insert on public.transakce;
 create policy transakce_insert on public.transakce for insert to authenticated
-  with check (ucet_id in (select app.platebni_ucty_s_pravem('finance.manage')));
+  with check (
+    ucet_id in (select app.platebni_ucty_s_pravem('finance.manage'))
+    and (zdroj = 'rucni' or app.has_access(tenant_id, 'finance.manage', null))
+  );
 
 drop policy bankovni_zustatky_select on public.bankovni_zustatky;
 create policy bankovni_zustatky_select on public.bankovni_zustatky for select to authenticated

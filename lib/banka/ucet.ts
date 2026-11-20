@@ -87,3 +87,34 @@ export function normalizovatUcet(text: string | null | undefined): string {
 
   return ocisteny
 }
+
+export type OvereniCislaUctu = { stav: 'ok'; ucet: string } | { stav: 'chyba'; text: string }
+
+/** Nejdelší číslo účtu, které appka u vlastního účtu přijme (IBAN má nejvýš 34 znaků). */
+const MAX_DELKA_CISLA = 64
+
+/**
+ * Číslo VLASTNÍHO účtu z formuláře (Platby → nový platební účet).
+ *
+ * U protiúčtu z banky se nic neodmítá — co banka poslala, to se uloží
+ * (normalizovatUcet). U čísla, které člověk píše rukou, je to jinak:
+ * tvar IBANu nebo českého účtu s chybnou kontrolní číslicí je skoro
+ * jistě překlep, a ten se má ukázat hned, ne až u nesedícího výpisu.
+ * Jiný text (účet bez kódu banky, zahraniční účet bez IBANu) projde
+ * očištěný. Prázdné = účet bez čísla.
+ */
+export function overitCisloUctu(text: string): OvereniCislaUctu {
+  const ocisteny = text.trim().replace(/\s+/g, ' ')
+  if (!ocisteny) return { stav: 'ok', ucet: '' }
+  if (ocisteny.length > MAX_DELKA_CISLA) return { stav: 'chyba', text: 'Číslo účtu je příliš dlouhé.' }
+
+  const bezMezer = ocisteny.replace(/\s+/g, '').toUpperCase()
+  if (IBAN.test(bezMezer) && !jePlatnyIban(bezMezer)) {
+    return { stav: 'chyba', text: 'IBAN nesedí (kontrolní číslice) — zkontrolujte ho, prosím.' }
+  }
+  const cesky = CESKY_UCET.exec(bezMezer)
+  if (cesky && ceskyUcetNaIban(cesky[1] ?? '', cesky[2], cesky[3]) === null) {
+    return { stav: 'chyba', text: 'Číslo účtu nesedí (kontrolní součet) — zkontrolujte ho, prosím.' }
+  }
+  return { stav: 'ok', ucet: normalizovatUcet(ocisteny) }
+}

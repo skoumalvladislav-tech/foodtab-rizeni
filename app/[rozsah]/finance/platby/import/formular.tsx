@@ -99,6 +99,7 @@ export default function ImportFormular({ rozsah, ucty }: { rozsah: string; ucty:
                   <th style={{ padding: '6px 8px' }}>Směr</th>
                   <th style={{ padding: '6px 8px' }}>Částka</th>
                   <th style={{ padding: '6px 8px' }}>Protistrana</th>
+                  <th style={{ padding: '6px 8px' }}>Účet protistrany</th>
                   <th style={{ padding: '6px 8px' }}>VS</th>
                 </tr>
               </thead>
@@ -109,6 +110,7 @@ export default function ImportFormular({ rozsah, ucty }: { rozsah: string; ucty:
                     <td style={{ padding: '6px 8px' }}>{r.smer === 'prijem' ? 'Příjem' : 'Výdaj'}</td>
                     <td style={{ padding: '6px 8px', fontFamily: 'ui-monospace, monospace' }}>{koruny(r.castkaHaleru)}</td>
                     <td style={{ padding: '6px 8px' }}>{r.protistrana || '—'}</td>
+                    <td style={{ padding: '6px 8px', fontFamily: 'ui-monospace, monospace' }}>{r.protiucet || '—'}</td>
                     <td style={{ padding: '6px 8px' }}>{r.vs || '—'}</td>
                   </tr>
                 ))}

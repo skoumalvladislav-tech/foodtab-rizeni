@@ -7,6 +7,8 @@ import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { zasifrovat } from '@/lib/integrace-klice'
+import { popisNabidky } from '@/lib/banka/konektor'
+import { REGISTR_BANK } from '@/lib/banka/konektory'
 
 async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()
@@ -45,11 +47,12 @@ export async function zalozitPripojeni(formData: FormData): Promise<void> {
   const nazev = nepovinnePole(formData, 'nazev') ?? poskytovatel
 
   // Banka má od bankovního modulu (20261004100000) VLASTNÍ obrazovku
-  // s živým ověřením (Fio) — tenhle obecný formulář jen zaregistruje
-  // záznam BEZ jakéhokoli připojení, což u banky působilo, jako by se
-  // appka pokusila připojit a nic se nestalo (nález 4. 10. 2026).
+  // s živým ověřením — tenhle obecný formulář jen zaregistruje záznam
+  // BEZ jakéhokoli připojení, což u banky působilo, jako by se appka
+  // pokusila připojit a nic se nestalo (nález 4. 10. 2026). Co se
+  // nabízí, říká registr konektorů — banky se tu nevyjmenovávají.
   if (oblast === 'banka') {
-    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Bankovní účet se připojuje na týhle stránce (Fio) nebo čeká na Enable Banking u ostatních bank — ne přes obecný formulář.')}`)
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(`Bankovní účet se připojuje tady, ne přes obecný formulář. Můžete použít: ${popisNabidky(REGISTR_BANK)}.`)}`)
   }
 
   // Pokladna má od 11. 10. 2026 vlastní obrazovku s živým ověřením

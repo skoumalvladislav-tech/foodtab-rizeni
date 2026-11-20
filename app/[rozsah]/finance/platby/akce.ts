@@ -11,6 +11,7 @@ import { hlaskaBrany } from '@/lib/faktury-brana'
 import { naHalere } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { pobockaUctu, ucetPatriRozsahu } from '@/lib/finance-platby-pobocka'
+import { overitCisloUctu } from '@/lib/banka/ucet'
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>
 
@@ -102,11 +103,18 @@ export async function zalozitPlatebniUcet(formData: FormData): Promise<void> {
   const volba = pobockaUctu(pobocka, vybrana, pobocka ? [] : await aktivniPobockaFirmy(supabase, tenantId, vybrana))
   if (volba.stav === 'chyba') redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(volba.text)}`)
 
+  // Číslo účtu (nepovinné) ve stejném tvaru jako protiúčet pohybu
+  // (lib/banka/ucet.ts) — import a párování ho pak poznají. Překlep
+  // v IBANu nebo českém čísle účtu se odmítne, ne uloží.
+  const cislo = overitCisloUctu(String(formData.get('cislo_uctu') ?? ''))
+  if (cislo.stav === 'chyba') redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(cislo.text)}`)
+
   const { error } = await supabase.from('platebni_ucty').insert({
     tenant_id: tenantId,
     branch_id: volba.branchId,
     nazev,
     typ,
+    cislo_uctu: cislo.ucet,
   })
 
   if (error) redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Účet se nepodařilo uložit.')}`)

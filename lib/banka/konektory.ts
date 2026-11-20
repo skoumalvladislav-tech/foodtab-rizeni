@@ -142,4 +142,7 @@ const enableBanking: KonektorBanky = {
   },
 }
 
-export const REGISTR_BANK = vytvoritRegistr([fio, saltEdge, kb, enableBanking, KONEKTOR_IMPORT_VYPISU])
+// Import výpisu první: v nabídce (dlaždice, hlášky) je cesta, která
+// funguje u každé banky. Úlohu jeho pořadí neovlivní — nic nestahuje.
+// Banky s API v dřívějším pořadí úlohy: Fio, Salt Edge, Komerční banka.
+export const REGISTR_BANK = vytvoritRegistr([KONEKTOR_IMPORT_VYPISU, fio, saltEdge, kb, enableBanking])

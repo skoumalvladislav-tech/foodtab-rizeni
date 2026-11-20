@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { getServerSupabase } from '@/lib/supabase/server'
-import { rozsifrovat, zasifrovat } from '@/lib/integrace-klice'
+import { zasifrovat } from '@/lib/integrace-klice'
+import { precistTajemstviBanky } from '@/lib/banka/tajemstvi'
 import { konfiguraceKb, platnostSouhlasu, nactiUcty, vymenitKod, ziskatAccessToken, type ExterniUcetKb, type TajemstviKb } from '@/lib/kb-adaa'
 import { precistStavKb } from '@/lib/kb-adaa-stav'
 import { synchronizovatKbPripojeni } from '@/lib/kb-adaa-sync'
@@ -68,13 +69,8 @@ export async function GET(request: NextRequest) {
   const kod = searchParams.get('code') ?? ''
   if (!kod) return nahlasit(`Komerční banka souhlas nevydala${searchParams.get('error') ? ` (${searchParams.get('error')})` : ''}.`)
 
-  const { data: sifra } = await supabase.rpc('integrace_precti_tajemstvi', { p_pripojeni: pripojeni.id })
-  let udaje: TajemstviKb = {}
-  try {
-    udaje = typeof sifra === 'string' ? (rozsifrovat(sifra) as TajemstviKb) : {}
-  } catch {
-    udaje = {}
-  }
+  // Jen server, po ověření práva v databázi (lib/banka/tajemstvi.ts).
+  const udaje: TajemstviKb = (await precistTajemstviBanky<TajemstviKb>(supabase, pripojeni.id as string)) ?? {}
   if (!udaje.client_id || !udaje.client_secret || !ucet.navrat_uri) return nahlasit('Registrace u KB chybí — začněte připojení znovu.')
 
   const vymena = await vymenitKod(konf, { kod, clientId: udaje.client_id, clientSecret: udaje.client_secret, navratUri: ucet.navrat_uri })

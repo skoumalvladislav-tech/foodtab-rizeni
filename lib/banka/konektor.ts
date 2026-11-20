@@ -137,6 +137,17 @@ export function vytvoritRegistr(konektory: readonly KonektorBanky[]): RegistrBan
   }
 }
 
+/**
+ * Nabídka pro lidi — dlaždice a hlášky v Integracích ji berou odsud,
+ * ne vyjmenovanou napevno: „import výpisu (CSV), X a Y". Co se nabízet
+ * nesmí (nenastavené na serveru, ukončené API), v ní není.
+ */
+export function popisNabidky(registr: Pick<RegistrBanky, 'nazvyKNabidce'>): string {
+  const nazvy = registr.nazvyKNabidce()
+  if (nazvy.length <= 1) return nazvy.join('')
+  return `${nazvy.slice(0, -1).join(', ')} a ${nazvy[nazvy.length - 1]}`
+}
+
 /** Řádky pro `importovat_vypis` — klíče v snake_case, protiúčet v jednom tvaru, pořadí i stejné řádky beze změny. */
 export function radkyProImport(pohyby: readonly PohybBanky[]) {
   return pohyby.map((p) => ({

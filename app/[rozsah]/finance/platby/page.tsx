@@ -47,7 +47,7 @@ export const dynamic = 'force-dynamic'
 
 const TYPY_UCTU: Record<string, string> = { banka: 'Banka', pokladna: 'Pokladna', karta: 'Karta' }
 
-type PlatebniUcet = { id: string; nazev: string; typ: string; branch_id: string | null }
+type PlatebniUcet = { id: string; nazev: string; typ: string; branch_id: string | null; cislo_uctu: string }
 type Transakce = {
   id: string
   smer: 'prijem' | 'vydaj' | 'prevod_dovnitr' | 'prevod_ven'
@@ -293,7 +293,7 @@ export default async function FinancePlatby({
   const pobocka = pobockaFinanci(pristup.scope)
   const nazevPobocky = pristup.scope.branchName ?? 'pobočka'
 
-  let dotazUctu = supabase.from('platebni_ucty').select('id, nazev, typ, branch_id').eq('tenant_id', tenantId).eq('aktivni', true)
+  let dotazUctu = supabase.from('platebni_ucty').select('id, nazev, typ, branch_id, cislo_uctu').eq('tenant_id', tenantId).eq('aktivni', true)
   if (pobocka) dotazUctu = dotazUctu.eq('branch_id', pobocka)
 
   // Na pobočce `!inner` + filtr na pobočku účtu (stejně jako export pro
@@ -671,6 +671,7 @@ export default async function FinancePlatby({
                     <div style={{ fontSize: '13.5px' }}>{u.nazev}</div>
                     <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
                       {TYPY_UCTU[u.typ] ?? u.typ}
+                      {u.cislo_uctu ? ` · ${u.cislo_uctu}` : ''}
                       {pobocka ? '' : ` · ${nazevPobockyUctu(u.branch_id, pobockyFirmy)}`}
                     </div>
                   </div>
@@ -721,6 +722,10 @@ export default async function FinancePlatby({
                   <option value="pokladna">Pokladna</option>
                   <option value="karta">Karta</option>
                 </select>
+              </label>
+              <label>
+                <span style={popisek}>Číslo účtu nebo IBAN</span>
+                <input type="text" name="cislo_uctu" inputMode="text" autoComplete="off" placeholder="např. 19-2000145399/0800" style={pole} />
               </label>
               {!pobocka ? (
                 <label>

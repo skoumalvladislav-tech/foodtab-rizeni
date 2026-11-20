@@ -37,8 +37,12 @@ export function dekodovatVypis(bajty: Uint8Array): { text: string; kodovani: Kod
   }
 }
 
-/** Soubor výpisu (bajty) → řádky a chyby; BOM odstraní dekodér i parser. */
-export function naparsovatVypis(bajty: Uint8Array): VysledekImportu & { kodovani: KodovaniVypisu } {
+/**
+ * Soubor výpisu (bajty) → řádky a chyby; BOM odstraní dekodér i parser.
+ * Vrací i přečtený text — z něj se počítá otisk souboru (dávka), ať je
+ * stejný soubor stejný bez ohledu na to, kudy přišel.
+ */
+export function naparsovatVypis(bajty: Uint8Array): VysledekImportu & { kodovani: KodovaniVypisu; text: string } {
   const { text, kodovani } = dekodovatVypis(bajty)
-  return { ...naparsovatCsv(text), kodovani }
+  return { ...naparsovatCsv(text), kodovani, text }
 }

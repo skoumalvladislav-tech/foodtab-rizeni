@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { naparsovatCsv, type ChybaImportu, type RadekImportu } from '@/lib/finance-csv-import'
+import type { ChybaImportu, RadekImportu } from '@/lib/finance-csv-import'
+import { naparsovatVypis } from '@/lib/banka/import-vypisu'
 
 /**
  * Krok 1 ze dvou: nahrání a NÁHLED — ještě se nic nezapisuje.
@@ -54,7 +55,11 @@ export async function naparsovatSoubor(_predchozi: StavNahledu, formData: FormDa
   if (!(soubor instanceof File) || soubor.size === 0) return { stav: 'chyba', text: 'Vyberte soubor.' }
   if (soubor.size > LIMIT_BAJTU) return { stav: 'chyba', text: `Soubor je příliš velký (limit ${LIMIT_BAJTU / 1_000_000} MB).` }
 
-  const obsah = await soubor.text()
+  // Bajty, ne `soubor.text()`: ta čte vždy jako UTF-8 a soubor uložený
+  // ve windows-1250 (český Excel) by rozbila („K�va"). Kódování pozná
+  // konektor importu výpisu (lib/banka/import-vypisu.ts). Otisk souboru
+  // se počítá z přečteného textu — u UTF-8 stejně jako dřív.
+  const { text: obsah, radky, chyby } = naparsovatVypis(new Uint8Array(await soubor.arrayBuffer()))
   const hash = createHash('sha256').update(obsah, 'utf8').digest('hex')
 
   const supabase = await getServerSupabase()
@@ -66,8 +71,6 @@ export async function naparsovatSoubor(_predchozi: StavNahledu, formData: FormDa
     .maybeSingle()
 
   if (existujici) return { stav: 'chyba', text: 'Tenhle soubor už byl jednou importován (stejný obsah).' }
-
-  const { radky, chyby } = naparsovatCsv(obsah)
 
   if (radky.length === 0) {
     return { stav: 'chyba', text: chyby[0]?.zprava ?? 'Soubor neobsahuje žádné platné řádky.' }

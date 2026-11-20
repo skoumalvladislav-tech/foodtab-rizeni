@@ -6,6 +6,8 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
 import { sifrovaniJeNastavene } from '@/lib/integrace-klice'
+import { popisNabidky } from '@/lib/banka/konektor'
+import { REGISTR_BANK } from '@/lib/banka/konektory'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
@@ -56,6 +58,8 @@ const pole = {
 } as const
 
 const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' } as const
+
+const velkymPismenem = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
 const NAZVY_OBLASTI: Record<string, string> = {
   pokladna: 'Pokladna (POS)',
@@ -144,7 +148,8 @@ export default async function FinanceIntegrace({
           </Link>
           <Link href={`/${rozsah}/finance/integrace/banka`} className="ft-tl" style={{ ...karta, display: 'block', whiteSpace: 'normal' }}>
             <strong>Bankovní účty</strong>
-            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Fio, Enable Banking →</div>
+            {/* Z registru konektorů (lib/banka/konektory.ts), ne vyjmenované napevno. */}
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>{velkymPismenem(popisNabidky(REGISTR_BANK))} →</div>
           </Link>
           <Link href={`/${rozsah}/rezervace/napojeni`} className="ft-tl" style={{ ...karta, display: 'block', whiteSpace: 'normal' }}>
             <strong>Rezervace</strong>

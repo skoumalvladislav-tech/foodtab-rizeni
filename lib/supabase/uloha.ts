@@ -67,6 +67,14 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     (první stažení po souhlasu v KB) — až po dohledání připojení
  *     uživatelským klientem (RLS) a uložení tajemství přes RPC, které
  *     samo ověří `integrace.manage`.
+ *   * `lib/banka/tajemstvi.ts` (`precistTajemstviBanky`) z
+ *     `app/[rozsah]/finance/integrace/banka/akce.ts` (obnova souhlasu)
+ *     a `app/api/integrace/kb/{registrace,vratit}` — šifra přístupových
+ *     údajů k bance JEDNOHO připojení, až když databáze pod účtem
+ *     přihlášeného potvrdí `integrace.manage` (`integrace_overit_spravu`),
+ *     a jen řádek firmy, kterou vrátila databáze. Dřív RPC
+ *     `integrace_precti_tajemstvi`, které šifru vydalo i do prohlížeče
+ *     (migrace 20261119100000).
  *   * `app/[rozsah]/finance/platby/import/akce.ts` (`potvrditImport` →
  *     `lib/finance-automaticke-parovani.ts`) — automatické párování po
  *     importu výpisu, jen když importující má `finance.manage`

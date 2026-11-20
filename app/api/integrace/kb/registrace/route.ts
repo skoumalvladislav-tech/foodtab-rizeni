@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { getServerSupabase } from '@/lib/supabase/server'
-import { rozsifrovat, zasifrovat } from '@/lib/integrace-klice'
+import { zasifrovat } from '@/lib/integrace-klice'
+import { precistTajemstviBanky } from '@/lib/banka/tajemstvi'
 import { adresaAutorizace, konfiguraceKb, rozsifrovatRegistraci, type ExterniUcetKb, type RegistraceKlienta, type TajemstviKb } from '@/lib/kb-adaa'
 import { precistStavKb, vytvoritStavKb, type StavKb } from '@/lib/kb-adaa-stav'
 
@@ -34,13 +35,12 @@ const MAX_KANDIDATU = 10
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>
 
+// Přístupové údaje k bance čte jen server po ověření práva v databázi
+// (lib/banka/tajemstvi.ts, migrace 20261119100000) — RPC přihlášenému
+// šifru k bance nevydá.
 async function klicSifrovani(supabase: Supabase, pripojeniId: string): Promise<string | null> {
-  const { data: sifra } = await supabase.rpc('integrace_precti_tajemstvi', { p_pripojeni: pripojeniId })
-  try {
-    return typeof sifra === 'string' ? ((rozsifrovat(sifra) as TajemstviKb).klic_sifrovani ?? null) : null
-  } catch {
-    return null
-  }
+  const udaje = await precistTajemstviBanky<TajemstviKb>(supabase, pripojeniId)
+  return udaje?.klic_sifrovani ?? null
 }
 
 export async function GET(request: NextRequest) {

@@ -15,6 +15,7 @@
 --      * člověk jiné pobočky nevidí cizí účty, pohyby ani zůstatky;
 --      * člověk pobočky nevidí pohyby firemního účtu (bez pobočky);
 --      * zápis jen na účty, ke kterým má právo; dávky jen za celou firmu;
+--      * pobočka zapíše jen ruční platbu, „výpis z banky" ne;
 --      * přehled tržeb (definer) počítá banku stejně;
 --      * druhá linie: účet nejde dát pod pobočku cizí firmy;
 --   3. přístupové údaje k bance se přihlášenému nevydají (RPC ani select),
@@ -341,6 +342,11 @@ select pg_temp.check('pobočka P1: app.platebni_ucty_s_pravem(finance.read) = je
 select pg_temp.check('pobočka P1: zapíše ruční platbu na účet P1',
   pg_temp.projde(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, protistrana) values (%L, %L, %L, 1, %L, %L, %L)',
     :'firma_a', :'u_p1', 'prijem', '2033-03-06', 'rucni', 'Krok111 zápis P1')));
+-- Výpisu z banky věří párování faktur i úhrady Jiných plateb jako důkazu
+-- o zaplacení — vedoucí pobočky si ho přímým zápisem nenapíše.
+select pg_temp.check('pobočka P1: „výpis z banky" (csv_banka) přímým zápisem ani na svůj účet nezapíše (42501)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, protistrana) values (%L, %L, %L, 1, %L, %L, %L)',
+    :'firma_a', :'u_p1', 'prijem', '2033-03-06', 'csv_banka', 'Krok111 podvržený výpis'), '42501', ''));
 select pg_temp.check('pobočka P1: na firemní účet nezapíše (42501)',
   pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj) values (%L, %L, %L, 1, %L, %L)',
     :'firma_a', :'u_firma', 'prijem', '2033-03-06', 'rucni'), '42501', ''));

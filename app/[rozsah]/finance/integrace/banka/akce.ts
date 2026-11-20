@@ -9,11 +9,12 @@ import { redirect } from 'next/navigation'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { rozsifrovat, zasifrovat } from '@/lib/integrace-klice'
+import { zasifrovat } from '@/lib/integrace-klice'
 import { overitPripojeniFio } from '@/lib/integrace-fio'
-import { synchronizovatFioPripojeni } from '@/lib/integrace-fio-sync'
-import { synchronizovatSaltEdgePripojeni } from '@/lib/integrace-saltedge-sync'
 import { synchronizovatPodlePoskytovatele } from '@/lib/banka-synchronizace'
+import { ZDROJ_BANKY_API } from '@/lib/banka/konektor'
+import { REGISTR_BANK } from '@/lib/banka/konektory'
+import { precistTajemstviBanky } from '@/lib/banka/tajemstvi'
 import { enableBankingProvider } from '@/lib/integrace-enablebanking'
 import { zahajitPripojeniSaltEdge, odvolatSouhlasSaltEdge } from '@/lib/integrace-saltedge'
 import { adresaAutorizace, adresaRegistrace, konfiguraceKb, novyKlicSifrovani, type ExterniUcetKb, type TajemstviKb } from '@/lib/kb-adaa'
@@ -296,12 +297,15 @@ export async function vybratUcetSaltEdge(formData: FormData): Promise<void> {
 
 /**
  * Manuální synchronizace — STEJNÁ cesta jako naplánovaná úloha
- * (lib/integrace-fio-sync.ts), jen spuštěná z tlačítka po ověření
- * integrace.manage. `synchronizovatFioPripojeni` běží přes
+ * (registr konektorů, lib/banka/konektory.ts), jen spuštěná z tlačítka
+ * po ověření integrace.manage. Synchronizace konektoru běží přes
  * `service_role` (sdílí kód s cron úlohou, která nemá session) a
  * dohledá připojení jen podle `id` — BEZ týhle kontroly by
  * `integrace.manage` ve VLASTNÍ firmě stačilo k vyvolání synchronizace
  * CIZÍHO připojení, kdyby volající znal nebo uhodl jeho UUID.
+ *
+ * Kterou banku a jak, rozhodne registr podle poskytovatele připojení —
+ * tady žádné jméno banky není (Finance Fáze 0, krok 1).
  */
 export async function synchronizovatTeto(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
@@ -320,10 +324,10 @@ export async function synchronizovatTeto(formData: FormData): Promise<void> {
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Připojení nepatří vaší firmě nebo neexistuje.')}`)
   }
 
-  // Podle poskytovatele, ne vždy Fio — viz lib/banka-synchronizace.ts (nález 11. 10. 2026).
+  // Podle poskytovatele připojení z registru — viz lib/banka-synchronizace.ts (nález 11. 10. 2026).
   const vysledek = await synchronizovatPodlePoskytovatele(
     { id: pripojeni.id as string, poskytovatel: pripojeni.poskytovatel as string },
-    { fio: synchronizovatFioPripojeni, saltedge: synchronizovatSaltEdgePripojeni, kb_adaa: synchronizovatKbPripojeni },
+    REGISTR_BANK.synchronizatory(),
   )
 
   const parametr = vysledek.stav === 'ok'
@@ -532,13 +536,9 @@ export async function obnovitSouhlasKb(formData: FormData): Promise<void> {
     .maybeSingle()
   if (!pripojeni) redirect(cestaBanky(rozsah, { chyba: 'Připojení neexistuje.' }))
 
-  const { data: sifra } = await supabase.rpc('integrace_precti_tajemstvi', { p_pripojeni: pripojeni.id })
-  let udaje: TajemstviKb = {}
-  try {
-    udaje = typeof sifra === 'string' ? (rozsifrovat(sifra) as TajemstviKb) : {}
-  } catch {
-    udaje = {}
-  }
+  // Jen server, po ověření práva v databázi (lib/banka/tajemstvi.ts) —
+  // RPC přihlášenému šifru k bance nevydá (migrace 20261119100000).
+  const udaje: TajemstviKb = (await precistTajemstviBanky<TajemstviKb>(supabase, pripojeni.id as string)) ?? {}
   if (!udaje.client_id) redirect(cestaBanky(rozsah, { chyba: 'Registrace u KB chybí — odpojte účet a připojte ho znovu.' }))
 
   const ucet = (pripojeni.externi_ucet ?? {}) as ExterniUcetKb

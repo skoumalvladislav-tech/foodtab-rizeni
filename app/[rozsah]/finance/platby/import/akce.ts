@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import type { RadekImportu } from '@/lib/finance-csv-import'
+import { zapsatVypis } from '@/lib/banka/zapis'
 import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 
@@ -46,49 +47,35 @@ export async function potvrditImport(formData: FormData): Promise<void> {
     redirect(`/${rozsah}/finance/platby/import?chyba=${encodeURIComponent('Náhled vypršel, nahrajte soubor znovu.')}`)
   }
 
+  if (zdroj !== 'csv_banka' && zdroj !== 'csv_pokladna') {
+    redirect(`/${rozsah}/finance/platby/import?chyba=${encodeURIComponent('Náhled vypršel, nahrajte soubor znovu.')}`)
+  }
+
   const supabase = await getServerSupabase()
 
-  const { data: davka, error: chybaDavky } = await supabase
-    .from('import_davky')
-    .insert({
-      tenant_id: tenantId,
-      typ: zdroj === 'csv_banka' ? 'banka_csv' : 'pokladna_csv',
-      soubor_nazev: souborNazev,
-      soubor_hash: souborHash,
-      pocet_radku: radky.length,
-      stav: 'zpracovano',
-    })
-    .select('id')
-    .single()
-
-  if (chybaDavky || !davka) {
-    const zprava = chybaDavky?.code === '23505' ? 'Tenhle soubor už byl jednou importován.' : 'Dávku se nepodařilo založit.'
-    redirect(`/${rozsah}/finance/platby/import?chyba=${encodeURIComponent(zprava)}`)
-  }
-
-  const { data: pocetVlozenych, error: chybaImportu } = await supabase.rpc('importovat_transakce', {
-    p_tenant: tenantId,
-    p_ucet: ucetId,
-    p_davka: davka.id,
-    p_zdroj: zdroj,
-    // `jsonb_to_recordset` v RPC čeká SNAKE_CASE klíče — `RadekImportu`
-    // je camelCase (shoda s TS konvencí appky). Posílání `radky` přímo
-    // by `castka_haleru`/`externi_id` nechalo padnout na NULL (nález
-    // 7. 10., oprava v 20261007100000_importovat_transakce_mena.sql).
-    p_radky: radky.map((r) => ({
-      datum: r.datum, smer: r.smer, castka_haleru: r.castkaHaleru, mena: r.mena,
-      protistrana: r.protistrana, vs: r.vs, poznamka: r.poznamka, externi_id: r.externiId,
-    })),
+  // Dávka i pohyby v JEDNÉ transakci (`importovat_vypis`, migrace
+  // 20261119100000). Dřív se dávka založila jako „zpracováno" dřív, než
+  // se zapsaly řádky — a když zápis spadl, zůstala a stejný soubor pak
+  // náhled navždy odmítal jako „už importovaný". Teď po chybě nezůstane
+  // nic a soubor jde nahrát znovu. Dvojí import téhož pohybu hlídá
+  // databáze (id od banky, jinak otisk pohybu i s pořadím stejného řádku).
+  // Protiúčet znovu normalizuje `radkyProImport` — řádky přišly z prohlížeče.
+  const zapis = await zapsatVypis(supabase, {
+    tenantId,
+    ucetId,
+    zdroj,
+    souborNazev,
+    souborHash,
+    pohyby: radky,
   })
 
-  if (chybaImportu) {
-    // Dávka zůstává zapsaná i při neúspěchu vložení řádků — je to
-    // dohledatelná stopa po pokusu, ne tiše zahozená informace.
-    redirect(`/${rozsah}/finance/platby/import?chyba=${encodeURIComponent('Import se nepodařilo dokončit — zkuste to znovu.')}`)
+  if (zapis.stav === 'chyba' || !zapis.davkaId) {
+    const uzImportovano = zapis.stav === 'chyba' && zapis.kod === '23505' && zapis.duvod.includes('import_davky_tenant_hash')
+    const zprava = uzImportovano ? 'Tenhle soubor už byl jednou importován.' : 'Import se nepodařilo dokončit — nic se nezapsalo, zkuste to znovu.'
+    redirect(`/${rozsah}/finance/platby/import?chyba=${encodeURIComponent(zprava)}`)
   }
-
-  // import_davky.pocet_novych zapisuje RPC sama (stejná transakce) —
-  // samostatný klientský .update() tu dřív tiše padal (žádný grant).
+  const davkaId = zapis.davkaId
+  const pocetVlozenych = zapis.pocetNovych
 
   // Nové platby z výpisu → jednoznačné shody s fakturami se spárují samy
   // a faktura přejde na „Uhrazeno" (Šéfík 8. 10. 2026). Jen když import
@@ -97,9 +84,9 @@ export async function potvrditImport(formData: FormData): Promise<void> {
   // fakturu, kterou sám ručně označit nesmí. Důvěryhodná je jen TAHLE dávka.
   const smiFaktury = (await zkusPristup(tenantId, 'faktury.manage', TENANT_SCOPE_SEGMENT)).stav === 'ok'
   const parovani = smiFaktury
-    ? await automatickyParovatPlatby(tenantId, { konecMs: Date.now() + 20_000, duveryhodneDavky: [{ id: davka.id, pocet: Number(pocetVlozenych ?? 0) }] })
+    ? await automatickyParovatPlatby(tenantId, { konecMs: Date.now() + 20_000, duveryhodneDavky: [{ id: davkaId, pocet: pocetVlozenych }] })
     : { sparovano: 0 }
 
   revalidatePath(`/${rozsah}/finance/platby`)
-  redirect(`/${rozsah}/finance/platby?importovano=${pocetVlozenych ?? 0}&sparovano=${parovani.sparovano}`)
+  redirect(`/${rozsah}/finance/platby?importovano=${pocetVlozenych}&sparovano=${parovani.sparovano}`)
 }
