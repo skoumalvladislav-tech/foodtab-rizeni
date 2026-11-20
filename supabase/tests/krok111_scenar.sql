@@ -455,6 +455,14 @@ select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-v
   jsonb_build_array(pg_temp.r('2033-06-10'))) as pokl_v2 \gset
 select pg_temp.check('… a pokladní uzávěrka se počítá jen proti pokladním: znovu nahraná nic nepřidá (0)',
   :'pokl_v2'::int = 0);
+-- Stažení BEZ id se počítá podle obsahu (žádný nárok) — ani tam se
+-- pokladní uzávěrka nepočítá, jinak by pohyb z banky zablokovala.
+select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-v3',
+  jsonb_build_array(pg_temp.r('2033-06-09'))) as pokl_v3 \gset
+select pg_temp.stahnout(:'firma_a', :'u_pokl', 'krok111-pokl-s3', jsonb_build_array(pg_temp.r('2033-06-09'))) as pokl_s3 \gset
+select pg_temp.check('pokladní uzávěrka, pak stažení BEZ id: pohyb z banky se zapíše (1/1)',
+  :'pokl_v3'::int = 1 and :'pokl_s3'::int = 1
+  and (select count(*) from public.transakce where ucet_id = :'u_pokl' and zdroj = 'banka_api' and datum = '2033-06-09') = 1);
 
 -- Stornovaný řádek výpisu pohyb z banky nezablokuje.
 select pg_temp.importovat(:'firma_a', :'u_storno', 'csv_banka', 'krok111-storno-v',
