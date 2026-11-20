@@ -217,5 +217,17 @@ await zkus('„Synchronizovat teď": mapa z REGISTR_BANK.synchronizatory()', () 
 await zkus('„Synchronizovat teď": žádná mapa poskytovatel → funkce napsaná ručně', () =>
   synchronizovatTeto !== null && !/\{\s*[a-z_]+\s*:\s*synchronizovat[A-Z]\w*Pripojeni/.test(synchronizovatTeto))
 
+console.log('\n== Import výpisu v appce jde stejnou cestou ==')
+// Dřív akce založila dávku samostatným zápisem a pohyby až po ní — spadlý
+// zápis pohybů nechal dávku a stejný soubor pak šel odmítnout napořád.
+const importAkce = cist('app/[rozsah]/finance/platby/import/akce.ts')
+await zkus('potvrzení importu zapisuje přes zapsatVypis (dávka i pohyby v jedné transakci)', () =>
+  /await\s+zapsatVypis\(\s*supabase\s*,/.test(importAkce))
+await zkus('potvrzení importu nezakládá dávku samo ani nevolá importovat_transakce', () =>
+  !/from\(\s*['"]import_davky['"]\s*\)\s*\.insert/.test(importAkce) && !/rpc\(\s*['"]importovat_transakce['"]/.test(importAkce))
+const nahled = cist('app/[rozsah]/finance/platby/import/akce-nahled.ts')
+await zkus('náhled čte bajty souboru přes naparsovatVypis (pozná windows-1250), ne soubor.text()', () =>
+  /naparsovatVypis\(\s*new Uint8Array\(\s*await\s+soubor\.arrayBuffer\(\)\s*\)\s*\)/.test(nahled) && !/soubor\.text\(\)\s*$/m.test(nahled.replace(/\/\/.*$/gm, '')))
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

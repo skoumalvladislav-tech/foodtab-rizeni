@@ -84,5 +84,14 @@ zkus('jiný text (účet bez kódu banky) projde očištěný', () => {
 })
 zkus('příliš dlouhý text → chyba', () => overitCisloUctu('1'.repeat(65)).stav === 'chyba')
 
+console.log('\n== Platby → nový platební účet: číslo účtu se ověří ==')
+const { readFileSync } = await import('node:fs')
+const koren = new URL('..', import.meta.url)
+const stranka = readFileSync(new URL('app/[rozsah]/finance/platby/page.tsx', koren), 'utf8')
+const akce = readFileSync(new URL('app/[rozsah]/finance/platby/akce.ts', koren), 'utf8')
+zkus('formulář má pole cislo_uctu', () => /<input[^>]*name="cislo_uctu"/.test(stranka))
+zkus('akce číslo ověří (overitCisloUctu) a uloží ověřený tvar', () =>
+  /overitCisloUctu\(\s*String\(\s*formData\.get\(\s*'cislo_uctu'\s*\)/.test(akce) && /cislo_uctu:\s*cislo\.ucet\b/.test(akce))
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)
