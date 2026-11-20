@@ -5,9 +5,11 @@
  * Dávka i pohyby vzniknou v JEDNÉ databázové transakci: když zápis
  * pohybů spadne, nezůstane po něm dávka, která by opakovaný import
  * téhož souboru odmítla jako „už importovaný". Dvojí import hlídá
- * databáze — id od banky, a kde id není, otisk pohybu i s pořadím
- * stejného řádku ve výpisu (dvě stejné platby v jednom výpisu zůstanou
- * dvě).
+ * databáze: řádek s id od banky se pozná podle id (u stejného zdroje);
+ * řádek bez id se počítá podle obsahu — zapíše se tolik kusů, o kolik
+ * jich je v souboru víc než na účtu (dvě stejné platby zůstanou dvě).
+ * Pohyb stažený z banky se kvůli obsahu jiného řádku nikdy nezahodí:
+ * buď „zabere" stejný řádek nahraného výpisu, nebo se zapíše.
  *
  * Bez `server-only` a bez vlastního klienta: klienta dává volající
  * (přihlášený u importu souboru, služba u úlohy), takže kód jde zkusit
@@ -48,4 +50,28 @@ export async function zapsatVypis(
   const davkaId = typeof radek?.davka_id === 'string' ? radek.davka_id : null
   if (!davkaId) return { stav: 'chyba', kod: null, duvod: 'Databáze nevrátila dávku importu.' }
   return { stav: 'ok', davkaId, pocetNovych: Number(radek?.pocet_novych ?? 0) }
+}
+
+/**
+ * Hláška, když se po připojení banky nezapsal první zůstatek.
+ *
+ * Připojení samo platí dál (je hotové dřív než zůstatek) — uživatel se
+ * jen musí dozvědět, že zůstatek chybí a proč. Zůstatek smí zapsat jen
+ * ten, kdo spravuje Finance za celou firmu (politika `bankovni_zustatky`
+ * se tu nemění, otázka 122); kdo má jen právo na integrace, připojí
+ * banku, ale zůstatek databáze odmítne (42501).
+ *
+ * `synchronizaceZapojena`: běží pro tuhle banku pravidelná synchronizace
+ * (služba, ta zůstatek zapíše)? Enable Banking dnes ne — tam by slib
+ * „ukáže se po synchronizaci" nebyl pravda.
+ */
+export function hlaskaPrvnihoZustatku(
+  chyba: { code?: string | null } | null | undefined,
+  v: { synchronizaceZapojena: boolean },
+): string {
+  const proc = chyba?.code === '42501' ? ' — chybí právo spravovat Finance za celou firmu' : ''
+  const dal = v.synchronizaceZapojena
+    ? 'Ukáže se po první synchronizaci.'
+    : 'Tahle banka se zatím sama nesynchronizuje, zůstatek se proto sám nedoplní.'
+  return `Banka je připojená, první zůstatek se ale nezapsal${proc}. ${dal}`
 }

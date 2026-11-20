@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { enableBankingProvider, podepsatJwt } from '@/lib/integrace-enablebanking'
 import { ZDROJ_BANKY_API } from '@/lib/banka/konektor'
+import { hlaskaPrvnihoZustatku } from '@/lib/banka/zapis'
 
 /**
  * Návrat z Enable Banking po souhlasu PSU (PSD2 redirect).
@@ -70,13 +71,18 @@ export async function GET(request: NextRequest) {
     připojení (to už je hotové výš). Pravidelnou synchronizaci dál
     dělá cron/manuální tlačítko (lib/integrace-fio-sync.ts vzor),
     Enable Banking tam dnes ještě není zapojený (vědomá mezera).
+
+    Výsledek zápisu se ale čte: kdo má právo na integrace, ale ne na
+    Finance za celou firmu, banku připojí, zůstatek databáze odmítne —
+    uživatel se to dozví hláškou, připojení platí dál.
   */
+  let chybaZustatku: { code?: string | null } | null = null
   try {
     const token = await podepsatJwt()
     const zustatky = await enableBankingProvider.nactiZustatky!(ucet.providerAccountId, token)
     if (zustatky.stav === 'ok' && pripojeni.platebni_ucet_id) {
       for (const z of zustatky.zustatky) {
-        await supabase.from('bankovni_zustatky').insert({
+        const { error } = await supabase.from('bankovni_zustatky').insert({
           tenant_id: pripojeni.tenant_id,
           platebni_ucet_id: pripojeni.platebni_ucet_id,
           typ: z.typ,
@@ -86,11 +92,17 @@ export async function GET(request: NextRequest) {
           zdroj: ZDROJ_BANKY_API,
           integrace_pripojeni_id: pripojeni.id,
         })
+        if (error && !chybaZustatku) chybaZustatku = error
       }
     }
   } catch {
-    // Zůstatek dokreslí další synchronizace — připojení samo je hotové beze změny.
+    // Zůstatek se od banky nenačetl — připojení samo je hotové beze změny.
   }
 
+  if (chybaZustatku) {
+    // Do logu jen kód a id připojení — žádný token ani částka.
+    console.error('[banka] Enable Banking: první zůstatek se nezapsal', { pripojeni: pripojeni.id, kod: chybaZustatku.code ?? null })
+    return cil({ enablebanking: 'pripojeno', upozorneni: hlaskaPrvnihoZustatku(chybaZustatku, { synchronizaceZapojena: false }) })
+  }
   return cil({ enablebanking: 'pripojeno' })
 }

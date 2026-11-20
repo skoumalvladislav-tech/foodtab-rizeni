@@ -109,13 +109,13 @@ export default async function FinanceIntegraceBanka({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; synchronizovano?: string; enablebanking?: string; kb?: string }>
+  searchParams: Promise<{ chyba?: string; synchronizovano?: string; enablebanking?: string; kb?: string; upozorneni?: string }>
 }) {
   const { rozsah } = await params
   // Na pobočce kreslí obrazovku layout (JenProFirmu) — stránka nic
   // nenačítá ani nevrací, ani když ji Next vyrenderuje souběžně s ním.
   if (!jeRozsahFirmy(rozsah)) return null
-  const { chyba, synchronizovano, enablebanking, kb } = await searchParams
+  const { chyba, synchronizovano, enablebanking, kb, upozorneni } = await searchParams
   const konfKb = konfiguraceKb()
   const dnesIso = new Date().toISOString().slice(0, 10)
   const zaMesicIso = posunoutDen(dnesIso, 30)
@@ -234,6 +234,8 @@ export default async function FinanceIntegraceBanka({
         {enablebanking === 'pripojeno' ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>Účet přes Enable Banking je připojený.</p>
         ) : null}
+        {/* Připojení prošlo, jen první zůstatek se nezapsal (hláška z hlaskaPrvnihoZustatku). */}
+        {upozorneni ? <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>{upozorneni}</p> : null}
 
         {pripojeni.length === 0 ? (
           <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Zatím žádný bankovní účet.</p>

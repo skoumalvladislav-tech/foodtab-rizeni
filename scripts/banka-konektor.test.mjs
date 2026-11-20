@@ -13,11 +13,14 @@
  *     nesmí;
  *   * úloha zpracuje připojení JEDNO PO DRUHÉM v pořadí registru
  *     a dlouhý konektor po svém stropu času přeskočí;
- *   * řádky pro databázi zachovají pořadí i stejné řádky (pořadí je
- *     v otisku) a protiúčet převedou na jeden tvar;
+ *   * řádky pro databázi zachovají i stejné řádky (dvě stejné platby
+ *     zůstanou dvě; kolik jich zapsat, počítá databáze podle obsahu)
+ *     a protiúčet převedou na jeden tvar;
  *   * zápis jde jedinou RPC `importovat_vypis` a prázdné stažení nic
  *     nezaloží;
- *   * úloha i tlačítko „Synchronizovat teď" berou banky jen z registru.
+ *   * úloha i tlačítko „Synchronizovat teď" berou banky jen z registru;
+ *   * nezapsaný první zůstatek po připojení banky se uživateli ohlásí
+ *     (Fio i Enable Banking čtou výsledek zápisu), připojení platí dál.
  */
 
 import { readFileSync } from 'node:fs'
@@ -26,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const { vytvoritRegistr, popisNabidky, radkyProImport, synchronizovatVsechnaPripojeni, ZDROJ_BANKY_API } = await import('../lib/banka/konektor.ts')
-const { zapsatVypis } = await import('../lib/banka/zapis.ts')
+const { zapsatVypis, hlaskaPrvnihoZustatku } = await import('../lib/banka/zapis.ts')
 const { synchronizovatPodlePoskytovatele } = await import('../lib/banka-synchronizace.ts')
 
 let chyb = 0
@@ -253,6 +256,45 @@ await zkus('potvrzení importu nezakládá dávku samo ani nevolá importovat_tr
 const nahled = cist('app/[rozsah]/finance/platby/import/akce-nahled.ts')
 await zkus('náhled čte bajty souboru přes naparsovatVypis (pozná windows-1250), ne soubor.text()', () =>
   /naparsovatVypis\(\s*new Uint8Array\(\s*await\s+soubor\.arrayBuffer\(\)\s*\)\s*\)/.test(nahled) && !/soubor\.text\(\)\s*$/m.test(nahled.replace(/\/\/.*$/gm, '')))
+
+console.log('\n== První zůstatek po připojení banky: nezapsaný se ohlásí ==')
+// Kdo má právo na integrace, ale ne na Finance za celou firmu, banku
+// připojí, zůstatek ale databáze odmítne (42501). Dřív se výsledek zápisu
+// nečetl a zůstatek tiše chyběl.
+await zkus('hláška při chybějícím právu (Fio, synchronizace běží)', () =>
+  hlaskaPrvnihoZustatku({ code: '42501' }, { synchronizaceZapojena: true })
+    === 'Banka je připojená, první zůstatek se ale nezapsal — chybí právo spravovat Finance za celou firmu. Ukáže se po první synchronizaci.')
+await zkus('bez pravidelné synchronizace (Enable Banking) neslibuje „ukáže se po synchronizaci"', () => {
+  const h = hlaskaPrvnihoZustatku({ code: '42501' }, { synchronizaceZapojena: false })
+  return h.includes('chybí právo spravovat Finance') && !h.includes('po první synchronizaci') && h.includes('nesynchronizuje')
+})
+await zkus('jiná chyba než právo: hláška nehádá důvod', () => {
+  const h = hlaskaPrvnihoZustatku({ code: '23514' }, { synchronizaceZapojena: true })
+  return h.startsWith('Banka je připojená, první zůstatek se ale nezapsal.') && !h.includes('chybí právo')
+})
+const pripojitFio = tělo(cist('app/[rozsah]/finance/integrace/banka/akce.ts'), 'export async function pripojitFioUcet')
+const navratEb = cist('app/api/integrace/enablebanking/vratit/route.ts')
+// Zápis zůstatku, jehož výsledek nikdo nepřevezme (holé await …insert).
+const holyZapisZustatku = /(^|[;{}\n])\s*await\s+supabase\s*\.from\(\s*['"]bankovni_zustatky['"]\s*\)\s*\.insert\(/
+const ctenyZapisZustatku = /const\s*\{\s*error(\s*:\s*\w+)?\s*\}\s*=\s*await\s+supabase\s*\.from\(\s*['"]bankovni_zustatky['"]\s*\)\s*\.insert\(/
+await zkus('Fio (pripojitFioUcet): výsledek zápisu zůstatku se čte', () =>
+  pripojitFio !== null && ctenyZapisZustatku.test(pripojitFio) && !holyZapisZustatku.test(pripojitFio))
+await zkus('Fio (pripojitFioUcet): při chybě přesměruje s upozorněním z hlaskaPrvnihoZustatku', () =>
+  pripojitFio !== null && /if\s*\(\s*chybaZustatku\s*\)\s*\{[\s\S]*hlaskaPrvnihoZustatku\(\s*chybaZustatku\s*,\s*\{\s*synchronizaceZapojena\s*:\s*true\s*\}\s*\)[\s\S]*redirect\([^)]*upozorneni=/.test(pripojitFio))
+await zkus('Enable Banking (návrat): výsledek zápisu zůstatku se čte', () =>
+  ctenyZapisZustatku.test(navratEb) && !holyZapisZustatku.test(navratEb))
+await zkus('Enable Banking (návrat): chyba zůstatku → upozornění bez slibu synchronizace', () =>
+  /if\s*\(\s*error\s*&&\s*!chybaZustatku\s*\)\s*chybaZustatku\s*=\s*error/.test(navratEb)
+    && /if\s*\(\s*chybaZustatku\s*\)\s*\{[\s\S]*cil\(\s*\{\s*enablebanking\s*:\s*'pripojeno'\s*,\s*upozorneni\s*:\s*hlaskaPrvnihoZustatku\(\s*chybaZustatku\s*,\s*\{\s*synchronizaceZapojena\s*:\s*false\s*\}/.test(navratEb))
+await zkus('stránka Banka upozornění ukáže', () => {
+  const stranka = cist('app/[rozsah]/finance/integrace/banka/page.tsx')
+  return /upozorneni\?\s*:\s*string/.test(stranka) && /\{\s*upozorneni\s*\?\s*<p[^>]*>\s*\{\s*upozorneni\s*\}\s*<\/p>/.test(stranka)
+})
+await zkus('log chyby zůstatku nenese token ani částku', () =>
+  [pripojitFio ?? '', navratEb].every((t) => {
+    const logy = t.match(/console\.error\([^)]*\)/g) ?? []
+    return logy.some((l) => l.includes('zůstatek')) && logy.every((l) => !/token|castka|sifra|zustatekHaleru/i.test(l))
+  }))
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

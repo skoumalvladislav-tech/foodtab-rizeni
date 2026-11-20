@@ -14,6 +14,7 @@ import { overitPripojeniFio } from '@/lib/integrace-fio'
 import { synchronizovatPodlePoskytovatele } from '@/lib/banka-synchronizace'
 import { ZDROJ_BANKY_API } from '@/lib/banka/konektor'
 import { REGISTR_BANK } from '@/lib/banka/konektory'
+import { hlaskaPrvnihoZustatku } from '@/lib/banka/zapis'
 import { precistTajemstviBanky } from '@/lib/banka/tajemstvi'
 import { enableBankingProvider } from '@/lib/integrace-enablebanking'
 import { zahajitPripojeniSaltEdge, odvolatSouhlasSaltEdge } from '@/lib/integrace-saltedge'
@@ -131,7 +132,10 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Připojení se založilo, ale token se neuložil — zkuste to znovu.')}`)
   }
 
-  await supabase.from('bankovni_zustatky').insert({
+  // Výsledek zápisu se čte: kdo má právo na integrace, ale ne na Finance
+  // za celou firmu, banku připojí, zůstatek ale databáze odmítne. Připojení
+  // platí dál — uživatel se jen dozví, proč zůstatek chybí.
+  const { error: chybaZustatku } = await supabase.from('bankovni_zustatky').insert({
     tenant_id: tenantId,
     platebni_ucet_id: platebniUcetId,
     typ: 'knihovni',
@@ -143,6 +147,12 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
   })
 
   revalidatePath(`/${rozsah}/finance/integrace/banka`)
+  if (chybaZustatku) {
+    // Do logu jen kód a id připojení — žádný token ani částka.
+    console.error('[banka] Fio: první zůstatek se nezapsal', { pripojeni: pripojeni.id, kod: chybaZustatku.code ?? null })
+    const upozorneni = hlaskaPrvnihoZustatku(chybaZustatku, { synchronizaceZapojena: true })
+    redirect(`/${rozsah}/finance/integrace/banka?upozorneni=${encodeURIComponent(upozorneni)}`)
+  }
   redirect(`/${rozsah}/finance/integrace/banka`)
 }
 
