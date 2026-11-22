@@ -370,15 +370,20 @@ select pg_temp.check('B1: stránky stažení zvlášť zapíšou obě platby, ce
 select pg_temp.importovat(:'firma_a', :'u_b2', 'csv_banka', 'krok111-b2-v',
   jsonb_build_array(pg_temp.r('2033-06-02'))) as b2_v \gset
 select pg_temp.stahnout(:'firma_a', :'u_b2', 'krok111-b2-s1', jsonb_build_array(pg_temp.r('2033-06-02', 'krok111-b2-x'))) as b2_s1 \gset
+-- Hned po první stránce (dřív, než druhá stránka nárok využije): bez
+-- zapsaného potvrzení by si druhá stránka zabrala týž řádek výpisu
+-- a druhá platba by se ztratila — tahle kontrola řekne proč.
+select pg_temp.check('B2: první stránka jen POTVRDÍ řádek výpisu (potvrzení s id banky, ne nový pohyb)',
+  :'b2_v'::int = 1 and :'b2_s1'::int = 0
+  and (select count(*) from public.transakce where ucet_id = :'u_b2') = 1
+  and (select count(*) from public.transakce_potvrzeni_banky b
+         join public.transakce t on t.id = b.transakce_id
+        where b.ucet_id = :'u_b2' and b.externi_id = 'krok111-b2-x' and t.zdroj = 'csv_banka') = 1);
 select pg_temp.stahnout(:'firma_a', :'u_b2', 'krok111-b2-s2', jsonb_build_array(pg_temp.r('2033-06-02', 'krok111-b2-y'))) as b2_s2 \gset
 select pg_temp.check('B2: výpis z půlky dne, pak stránky stažení — druhá platba se zapíše (1/0/1, na účtu 2)',
   :'b2_v'::int = 1 and :'b2_s1'::int = 0 and :'b2_s2'::int = 1
   and (select count(*) from public.transakce where ucet_id = :'u_b2') = 2
   and exists (select 1 from public.transakce where ucet_id = :'u_b2' and zdroj = 'banka_api' and externi_id = 'krok111-b2-y'));
-select pg_temp.check('B2: první stránka jen POTVRDÍ řádek výpisu (potvrzení s id banky, ne nový pohyb)',
-  (select count(*) from public.transakce_potvrzeni_banky b
-     join public.transakce t on t.id = b.transakce_id
-    where b.ucet_id = :'u_b2' and b.externi_id = 'krok111-b2-x' and t.zdroj = 'csv_banka') = 1);
 select pg_temp.stahnout(:'firma_a', :'u_b2', 'krok111-b2-s1b', jsonb_build_array(pg_temp.r('2033-06-02', 'krok111-b2-x'))) as b2_s1b \gset
 select pg_temp.stahnout(:'firma_a', :'u_b2', 'krok111-b2-s2b', jsonb_build_array(pg_temp.r('2033-06-02', 'krok111-b2-y'))) as b2_s2b \gset
 select pg_temp.check('B2: opakované stránky stažení nic nepřidají (0/0, na účtu 2, potvrzení 1)',
@@ -598,7 +603,11 @@ select pg_temp.check('… ale zdroj banka_api přihlášený nezapíše (42501, 
     '[{"datum":"2033-02-03","smer":"prijem","castka_haleru":700,"mena":"CZK","protistrana":"x","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-maj-x"}]'),
     '42501', 'synchronizace'));
 -- Řádek výpisu bez potvrzení na u_sv existuje — „stažení" přihlášeného by
--- zapsalo jen potvrzení (žádný nový pohyb).
+-- zapsalo jen potvrzení (žádný nový pohyb). Spoušť zdroje tu nepomůže
+-- (žádný řádek transakce), první linie je jen podmínka v importu; grant
+-- a RLS potvrzení jsou druhá linie — proto se čeká hláška importu.
+-- (Kontrolu výš drží i spoušť zdroje; tahle padne, i když import
+-- podmínku ztratí a potvrzení by někdo omylem dal právo zápisu.)
 select pg_temp.check('… ani stažení, které by jen potvrdilo řádek výpisu (42501, potvrzení zapíše jen služba)',
   pg_temp.spadne_hlaskou(format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
     :'firma_a', :'u_sv', :'d_stary', 'banka_api', jsonb_build_array(pg_temp.r('2033-06-08', 'krok111-maj-potvrzeni'))::text),
