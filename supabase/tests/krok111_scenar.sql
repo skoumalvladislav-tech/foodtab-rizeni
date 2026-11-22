@@ -20,6 +20,7 @@
 --        → stažení, stažení → výpis, opakování nic nepřidá;
 --      * výpis omylem jako pokladní uzávěrka, stornovaný řádek výpisu,
 --        pokladna nebo výpis s vymyšleným id pohyb z banky nezablokují;
+--        pohyb z banky nezablokuje pokladní uzávěrku;
 --      * každé id ze stažení je na účtu právě jednou: řádek `banka_api`,
 --        nebo potvrzení řádku výpisu;
 --      * přihlášený přímo zapíše jen ruční platbu; potvrzení nezapíše;
@@ -460,6 +461,13 @@ select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-v
   jsonb_build_array(pg_temp.r('2033-06-10'))) as pokl_v2 \gset
 select pg_temp.check('… a pokladní uzávěrka se počítá jen proti pokladním: znovu nahraná nic nepřidá (0)',
   :'pokl_v2'::int = 0);
+-- A obráceně: pohyb z banky pokladní uzávěrku se stejným obsahem
+-- nezablokuje — pokladní uzávěrka se počítá jen proti pokladním.
+select pg_temp.stahnout(:'firma_a', :'u_pokl', 'krok111-pokl-s4', jsonb_build_array(pg_temp.r('2033-06-08', 'krok111-pokl-b'))) as pokl_s4 \gset
+select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-v4',
+  jsonb_build_array(pg_temp.r('2033-06-08'))) as pokl_v4 \gset
+select pg_temp.check('pohyb z banky, pak pokladní uzávěrka se stejným obsahem: uzávěrka se zapíše (1/1)',
+  :'pokl_s4'::int = 1 and :'pokl_v4'::int = 1);
 -- Stažení BEZ id se počítá podle obsahu (žádný nárok) — ani tam se
 -- pokladní uzávěrka nepočítá, jinak by pohyb z banky zablokovala.
 select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-v3',
@@ -523,7 +531,7 @@ reset datestyle;
 -- Souběh: import se řadí zámkem na účet, a to SAMOSTATNÝM příkazem před
 -- roztříděním (další příkaz už vidí, co zapsal souběžný import).
 select pg_temp.check('importovat_transakce: zámek účtu samostatným příkazem PŘED roztříděním řádků',
-  (select position(z in d) > 0 and position(z in d) < position('app.import_roztridit(' in d)
+  (select position(z in d) > 0 and position(z in d) < position('from app.import_roztridit' in d)
      from (select pg_get_functiondef('public.importovat_transakce(uuid, uuid, uuid, text, jsonb)'::regprocedure) as d,
                   'perform pg_advisory_xact_lock(hashtextextended(''transakce:'' || p_ucet::text, 0));' as z) x));
 
