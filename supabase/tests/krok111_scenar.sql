@@ -22,11 +22,14 @@
 --        pokladna nebo výpis s vymyšleným id pohyb z banky nezablokují;
 --        pohyb z banky nezablokuje pokladní uzávěrku;
 --      * storno (kontrola 23. 11.): stornovaný řádek výpisu (pokladní
---        uzávěrky) se dalším výpisem (uzávěrkou) nevrátí, stažení z banky
---        ale nezablokuje (s id ani bez id); storno pohybu z banky výpis
---        nezastaví (ROZHODNOUT); storno jen na pohyb téže firmy a účtu —
---        cizí firma storno našeho pohybu nezapíše a synchronizaci
---        nezdvojí;
+--        uzávěrky) se dalším výpisem (uzávěrkou) nevrátí — ani když ho
+--        banka už potvrdila —, stažení z banky ale nezablokuje (s id ani
+--        bez id); stornovaný pohyb ze stažení bez id se dalším stažením
+--        bez id nevrátí (druhou stejnou platbu doplní); storno pohybu
+--        z banky výpis nezastaví (ROZHODNOUT) a jeho id zůstane jednou;
+--        stornovaný potvrzený řádek výpisu stažení bez id jednou vrátí
+--        (ROZHODNOUT); storno jen na pohyb téže firmy a účtu — cizí firma
+--        storno našeho pohybu nezapíše a synchronizaci nezdvojí;
 --      * každé id ze stažení je na účtu právě jednou: řádek `banka_api`,
 --        nebo potvrzení řádku výpisu;
 --      * přihlášený přímo zapíše jen ruční platbu; potvrzení nezapíše;
@@ -246,6 +249,10 @@ insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
 values (:'firma_a', null, 'Krok111 storno a další výpis', 'banka') returning id as u_storno2 \gset
 insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
 values (:'firma_a', null, 'Krok111 cizí storno', 'banka') returning id as u_cizi_storno \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 storno potvrzeného', 'banka') returning id as u_storno3 \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 storno stažení bez id', 'banka') returning id as u_stbez \gset
 
 
 \echo ''
@@ -573,8 +580,82 @@ select pg_temp.importovat(:'firma_a', :'u_storno', 'csv_banka', 'krok111-storno-
   jsonb_build_array(pg_temp.r('2033-06-20'))) as stb_v \gset
 select pg_temp.stahnout(:'firma_a', :'u_storno', 'krok111-storno-s6',
   jsonb_build_array(pg_temp.r('2033-06-20', 'krok111-storno-b'))) as stb_s2 \gset
-select pg_temp.check('stornovaný pohyb z banky, pak výpis se stejným obsahem: řádek výpisu se zapíše, opakované stažení nic (1/1/0)',
-  :'stb_s'::int = 1 and :'stb_v'::int = 1 and :'stb_s2'::int = 0);
+-- „Opakované stažení nic" se nedá měřit jen počtem nových: potvrzení se do
+-- něj nepočítá. Kdyby stažení id stornovaného pohybu nepoznalo, nárokovalo
+-- by si právě zapsaný řádek výpisu a id by bylo na účtu dvakrát (kontrola
+-- 23. 11.) — proto i id jednou a žádné potvrzení s ním.
+select pg_temp.check('stornovaný pohyb z banky, pak výpis se stejným obsahem: řádek výpisu se zapíše, opakované stažení nic (1/1/0, id jednou, bez potvrzení)',
+  :'stb_s'::int = 1 and :'stb_v'::int = 1 and :'stb_s2'::int = 0
+  and (select count(*) from public.transakce
+        where ucet_id = :'u_storno' and zdroj = 'banka_api' and externi_id = 'krok111-storno-b') = 1
+  and (select count(*) from public.transakce_potvrzeni_banky
+        where ucet_id = :'u_storno' and externi_id = 'krok111-storno-b') = 0);
+
+-- Storno pohybu ze stažení BEZ id drží proti dalšímu stažení bez id
+-- (kontrola 23. 11.; ROZHODNOUT v migraci). Dřív se stornovaný pohyb
+-- vrátil s každým stažením bez id, které ten den pokrývá. Storno ale
+-- počítání nemění: celodenní stažení se dvěma stejnými platbami doplní
+-- druhou.
+select pg_temp.stahnout(:'firma_a', :'u_stbez', 'krok111-stbez-1',
+  jsonb_build_array(pg_temp.r('2033-06-24', null, 500, 'Beta'))) as stbez_1 \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
+select :'firma_a', :'u_stbez', 'vydaj', 500, '2033-06-24', 'rucni', t.id
+  from public.transakce t where t.ucet_id = :'u_stbez' and t.zdroj = 'banka_api';
+select pg_temp.stahnout(:'firma_a', :'u_stbez', 'krok111-stbez-2',
+  jsonb_build_array(pg_temp.r('2033-06-24', null, 500, 'Beta'))) as stbez_2 \gset
+select pg_temp.check('storno pohybu ze stažení bez id, pak totéž stažení bez id: pohyb se nevrátí (1/0, pohyb z banky jeden a stornovaný)',
+  :'stbez_1'::int = 1 and :'stbez_2'::int = 0
+  and (select count(*) from public.transakce where ucet_id = :'u_stbez' and zdroj = 'banka_api') = 1
+  and (select count(*) from public.transakce s
+         join public.transakce t on t.id = s.storno_of
+        where s.ucet_id = :'u_stbez' and t.zdroj = 'banka_api') = 1);
+select pg_temp.stahnout(:'firma_a', :'u_stbez', 'krok111-stbez-3',
+  jsonb_build_array(pg_temp.r('2033-06-24', null, 500, 'Beta'), pg_temp.r('2033-06-24', null, 500, 'Beta'))) as stbez_3 \gset
+select pg_temp.check('… stažení bez id se dvěma stejnými platbami pak doplní právě druhou (1, pohybů z banky 2)',
+  :'stbez_3'::int = 1
+  and (select count(*) from public.transakce where ucet_id = :'u_stbez' and zdroj = 'banka_api') = 2);
+
+-- Storno řádku výpisu, který banka už POTVRDILA (kontrola 23. 11.): výpis,
+-- stažení s id ho potvrdí, majitelka ho pak stornuje (dvojice s ruční
+-- platbou), přijde překrývající se výpis. Stornovaný potvrzený řádek drží
+-- místo proti výpisu stejně jako nepotvrzený. (Kontrola „každé potvrzení
+-- ukazuje na nestornovaný řádek výpisu" níž tohle id proto vynechává.)
+select pg_temp.importovat(:'firma_a', :'u_storno3', 'csv_banka', 'krok111-sp-v1',
+  jsonb_build_array(pg_temp.r('2033-06-22'))) as sp_v1 \gset
+select pg_temp.stahnout(:'firma_a', :'u_storno3', 'krok111-sp-s1',
+  jsonb_build_array(pg_temp.r('2033-06-22', 'krok111-sp-x'))) as sp_s1 \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
+select :'firma_a', :'u_storno3', 'vydaj', 500, '2033-06-22', 'rucni', t.id
+  from public.transakce t
+  join public.transakce_potvrzeni_banky b on b.transakce_id = t.id
+ where t.ucet_id = :'u_storno3' and t.zdroj = 'csv_banka' and b.externi_id = 'krok111-sp-x';
+select pg_temp.importovat(:'firma_a', :'u_storno3', 'csv_banka', 'krok111-sp-v2',
+  jsonb_build_array(pg_temp.r('2033-06-22'), pg_temp.r('2033-06-23'))) as sp_v2 \gset
+select pg_temp.check('storno řádku výpisu potvrzeného bankou, pak překrývající se výpis: nevrátí se, zapíše se jen nový den (1/0/1, řádků výpisu 22. 6. jeden)',
+  :'sp_v1'::int = 1 and :'sp_s1'::int = 0 and :'sp_v2'::int = 1
+  and (select count(*) from public.transakce s
+         join public.transakce_potvrzeni_banky b on b.transakce_id = s.storno_of
+        where s.ucet_id = :'u_storno3' and b.externi_id = 'krok111-sp-x') = 1
+  and (select count(*) from public.transakce
+        where ucet_id = :'u_storno3' and zdroj = 'csv_banka' and datum = '2033-06-22') = 1);
+select pg_temp.stahnout(:'firma_a', :'u_storno3', 'krok111-sp-s2',
+  jsonb_build_array(pg_temp.r('2033-06-22', 'krok111-sp-x'))) as sp_s2 \gset
+select pg_temp.check('… totéž id ze stažení znovu nic nezapíše ani nepotvrdí (0, pohyb z banky žádný, potvrzení jedno)',
+  :'sp_s2'::int = 0
+  and (select count(*) from public.transakce where ucet_id = :'u_storno3' and zdroj = 'banka_api') = 0
+  and (select count(*) from public.transakce_potvrzeni_banky where ucet_id = :'u_storno3') = 1);
+-- ROZHODNOUT (migrace, hlavička): stornovaný potvrzený řádek je pořád
+-- řádek výpisu — proti stažení BEZ id místo nedrží. Stažení bez id ho
+-- jednou vrátí jako pohyb z banky, další už nic. Dnes nedosažitelné
+-- (žádný konektor nedává řádek bez id).
+select pg_temp.stahnout(:'firma_a', :'u_storno3', 'krok111-sp-s3',
+  jsonb_build_array(pg_temp.r('2033-06-22'))) as sp_s3 \gset
+select pg_temp.stahnout(:'firma_a', :'u_storno3', 'krok111-sp-s4',
+  jsonb_build_array(pg_temp.r('2033-06-22'))) as sp_s4 \gset
+select pg_temp.check('stornovaný potvrzený řádek výpisu stažení bez id jednou vrátí jako pohyb z banky, podruhé nic (1/0, ROZHODNOUT)',
+  :'sp_s3'::int = 1 and :'sp_s4'::int = 0
+  and (select count(*) from public.transakce
+        where ucet_id = :'u_storno3' and zdroj = 'banka_api' and datum = '2033-06-22') = 1);
 
 -- Řádek výpisu, jehož storno zkusí zapsat majitel cizí firmy (oddíl 4);
 -- stažení téhož pohybu až za oddílem 4.
@@ -807,6 +888,10 @@ select pg_temp.check('žádné id ze stažení se neztratí ani nezdvojí: každ
              where t.ucet_id = s.ucet_id and t.zdroj = 'banka_api' and t.externi_id = s.externi_id)
          + (select count(*) from public.transakce_potvrzeni_banky b
              where b.ucet_id = s.ucet_id and b.externi_id = s.externi_id) <> 1));
+-- Storno potvrzeného řádku databáze nebrání (majitelka ho stornuje, když
+-- je dvojicí s ruční platbou) — „nestornovaný" platí pro řádek v okamžiku
+-- potvrzení. Jediné potvrzení, jehož řádek scénář stornoval AŽ PO
+-- potvrzení, je krok111-sp-x (oddíl 2b); to se tu vynechává.
 select pg_temp.check('každé potvrzení ukazuje na nestornovaný řádek výpisu (csv_banka) téhož účtu',
   (select count(*) from public.transakce_potvrzeni_banky where tenant_id = :'firma_a') > 0
   and not exists (
@@ -814,7 +899,8 @@ select pg_temp.check('každé potvrzení ukazuje na nestornovaný řádek výpis
       join public.transakce t on t.id = b.transakce_id
      where b.tenant_id = :'firma_a'
        and (t.zdroj <> 'csv_banka' or t.ucet_id <> b.ucet_id
-            or exists (select 1 from public.transakce s where s.storno_of = t.id))));
+            or (b.externi_id <> 'krok111-sp-x'
+                and exists (select 1 from public.transakce s where s.storno_of = t.id)))));
 
 
 \echo ''

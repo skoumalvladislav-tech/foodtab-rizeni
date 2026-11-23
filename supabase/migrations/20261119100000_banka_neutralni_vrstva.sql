@@ -86,12 +86,16 @@
 --     potvrdila; jinak se zapíše jako nový pohyb.
 --   * STORNO (oprava pohybu, `storno_of`) ukazuje vždy na pohyb téže
 --     firmy a téhož účtu (složený cizí klíč `transakce_storno_tez_ucet`).
---     Stornovaný řádek výpisu dál DRŽÍ MÍSTO svého klíče proti dalším
---     výpisům (a stornovaná pokladní uzávěrka proti uzávěrkám) — dvojice,
---     kterou člověk stornem vyřešil, se s dalším překrývajícím se výpisem
---     nevrátí. Proti stažení z banky stornovaný řádek místo nedrží: nedá
---     se nárokovat a stažení bez id se proti němu nepočítá — pohyb z banky
---     se kvůli stornovanému řádku nezahodí.
+--     Stornovaný řádek dál DRŽÍ MÍSTO svého klíče proti dalším importům
+--     TÉHOŽ zdroje: řádek výpisu proti výpisům, pokladní uzávěrka proti
+--     uzávěrkám, pohyb z banky proti stažení bez id (stažení s id ho
+--     pozná podle id) — dvojice, kterou člověk stornem vyřešil, se
+--     s dalším překrývajícím se importem nevrátí. Storno tím počítání
+--     téhož zdroje nemění: co by import bez storna nezapsal, nezapíše ani
+--     po něm. Proti JINÉMU zdroji stornovaný řádek místo nedrží:
+--     stornovaný řádek výpisu stažení z banky nezablokuje (nedá se
+--     nárokovat a stažení bez id se proti němu nepočítá) — pohyb z banky
+--     se kvůli stornovanému řádku výpisu nezahodí.
 --   * Výsledek pro každý klíč: řádků = víc z (výpisů, stažených), a každé
 --     id ze stažení je buď řádek `banka_api`, nebo potvrzení — žádné se
 --     neztratí, ani když banka stahuje po stránkách nebo okno začíná
@@ -101,11 +105,25 @@
 --     je). Banky exportují po celých dnech; s napojenou bankou ji
 --     doplní stažení (má vlastní id). Totéž po stornu: stornovaný řádek
 --     výpisu drží místo, takže výpis se stejnou platbou podruhé ji
---     nepřidá (doplní ji jen stažení z banky).
+--     nepřidá (doplní ji jen stažení z banky). Totéž platí pro stažení
+--     BEZ id, jehož okno začíná uprostřed dne (se stornem i bez něj) —
+--     dnes žádné: všechny konektory id dávají, řádek bez id zahodí.
 --   * Mez (ROZHODNOUT): storno pohybu z BANKY (`banka_api`) další výpis
 --     se stejným obsahem nezastaví — řádek výpisu se zapíše (viditelná
---     dvojice raději než chybějící platba). Opakované stažení téhož id
---     ho nezapíše (id zná).
+--     dvojice raději než chybějící platba). Další stažení ho nezapíše:
+--     s id ho pozná podle id, bez id proti němu stornovaný pohyb z banky
+--     drží místo jako u výpisu (kontrola kroku 1, 23. 11.: jinak by se
+--     vracel s každým stažením bez id, které ten den pokrývá). Druhá
+--     možnost (stornovaný pohyb z banky proti stažení bez id místo
+--     nedrží) by storno nenechala vydržet; navíc by zachránila jen druhou
+--     stejnou platbu v okně od poledne, kterou stažení bez id bez storna
+--     ztratí stejně (mez výš).
+--   * Mez (ROZHODNOUT): stornovaný řádek výpisu, který banka už potvrdila
+--     (potvrzení s id od banky), je pořád řádek výpisu — proti stažení
+--     BEZ id místo nedrží. Stažení bez id ho jednou zapíše znovu jako
+--     pohyb z banky (storno toho pak už drží); stažení s id ne (id zná
+--     z potvrzení). Dnes nedosažitelné: potvrzení vzniká jen ze stažení
+--     s id a žádný konektor řádek bez id nedává.
 --   * Mez (ROZHODNOUT): poskytovatel, který nedává VS ani protiúčet
 --     (Salt Edge, Enable Banking — lib/integrace-saltedge.ts,
 --     lib/integrace-enablebanking.ts), má jiný obsahový klíč než výpis
@@ -671,11 +689,12 @@ create trigger trg_audit_transakce_potvrzeni_banky
   Důvěryhodná sada = pohyby účtu z importu (mají dávku), samy nejsou
   storno; pro pokladní uzávěrku jen pokladní uzávěrky, jinak jen stažení
   z banky a výpisy. Ruční zápis a pokladna nikdy. Místo drží nestornované
-  řádky sady; u výpisu a pokladní uzávěrky i stornované řádky TÉHOŽ
-  zdroje (storno drží proti dalšímu výpisu). U stažení z banky stornovaný
-  řádek místo nedrží a nárokovat se nedá — pohyb z banky se kvůli němu
-  nezahodí. Storno je vždy na témže účtu (transakce_storno_tez_ucet),
-  firma storna se proto znovu nefiltruje.
+  řádky sady a stornované řádky TÉHOŽ zdroje (storno drží proti dalšímu
+  výpisu, uzávěrce, stažení bez id; stažení s id se řídí id, ne místem).
+  Stornovaný řádek JINÉHO zdroje místo nedrží a nárokovat se nedá — pohyb
+  z banky se kvůli stornovanému řádku výpisu nezahodí. Storno je vždy na
+  témže účtu (transakce_storno_tez_ucet), firma storna se proto znovu
+  nefiltruje.
 
   SECURITY INVOKER: u přihlášeného čte pod RLS (importovat_transakce proto
   pustí jen na účet, jehož platby vidí). Jen čte — zapisuje volající.
@@ -743,14 +762,18 @@ as $$
        and case when p_zdroj = 'csv_pokladna' then t.zdroj = 'csv_pokladna'
                 else t.zdroj in ('banka_api', 'csv_banka') end
   ),
-  -- Kolik míst klíče účet drží. Stornovaný řádek výpisu (pokladní
-  -- uzávěrky) drží místo proti dalšímu výpisu (uzávěrce) — jinak by se
-  -- s každým překrývajícím se výpisem vrátil (kontrola kroku 1, 23. 11.).
+  -- Kolik míst klíče účet drží. Stornovaný řádek drží místo proti dalšímu
+  -- importu TÉHOŽ zdroje (výpis proti výpisu, uzávěrka proti uzávěrce,
+  -- pohyb z banky proti stažení bez id) — jinak by se s každým
+  -- překrývajícím se importem vrátil (kontrola kroku 1, 23. 11.).
+  -- ROZHODNOUT (hlavička, meze storna): stornovaný pohyb z banky proti
+  -- stažení bez id místo drží; stornovaný řádek výpisu proti stažení ne,
+  -- ani když ho banka potvrdila.
   drzi_misto as (
     select a.otisk
       from sada a
      where not a.stornovany
-        or (p_zdroj in ('csv_banka', 'csv_pokladna') and a.zdroj = p_zdroj)
+        or a.zdroj = p_zdroj
   ),
   pocitane as (
     select s.* from s_id s
