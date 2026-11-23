@@ -2445,15 +2445,19 @@ od 25. 6. 2025; automatické párování sahá 180 dní zpět).
 
 ## 120. Táž platba z výpisu i z napojení banky
 
-**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1, po kontrole).
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1, po kontrole). **Přepsáno 23. 11. 2026:** po dalších
+kontrolách se změnilo, jak se táž platba pozná. Původní text o „přeházeném pořadí“ už neplatí.
 
-- **Teď:** pohyb z nahraného výpisu a tentýž pohyb stažený přes napojení banky se navzájem poznají a zapíšou
-  se jen jednou. Dvě opravdu stejné platby téhož dne (stejná částka, protistrana, VS) se zapíšou obě.
-- **Kde to nestačí:** když banka mezi dvěma staženími přehází pořadí dvou úplně stejných plateb téhož dne
-  a potom se nahraje výpis téhož dne, druhá z nich se zapíše podruhé. Zvolil jsem viditelnou dvojici (dá se
-  stornovat) místo tiše zahozené platby.
-- **Když to má být jinak:** výpis by místo toho zapisoval jen rozdíl v počtu stejných plateb. Pak by se ale
-  ztratila opravdová další stejná platba, kterou banka ještě neposlala.
+- **Teď:** pohyb z nahraného výpisu a tentýž pohyb stažený přes napojení banky se poznají podle obsahu:
+  účet, den, směr, částka, měna, VS, číslo protiúčtu a protistrana. Na pořadí nezáleží. Dvě opravdu stejné
+  platby téhož dne se zapíšou obě. Každý pohyb, který pošle banka, se buď zapíše, nebo spáruje s řádkem
+  výpisu, takže se žádný neztratí.
+- **Kde to nestačí:** výpis jen z části dne, ve kterém je jen druhá ze dvou stejných plateb, ji nepřidá,
+  protože stejná platba už na účtu je. Banky ale exportují výpisy po celých dnech a u napojené banky ji
+  doplní stažení, které má od banky vlastní číslo pohybu.
+- **Když to má být jinak:** výpis by zapisoval každý řádek bez ohledu na to, co už na účtu je. Pak by ale
+  každý překrývající se výpis zapsal platby znovu.
+- Na stejné téma navazují otázky 124 (výpis a napojení píšou údaje jinak) a 125 (storno).
 
 ## 121. Co vidí pobočka u zakázek a párování plateb
 
@@ -2485,3 +2489,62 @@ od 25. 6. 2025; automatické párování sahá 180 dní zpět).
   VS, by se vzaly jako jedna. Je to krajně nepravděpodobné.
 - **Když to má být jinak:** brát VS doslova a smířit se s tím, že výpis uložený v Excelu vedle výpisu
   z banky zapíše platby znovu.
+
+## 124. Výpis a napojení banky píšou tutéž platbu jinak
+
+**Vzniklo:** 22.–23. 11. 2026 (Finance Fáze 0, krok 1, kontroly).
+
+- **Teď:** stažení z banky převezme řádek z nahraného výpisu jen tehdy, když sedí celý obsah (otázka 120).
+  Číslu pohybu ze souboru CSV nevěřím. Soubor jde ručně upravit a podvržený řádek by si pak mohl zabrat
+  skutečnou platbu z banky.
+- **Kde to nestačí:**
+  - Když výpis a napojení téže banky píšou protistranu nebo poznámku jinak (třeba „ALFA S.R.O.“
+    a „Alfa s.r.o.“), bude platba na účtu dvakrát. Dvojice je vidět a dá se stornovat.
+  - Salt Edge a Enable Banking neposílají VS ani číslo protiúčtu vůbec. U nich se výpis se stažením
+    nepotká nikdy a každý den, který je ve výpisu i ve stažení, bude zapsaný dvakrát. Dnes na to nic
+    neupozorní. Dnes to ale ani nenastane: nové připojení přes Salt Edge se nenabízí a Enable Banking
+    noční stahování nestahuje (otázka 116). V kódu je to označené ROZHODNOUT.
+- **Co navrhuji:** po prvních ostrých datech z Fio nebo KB porovnat, čím se výpis a napojení liší, a podle
+  toho rozpoznávání zúžit, třeba bez jména protistrany.
+- **Když to má být jinak:**
+  - věřit číslu pohybu u výpisu, který nahrál správce Financí;
+  - u Salt Edge a Enable Banking brát chybějící VS a protiúčet jako „neznámý“. Pozor, pak se můžou dvě
+    různé platby se stejnou částkou a protistranou vzít jako jedna;
+  - nebo aspoň ukazovat možné dvojice i bez shody VS.
+
+## 125. Storno a další nahrání výpisu nebo stažení z banky
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 1, kontroly).
+
+- **Teď:** storno (opravný řádek, který ruší pohyb) drží. Stornovaný pohyb se s dalším výpisem, pokladní
+  uzávěrkou ani stažením téhož druhu nevrátí. Storno smí mířit jen na pohyb téže firmy a téhož účtu, jinak
+  ho databáze odmítne. Appka dnes storno nenabízí, jde zapsat jen přímo do databáze.
+- **Tři meze, které jsem zvolil (v kódu ROZHODNOUT):**
+  1. Když stornujete pohyb stažený z banky a potom nahrajete výpis se stejnou platbou, řádek z výpisu se
+     zapíše. Zvolil jsem viditelnou dvojici (dá se znovu stornovat) místo tiše zahozené platby.
+  2. Stornovaný pohyb z banky drží místo i proti stažení, u kterého banka nepošle číslo pohybu. Jinak by
+     se vracel s každým takovým stažením. Dnes to nenastane, všechny napojené banky číslo pohybu posílají.
+  3. Stornovaný řádek výpisu, který banka už potvrdila, vrátí jednou stažení bez čísla pohybu. Dnes to
+     nenastane ze stejného důvodu jako bod 2.
+- **Když to má být jinak:** u bodu 1 by storno pohybu z banky zablokovalo i výpis. Hrozilo by pak, že se
+  ztratí opravdová další stejná platba. U bodů 2 a 3 jde o jednu podmínku.
+
+## 126. Služba smí mazat pět starších tabulek
+
+**Vzniklo:** 23. 11. 2026 (kontrola kroku 1 Fáze 0, závažnost střední). **Je to dřívější stav, mimo
+krok 1. Nic jsem na něm neměnil.**
+
+- **Teď:** serverový klíč služby smí mazat a vyprázdnit pět tabulek, do kterých se má jen přidávat:
+  - kniha plateb (pohyby na účtech),
+  - zůstatky z banky,
+  - auditní záznam,
+  - mzdové sazby,
+  - nákupní ceny surovin.
+
+  Je to výchozí nastavení Supabase, které se u těchto tabulek nikdy neodebralo. U plateb faktur a u nové
+  tabulky potvrzení z banky odebrané je. Appka tyto tabulky nikde nemaže. Kdo by ale klíč služby získal,
+  mohl by smazat pohyb z knihy plateb (i s jeho spárováním s fakturou), a audit by to nezachytil.
+- **Co navrhuji:** samostatnou malou migrací službě mazání u těch pěti tabulek odebrat a vyřadit je ze
+  seznamu výjimek v testu oprávnění (`scripts/provoz-granty.test.mjs`). Udělat to jako samostatný krok mimo
+  Fázi 0?
+- **Když to zůstane:** dnes nic nehoří, klíč služby je jen na serveru.
