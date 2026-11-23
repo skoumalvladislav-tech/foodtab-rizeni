@@ -462,8 +462,18 @@ console.log('\n== Stav faktury, jisté shody a návrhy jdou přes databázi ==')
     !STAVY_RUCNIHO_ZADANI.includes('Uhrazeno') && !STAVY_RUCNIHO_ZADANI.includes('Částečně uhrazeno') && STAVY_RUCNIHO_ZADANI.length >= 1)
 
   const platbyAkce = bezKomentaru(cist('app/[rozsah]/finance/platby/akce.ts'))
-  ok('Platby: zrušení párování chce důvod (duvodZFormulare) a pošle ho databázi',
-    /const duvod = duvodZFormulare\(formData\)/.test(platbyAkce) && /p_duvod: duvod,/.test(platbyAkce))
+  {
+    // Databáze důvod zrušení párování nevyžaduje (zrusit_parovani_faktury
+    // ho jen zapíše) — hlídá ho jen tahle akce.
+    const zacatek = platbyAkce.indexOf('export async function zrusitAlokaci(')
+    const zruseni = zacatek < 0 ? '' : platbyAkce.slice(zacatek, platbyAkce.indexOf('\nexport ', zacatek + 10) >>> 0)
+    const kontrola = zruseni.indexOf('if (!duvod) {\n    redirect(')
+    ok('Platby: zrušení párování bez důvodu odmítne dřív, než zavolá databázi, a důvod jí pošle',
+      /const duvod = duvodZFormulare\(formData\)/.test(zruseni) && kontrola > 0
+        && kontrola < zruseni.indexOf("rpc('zrusit_parovani_faktury'") && /p_duvod: duvod,/.test(zruseni))
+    ok('Platby: důvod z formuláře aspoň 5 znaků (po oříznutí mezer)',
+      /function duvodZFormulare\(formData: FormData\): string \| null \{\s*const duvod = String\(formData\.get\('duvod'\) \?\? ''\)\.trim\(\)\.slice\(0, 300\)\s*return duvod\.length >= 5 \? duvod : null/.test(platbyAkce))
+  }
   ok('Platby: potvrzení a odmítnutí návrhu jen podle id návrhu',
     /rpc\('potvrdit_navrh_parovani', \{ p_tenant: tenantId, p_navrh: navrhId \}\)/.test(platbyAkce)
       && /rpc\('odmitnout_navrh_parovani', \{ p_tenant: tenantId, p_navrh: navrhId \}\)/.test(platbyAkce))
