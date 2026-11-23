@@ -48,7 +48,10 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     firma jen z přihlášení, do Faktur přes pristupKFakturamUlohy, zápis
  *     jen funkcí `zapsat_navrhy_parovani` (návrh nic neplatí). Dřív tu byl
  *     `vratitNeuhrazenou` — od Finance Fáze 0, kroku 2 vrací fakturu
- *     databázová funkce pod přihlášeným, bez služby.
+ *     databázová funkce pod přihlášeným, bez služby. Automatické párování
+ *     po importu (`lib/finance-automaticke-parovani.ts`) odtud zmizelo
+ *     taky: jisté shody z nahrané dávky páruje `sparovat_jiste_z_davky`
+ *     pod přihlášeným a databáze sama ověří autora dávky a právo.
  *   * `app/api/prevod-faktur` (`lib/faktury-prevod-sync.ts`) — převod
  *     faktur ze staré databáze do hlavní; za CRON_SECRET, krok vždy
  *     výslovně a zapisující s potvrzením, firma VÝHRADNĚ z
@@ -79,10 +82,6 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     a jen řádek firmy, kterou vrátila databáze. Dřív RPC
  *     `integrace_precti_tajemstvi`, které šifru vydalo i do prohlížeče
  *     (migrace 20261119100000).
- *   * `app/[rozsah]/finance/platby/import/akce.ts` (`potvrditImport` →
- *     `lib/finance-automaticke-parovani.ts`) — automatické párování po
- *     importu výpisu, jen když importující má `finance.manage`
- *     i `faktury.manage`, jen vlastní firma a z CSV jen právě nahraná dávka.
  *   * Jiné platby — `app/[rozsah]/finance/trzby/jine-platby/akce-pos.ts`
  *     a `akce-ai.ts` (a přes ně `lib/pokladna-relace.ts`): otevření relace
  *     pokladny (rozšifrování tokenu), výsledek dohledání v pokladně
