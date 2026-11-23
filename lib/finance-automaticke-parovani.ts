@@ -16,10 +16,12 @@ import 'server-only'
  *   1. načte VŠECHNY faktury a pohyby za 180 dní (jednoznačnost jde
  *      posoudit jen nad celkem; při neúplných datech nedělá nic),
  *   2. spáruje nové jednoznačné shody (vybratAutomatickaParovani; databázová
- *      funkce automaticky_sparovat_platbu to ještě jednou ověří),
- *   3. přepne stav ve Fakturách — jen podle AUTOMATICKÝCH párování (ruční
- *      párování si stav nastavuje samo při potvrzení; dorovnávat je by
- *      otevřelo cestu, jak fakturu „zaplatit" bez práva na Faktury).
+ *      funkce automaticky_sparovat_fakturu celou jistou shodu — VS, částku,
+ *      IBAN, měnu, soupeře — ověří znovu a stav faktury přepočítá sama),
+ *   3. dorovná stav faktur s potvrzeným párováním, kde nesedí — jen přes
+ *      databázi (`prepocitat_stav_faktury`, jediný výpočet stavu podle
+ *      plateb). Přímý zápis „Uhrazeno" appka nedělá (Finance Fáze 0,
+ *      krok 2: stav podle plateb počítá jen databáze).
  *
  * Párování, jehož platbu banka vrátila až PO spárování, úloha sama
  * nezruší — Platby ho ukážou k ruční kontrole (viz jeVracena). Automatické
@@ -35,7 +37,6 @@ import { klientUlohy } from './supabase/uloha.ts'
 import { fakturyFirmy, pristupKFakturamUlohy } from './faktury-pristup.ts'
 import {
   autoTransakceZRadku,
-  cilovyStavPodlePlateb,
   dorovnatStavy,
   SLOUPCE_AUTOMATICKEHO_PAROVANI,
   vybratAutomatickaParovani,
@@ -48,7 +49,7 @@ export type VysledekParovani = {
   stav: 'ok' | 'preskoceno' | 'chyba'
   /** Nově spárováno automaticky. */
   sparovano: number
-  /** Faktury, kterým se ve Fakturách přepnul stav podle automatického párování. */
+  /** Faktury, kterým databáze dorovnala stav podle potvrzených plateb. */
   dorovnano: number
   duvod: string | null
 }
@@ -73,6 +74,7 @@ type RadekFaktury = {
   duplicita: boolean | null
   archivovano: boolean | null
   mena: string | null
+  ucet_dodavatele: string | null
 }
 
 function prazdny(stav: VysledekParovani['stav'], duvod: string | null): VysledekParovani {
@@ -98,24 +100,17 @@ export async function automatickyParovatPlatby(
   tenantId: string,
   /**
    * konecMs: nejpozději do kdy (časový rozpočet volající adresy).
-   * duveryhodneDavky: dávky CSV výpisu, které právě nahrál člověk s právem
-   * spravovat Faktury, s počtem řádků, které import vložil — když jich
-   * v dávce mezitím přibylo (někdo do ní zapsal další), dávce se nevěří.
+   * Dávku výpisu, kterou právě nahrál člověk, sem appka NEPOSÍLÁ (dřív
+   * `duveryhodneDavky`): tu posoudí databáze pod jeho přihlášením
+   * (`sparovat_jiste_z_davky`) — úloha bez přihlášeného výpisu nevěří.
    */
-  moznosti: { konecMs?: number; duveryhodneDavky?: readonly { id: string; pocet: number }[] } = {},
+  moznosti: { konecMs?: number } = {},
 ): Promise<VysledekParovani> {
   const konecMs = moznosti.konecMs ?? Number.POSITIVE_INFINITY
   const supabase = klientUlohy()
   if (!supabase) return prazdny('preskoceno', 'Úloha není nastavená — chybí SUPABASE_SERVICE_ROLE_KEY.')
   const pristup = await pristupKFakturamUlohy(tenantId)
   if (pristup.stav !== 'ok') return prazdny('preskoceno', 'Faktury pro tuhle firmu nejsou otevřené.')
-
-  const soucetAutomatickych = async (fakturaId: string): Promise<number | null> => {
-    const { data, error } = await supabase.from('platby_faktury').select('castka_haleru')
-      .eq('tenant_id', tenantId).eq('faktura', fakturaId).eq('stav', 'potvrzeno').eq('zpusob', 'automaticky')
-    if (error) return null
-    return ((data ?? []) as { castka_haleru: number }[]).reduce((s, r) => s + r.castka_haleru, 0)
-  }
 
   try {
     // --- 1. data ------------------------------------------------------------
@@ -129,18 +124,16 @@ export async function automatickyParovatPlatby(
       .eq('tenant_id', tenantId).in('stav', ['potvrzeno', 'zamitnuto'])
       .order('created_at', { ascending: true }).order('id', { ascending: true }).range(a, b), 'Párování')
     const fakturyRadky = await vsechnyStranky<RadekFaktury>((a, b) => fakturyFirmy(pristup,
-      'id, variabilni_symbol, castka_haleru, datum_vystaveni, duzp, dodavatel, stav, duplicita, archivovano, mena')
+      'id, variabilni_symbol, castka_haleru, datum_vystaveni, duzp, dodavatel, stav, duplicita, archivovano, mena, ucet_dodavatele')
       .order('id', { ascending: true }).range(a, b), 'Faktury')
     if (!transakce || !alokace || !fakturyRadky) {
       return prazdny('preskoceno', 'Dat je víc, než appka umí najednou posoudit — automatické párování se v tomhle běhu vynechalo.')
     }
 
-    const duveryhodneDavky = new Set<string>()
-    for (const d of moznosti.duveryhodneDavky ?? []) {
-      const { count, error } = await supabase.from('transakce').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('import_davka_id', d.id)
-      if (!error && count === d.pocet) duveryhodneDavky.add(d.id)
-    }
+    // Stornované pohyby: storno ukazuje na původní (storno_of). Storno
+    // starší než 180 dní by tu chybělo — databáze to posoudí znovu.
+    const stornovane = new Set<string>()
+    for (const t of transakce) if (t.storno_of) stornovane.add(t.storno_of)
 
     // Řádky výpisu, které potvrdilo stažení z banky (transakce_potvrzeni_banky):
     // stažení je podruhé nezapsalo, platba z banky je tedy ten řádek výpisu.
@@ -156,21 +149,19 @@ export async function automatickyParovatPlatby(
 
     // Protistrana = jméno, jinak číslo účtu (autoTransakceZRadku) — pravidla
     // párování stojí na neprázdné protistraně.
-    const autoTransakce: AutoTransakce[] = transakce.map((t) => autoTransakceZRadku(t, potvrzeneBankou))
+    const autoTransakce: AutoTransakce[] = transakce.map((t) => autoTransakceZRadku(t, potvrzeneBankou, stornovane))
     // I faktury bez přečtené částky (castkaHaleru 0) — pravidlo je počítá jako soupeře.
     const autoFaktury: AutoFaktura[] = fakturyRadky.map((f) => ({
       id: String(f.id), vs: f.variabilni_symbol,
       castkaHaleru: typeof f.castka_haleru === 'number' && Number.isFinite(f.castka_haleru) ? f.castka_haleru : 0,
       dodavatel: f.dodavatel, datum: f.datum_vystaveni ?? f.duzp, stav: f.stav,
       alokovanoHaleru: 0, duplicita: f.duplicita === true,
-      archivovana: f.archivovano === true, mena: f.mena,
+      archivovana: f.archivovano === true, mena: f.mena, ucetDodavatele: f.ucet_dodavatele,
     }))
-    const fakturaPodleId = new Map(autoFaktury.map((f) => [f.id, f]))
 
     // Součty párování.
     const naTransakci = new Map<string, number>()
     const naFakturu = new Map<string, number>()
-    const naFakturuAutomaticky = new Map<string, number>()
     const zamitnute = new Set<string>()
     for (const a of alokace) {
       const faktura = a.faktura ?? a.faktura_id
@@ -180,37 +171,32 @@ export async function automatickyParovatPlatby(
       }
       naTransakci.set(a.transakce_id, (naTransakci.get(a.transakce_id) ?? 0) + a.castka_haleru)
       naFakturu.set(faktura, (naFakturu.get(faktura) ?? 0) + a.castka_haleru)
-      if (a.zpusob === 'automaticky') naFakturuAutomaticky.set(faktura, (naFakturuAutomaticky.get(faktura) ?? 0) + a.castka_haleru)
     }
     for (const t of autoTransakce) t.alokovanoHaleru = naTransakci.get(t.id) ?? 0
     for (const f of autoFaktury) f.alokovanoHaleru = naFakturu.get(f.id) ?? 0
 
     // --- 2. nové jednoznačné shody -------------------------------------------
+    // Databáze stav faktury přepočítá sama (sparovat_jiste_interne).
     let sparovano = 0
-    for (const p of vybratAutomatickaParovani(autoTransakce, autoFaktury, { zamitnute, duveryhodneDavky })) {
+    for (const p of vybratAutomatickaParovani(autoTransakce, autoFaktury, { zamitnute })) {
       if (Date.now() >= konecMs) break
       const { data: zapsano, error } = await supabase.rpc('automaticky_sparovat_fakturu', {
         p_tenant: tenantId, p_transakce: p.transakceId, p_faktura: p.fakturaId, p_castka_haleru: p.castkaHaleru,
       })
       if (error) throw new Error(`Párování: ${error.message}`)
-      if (zapsano === true) {
-        sparovano++
-        naFakturuAutomaticky.set(p.fakturaId, (naFakturuAutomaticky.get(p.fakturaId) ?? 0) + p.castkaHaleru)
-      }
+      if (zapsano === true) sparovano++
     }
 
-    // --- 3. stav ve Fakturách podle automatických párování -------------------
-    // Těsně před zápisem se párování faktury načtou znovu (mezitím ho mohl
-    // někdo zrušit) a zápis je podmíněný stavem, který appka viděla —
-    // souběžnou změnu (třeba odmítnutí) nepřepíše; zkusí se to příště.
+    // --- 3. dorovnání stavu podle potvrzených plateb -------------------------
+    // Kandidáti: faktury s potvrzeným párováním, jejichž stav podle součtu
+    // nesedí (dřív se přepnutí ve Fakturách mohlo nepovést). Co je správně,
+    // rozhodne databáze (prepocitat_stav_faktury → faktura_stav_podle_plateb,
+    // i ruční úhrady a měnu faktury) — appka stav sama nezapisuje.
     let dorovnano = 0
-    for (const z of dorovnatStavy(autoFaktury.filter((f) => !f.archivovana), naFakturuAutomaticky)) {
+    for (const z of dorovnatStavy(autoFaktury.filter((f) => !f.archivovana), naFakturu)) {
       if (Date.now() >= konecMs) break
-      const soucet = await soucetAutomatickych(z.fakturaId)
-      if (soucet === null || cilovyStavPodlePlateb(soucet, fakturaPodleId.get(z.fakturaId)?.castkaHaleru ?? 0) !== z.stav) continue
-      const { data, error } = await supabase.from('faktury').update({ stav: z.stav })
-        .eq('tenant_id', tenantId).eq('id', z.fakturaId).eq('stav', z.puvodni).select('id')
-      if (!error && (data ?? []).length > 0) dorovnano++
+      const { data, error } = await supabase.rpc('prepocitat_stav_faktury', { p_tenant: tenantId, p_faktura: z.fakturaId })
+      if (!error && typeof data === 'string' && data !== z.puvodni) dorovnano++
     }
 
     return { stav: 'ok', sparovano, dorovnano, duvod: null }

@@ -48,8 +48,14 @@ export const STAV_KE_SCHVALENI = 'Ke schválení'
 /**
  * Stavy a měny, které smí mít RUČNĚ zadaná faktura (Faktury → Nová).
  * Akce je ověřuje na serveru — formulář jde poslat i podvržený.
+ *
+ * Bez „Uhrazeno" a „Částečně uhrazeno" (Finance Fáze 0, krok 2):
+ * zaplacenou fakturu udělá jen párování s platbou nebo ruční úhrada
+ * s důvodem — databáze založení rovnou zaplacené faktury odmítne
+ * (spoušť trg_faktury_hlida_uhradu). Zaplaceno na místě = založit
+ * a pak „Označit jako uhrazenou" s důvodem.
  */
-export const STAVY_RUCNIHO_ZADANI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno', 'Uhrazeno']
+export const STAVY_RUCNIHO_ZADANI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno']
 export const MENY_RUCNIHO_ZADANI: readonly string[] = ['CZK', 'EUR', 'USD']
 export const STAV_ODMITNUTO = 'Odmítnuto'
 

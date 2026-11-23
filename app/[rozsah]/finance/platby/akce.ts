@@ -231,6 +231,24 @@ function fakturyZavrene(pristup: Parameters<typeof hlaskaBrany>[0]): string {
 
 const BEZ_FAKTUR = 'Párovat s fakturami (a rušit párování) smí ten, kdo má právo „Vidět přijaté faktury“ — mění stav faktury.'
 
+/**
+ * Hláška databáze pro člověka, nebo obecná věta. Funkce párování
+ * (migrace 20261120100000) hlásí česky a bez id — kód 23514/42501
+ * s vlastní větou se ukáže; technická hláška omezení („violates…")
+ * ne.
+ */
+function hlaskaProLidi(error: { code?: string; message: string }, zalozni: string): string {
+  const vlastni = (error.code === '23514' || error.code === '42501' || error.code === 'P0001')
+    && !/violates|relation|constraint|function|column/i.test(error.message)
+  return vlastni ? error.message : zalozni
+}
+
+/** Důvod (zrušení, ruční úhrada): aspoň 5 znaků, nejvýš 300. */
+function duvodZFormulare(formData: FormData): string | null {
+  const duvod = String(formData.get('duvod') ?? '').trim().slice(0, 300)
+  return duvod.length >= 5 ? duvod : null
+}
+
 /** Odmítnutí párování mimo celou firmu — viz `pripravitFiremni`. */
 const PAROVANI_JEN_FIRMA =
   'Párování plateb s fakturami smí jen ten, kdo má právo „Správa financí“ za celou firmu — mění stav faktury celé firmy.'
@@ -303,9 +321,9 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
   })
 
   if (error) {
-    // Hlášky funkce jsou psané pro lidi (česky, bez id) — ukázat je.
-    const zprava = /přesahuje|nepatří|oprávnění|Vidět přijaté|otevřené/.test(error.message) ? error.message : 'Párování se nepodařilo uložit.'
-    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(zprava)}`)
+    // Hlášky funkce jsou psané pro lidi (česky, bez id) — ukázat je:
+    // jiná měna, směr platby, storno, neschválená faktura, přesah platby…
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(hlaskaProLidi(error, 'Párování se nepodařilo uložit.'))}`)
   }
 
   const vysledek = (data as { prebytek_haleru: number | null; stav_faktury: string | null }[] | null)?.[0]
@@ -313,17 +331,84 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/finance/platby`)
   revalidatePath(`/${rozsah}/finance/faktury`)
-  if (vysledek && vysledek.stav_faktury === null) {
-    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Platba je spárovaná, ale stav faktury se nezměnil — faktura není v Kč nebo nemá přečtenou částku. Stav nastavte ve Fakturách ručně.')}`)
-  }
   // Přeplatek appka od 7.10.2026 nezakazuje (zadání: „podporuj...
   // přeplatky"), jen o něm nahlas řekne — co se s penězi navíc stane
-  // (jiná faktura, dobropis, vrácení), rozhoduje člověk.
+  // (jiná faktura, dobropis, vrácení), rozhoduje člověk. Stav faktury
+  // přepočítala databáze ve stejné transakci (jiná měna se spárovat nedá).
   redirect(
     prebytekHaleru > 0
       ? `/${rozsah}/finance/platby?prebytek=${prebytekHaleru}`
       : `/${rozsah}/finance/platby`
   )
+}
+
+/* ---------------------------------------------------------------------
+ * Fronta Návrhy párování (Finance Fáze 0, krok 2). Potvrzení i odmítnutí
+ * rozhoduje databáze podle id návrhu — částku, platbu ani fakturu appka
+ * z formuláře nebere. Právo stejné jako ruční párování.
+ * ------------------------------------------------------------------ */
+
+const FRONTA = (rozsah: string) => `/${rozsah}/finance/platby/navrhy`
+
+async function pripravitNavrh(formData: FormData) {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const navrhId = String(formData.get('navrh_id') ?? '')
+  const { supabase, tenantId } = await pripravitFiremni(rozsah, 'finance.manage', PAROVANI_JEN_FIRMA)
+  if ((await zkusPristup(tenantId, 'faktury.read', TENANT_SCOPE_SEGMENT)).stav !== 'ok') {
+    redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent(BEZ_FAKTUR)}`)
+  }
+  if (!VZOR_UUID.test(navrhId)) redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent('Návrh se nenašel.')}`)
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent(fakturyZavrene(pristupFaktury))}`)
+  return { supabase, tenantId, rozsah, navrhId }
+}
+
+export async function potvrditNavrh(formData: FormData): Promise<void> {
+  const { supabase, tenantId, rozsah, navrhId } = await pripravitNavrh(formData)
+  const { data, error } = await supabase.rpc('potvrdit_navrh_parovani', { p_tenant: tenantId, p_navrh: navrhId })
+  if (error) redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent(hlaskaProLidi(error, 'Návrh se nepodařilo potvrdit.'))}`)
+  const vysledek = (data as { prebytek_haleru: number | null }[] | null)?.[0]
+  const prebytekHaleru = Number(vysledek?.prebytek_haleru ?? 0)
+  revalidatePath(`/${rozsah}/finance/platby`)
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  redirect(prebytekHaleru > 0 ? `${FRONTA(rozsah)}?prebytek=${prebytekHaleru}` : `${FRONTA(rozsah)}?potvrzeno=1`)
+}
+
+export async function odmitnoutNavrh(formData: FormData): Promise<void> {
+  const { supabase, tenantId, rozsah, navrhId } = await pripravitNavrh(formData)
+  const { error } = await supabase.rpc('odmitnout_navrh_parovani', { p_tenant: tenantId, p_navrh: navrhId })
+  if (error) redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent(hlaskaProLidi(error, 'Návrh se nepodařilo odmítnout.'))}`)
+  revalidatePath(`/${rozsah}/finance/platby`)
+  redirect(`${FRONTA(rozsah)}?odmitnuto=1`)
+}
+
+/**
+ * Návrh „jiná měna": platba v Kč na fakturu v EUR (a naopak). Spárovat
+ * v haléřích nejde — zapíše se RUČNÍ ÚHRADA v měně faktury s důvodem
+ * a odkazem na platbu (`rucne_uhradit_fakturu` s p_transakce; databáze
+ * ověří, že měny opravdu nesedí, a návrh tím uzavře).
+ */
+export async function uhraditVJineMene(formData: FormData): Promise<void> {
+  const { supabase, tenantId, rozsah, navrhId } = await pripravitNavrh(formData)
+  const castkaHaleru = naHalere(String(formData.get('castka') ?? '').trim())
+  const duvod = duvodZFormulare(formData)
+  if (castkaHaleru === null || castkaHaleru <= 0 || !duvod) {
+    redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent('Vyplňte částku v měně faktury a důvod (aspoň 5 znaků).')}`)
+  }
+  // Platbu a fakturu bere z NÁVRHU (čte ho databáze pod přihlášením), ne z formuláře.
+  const { data: navrh } = await supabase.from('platby_faktury')
+    .select('transakce_id, faktura, duvod, stav').eq('tenant_id', tenantId).eq('id', navrhId).maybeSingle()
+  const n = navrh as { transakce_id: string; faktura: string | null; duvod: string | null; stav: string } | null
+  if (!n || !n.faktura || n.stav !== 'navrzeno' || n.duvod !== 'jina_mena') {
+    redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent('Návrh už není otevřený nebo není v jiné měně.')}`)
+  }
+  const { error } = await supabase.rpc('rucne_uhradit_fakturu', {
+    p_tenant: tenantId, p_faktura: n.faktura, p_castka_haleru: castkaHaleru, p_duvod: duvod, p_transakce: n.transakce_id,
+  })
+  if (error) redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent(hlaskaProLidi(error, 'Úhradu se nepodařilo zapsat.'))}`)
+  revalidatePath(`/${rozsah}/finance/platby`)
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  redirect(`${FRONTA(rozsah)}?potvrzeno=1`)
 }
 
 /**
@@ -341,9 +426,13 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
 export async function zrusitAlokaci(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const alokaceId = String(formData.get('alokace_id') ?? '')
-  const duvod = String(formData.get('duvod') ?? '').trim()
+  // Důvod je povinný (Finance Fáze 0, krok 2) — zůstane v auditu.
+  const duvod = duvodZFormulare(formData)
 
   const { supabase, tenantId } = await pripravitFiremni(rozsah, 'finance.manage', PAROVANI_JEN_FIRMA)
+  if (!duvod) {
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Napište důvod zrušení párování (aspoň 5 znaků).')}`)
+  }
 
   // Právo na Faktury výslovně a PRVNÍ: bez něj by brána (stav převodu čte
   // jen ten, kdo Faktury vidí) vypadala jako „Faktury se stěhují".
@@ -358,12 +447,11 @@ export async function zrusitAlokaci(formData: FormData): Promise<void> {
   const { error } = await supabase.rpc('zrusit_parovani_faktury', {
     p_tenant: tenantId,
     p_alokace: alokaceId,
-    p_duvod: duvod || null,
+    p_duvod: duvod,
   })
 
   if (error) {
-    const zprava = /oprávnění|Vidět přijaté|nepatří|otevřené|není co rušit/.test(error.message) ? error.message : 'Zrušení párování se nepodařilo.'
-    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(zprava)}`)
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(hlaskaProLidi(error, 'Zrušení párování se nepodařilo.'))}`)
   }
 
   revalidatePath(`/${rozsah}/finance/platby`)

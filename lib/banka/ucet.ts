@@ -105,6 +105,19 @@ export function normalizovatUcet(text: string | null | undefined): string {
 }
 
 /**
+ * Účet jako platný IBAN, jinak null — pro JISTOU shodu platby s fakturou
+ * (krok 2): nečitelný účet, účet s chybným kontrolním součtem nebo text
+ * „účet u dodavatele" se nikdy neshodují, ani samy se sebou. Stejné
+ * pravidlo jako `app.normalizovat_ucet` v databázi; že dávají stejný
+ * výsledek, hlídá sdílený seznam PRIKLADY_UCTU (supabase/tests/
+ * krok112_scenar.sql ↔ scripts/finance-parovani.test.mjs).
+ */
+export function ibanZUctu(text: string | null | undefined): string | null {
+  const n = normalizovatUcet(text)
+  return n !== '' && jePlatnyIban(n) ? n : null
+}
+
+/**
  * Protistrana pro lidi a pro pravidla párování: jméno, a když ho banka
  * nedala, číslo účtu protistrany. Do kroku 1 (migrace 20261119100000)
  * stálo číslo účtu přímo v `protistrana`; seznam plateb, export

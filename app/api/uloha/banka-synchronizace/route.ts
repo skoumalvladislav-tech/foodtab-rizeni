@@ -4,6 +4,7 @@ import { tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
 import { REGISTR_BANK } from '@/lib/banka/konektory'
 import { synchronizovatVsechnaPripojeni } from '@/lib/banka/konektor'
 import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
+import { najitNavrhyParovani } from '@/lib/finance-navrhy-parovani'
 import { firmySOtevrenymiFakturami } from '@/lib/faktury-pristup'
 
 /**
@@ -54,24 +55,33 @@ export async function GET(request: Request): Promise<NextResponse> {
   // Fakturami bere z databáze (dřív jediná z FAKTURY_DB_TENANT_ID) — brána
   // uvnitř párování to ověří znovu. Jen když po synchronizaci zbývá čas
   // (maxDuration 60 s); jinak příště.
-  let parovani = null as { stav: string; sparovano: number; dorovnano: number } | null
+  // Po jistých shodách hledá návrhy (Finance Fáze 0, krok 2) do fronty
+  // Návrhy párování — potvrzuje je vždy člověk.
+  let parovani = null as { stav: string; sparovano: number; dorovnano: number; navrzeno: number } | null
   if (Date.now() < zacatek + 40_000) {
     const firmy = await firmySOtevrenymiFakturami()
-    if (firmy === null) parovani = { stav: 'chyba', sparovano: 0, dorovnano: 0 }
+    if (firmy === null) parovani = { stav: 'chyba', sparovano: 0, dorovnano: 0, navrzeno: 0 }
     for (const tenantId of firmy ?? []) {
       if (Date.now() >= zacatek + 50_000) break
       const r = await automatickyParovatPlatby(tenantId, { konecMs: zacatek + 55_000 })
+      const n = Date.now() < zacatek + 52_000
+        ? await najitNavrhyParovani(tenantId, { konecMs: zacatek + 55_000 })
+        : { stav: r.stav, navrzeno: 0 }
+      const stav = r.stav === n.stav ? r.stav : 'smisene'
       parovani = {
-        stav: parovani && parovani.stav !== r.stav ? 'smisene' : r.stav,
+        stav: parovani && parovani.stav !== stav ? 'smisene' : stav,
         sparovano: (parovani?.sparovano ?? 0) + r.sparovano,
         dorovnano: (parovani?.dorovnano ?? 0) + r.dorovnano,
+        navrzeno: (parovani?.navrzeno ?? 0) + n.navrzeno,
       }
     }
   }
 
   return NextResponse.json({
     // Jen čísla a stav — odpověď končí ve veřejném logu GitHub Actions.
-    parovani: parovani ? { stav: parovani.stav, sparovano: parovani.sparovano, dorovnano: parovani.dorovnano } : null,
+    parovani: parovani
+      ? { stav: parovani.stav, sparovano: parovani.sparovano, dorovnano: parovani.dorovnano, navrzeno: parovani.navrzeno }
+      : null,
     zpracovano: vysledky.length,
     ok: vysledky.filter((v) => v.stav === 'ok').length,
     chyby: vysledky.filter((v) => v.stav === 'chyba').length,

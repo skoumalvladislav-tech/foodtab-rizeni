@@ -42,9 +42,13 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     `zapsatNavrhyAkce` → `lib/faktury-prijem-sync.ts`) — příjem faktur
  *     hned / zápis návrhů, až po `integrace.manage` + `faktury.manage`
  *     a dohledání schránky uživatelským klientem s `tenant_id` firmy.
- *   * `app/[rozsah]/finance/faktury/akce.ts` (`vratitNeuhrazenou`) — jen
- *     součet párování JEDNÉ faktury vlastní firmy, po `faktury.manage`
- *     (uživatelský klient by bez práva na Platby viděl nulu).
+ *   * `app/[rozsah]/finance/platby/import/akce.ts` → `lib/finance-navrhy-parovani.ts`
+ *     (`najitNavrhyParovani`) — návrhy párování po importu výpisu, až po
+ *     `finance.manage` za celou firmu a zápisu dávky pod přihlášeným;
+ *     firma jen z přihlášení, do Faktur přes pristupKFakturamUlohy, zápis
+ *     jen funkcí `zapsat_navrhy_parovani` (návrh nic neplatí). Dřív tu byl
+ *     `vratitNeuhrazenou` — od Finance Fáze 0, kroku 2 vrací fakturu
+ *     databázová funkce pod přihlášeným, bez služby.
  *   * `app/api/prevod-faktur` (`lib/faktury-prevod-sync.ts`) — převod
  *     faktur ze staré databáze do hlavní; za CRON_SECRET, krok vždy
  *     výslovně a zapisující s potvrzením, firma VÝHRADNĚ z

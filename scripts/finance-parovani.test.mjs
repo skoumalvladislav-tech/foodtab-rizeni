@@ -4,13 +4,21 @@
  *
  * Pusť `node --experimental-strip-types scripts/finance-parovani.test.mjs`.
  *
- * Nejcennější kontrola tady není „dokonalá shoda dá vysokou jistotu" —
- * to je samozřejmost. Je to že SLABÁ shoda (jen částka, jen podobné
- * jméno) jistotu přes práh NEDOSTANE — jinak by appka náhodnou shodu
- * nabídla jako jistou a někdo by klikl potvrdit bez přečtení.
+ * Finance Fáze 0, krok 2: (1) VS + částka + IBAN dodavatele = jisté,
+ * spáruje se samo; (2) částka + dodavatel + datum v okně = návrh;
+ * (3) jinak nespárováno. Nejcennější kontroly tady nejsou „dokonalá
+ * shoda se spáruje" — to je samozřejmost. Jsou to ty, že bez IBAN, s jinou
+ * nebo prázdnou měnou, se soupeřem nebo se stornem se NIC samo nespáruje,
+ * a že návrh nikdy nepřekročí zbytek platby ani faktury.
  */
 
-const { jistotaShody, navrhnoutParovani, PRAH_NAVRHU, vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, stavPoVraceni, protistranaSedi, normalizovatVs, jeVracena, kandidatiProNavrhy, jeVKorunach, autoTransakceZRadku, platbaZBanky, SLOUPCE_AUTOMATICKEHO_PAROVANI, SLOUPCE_POTVRZENEHO_PAROVANI, SLOUPCE_PRIJMU_PRO_VRACENI, SLOUPCE_NAVRHU_POZORNOSTI, sloupceSeznamuPlateb } = await import('../lib/finance-parovani.ts')
+const {
+  vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, protistranaSedi, normalizovatVs, jeVracena, jeVKorunach,
+  menaNeboCzk, autoTransakceZRadku, platbaZBanky, navrhyParovani, DUVODY_NAVRHU, OKNO_NAVRHU_PRED_VYSTAVENIM,
+  OKNO_NAVRHU_PO_SPLATNOSTI, NEJVIC_NAVRHU_NA_POHYB, SLOUPCE_AUTOMATICKEHO_PAROVANI, SLOUPCE_POTVRZENEHO_PAROVANI,
+  SLOUPCE_PRIJMU_PRO_VRACENI, SLOUPCE_NAVRHU_POZORNOSTI, sloupceSeznamuPlateb,
+} = await import('../lib/finance-parovani.ts')
+const { ibanZUctu } = await import('../lib/banka/ucet.ts')
 const { readFileSync } = await import('node:fs')
 
 let chyb = 0
@@ -18,85 +26,54 @@ const ok = (popis, podminka) => {
   if (!podminka) chyb++
   console.log(`  ${podminka ? 'OK   ' : 'CHYBA'} ${popis}`)
 }
+const zkus = (popis, fn) => {
+  try { ok(popis, fn()) } catch (e) { ok(`${popis} — výjimka: ${e instanceof Error ? e.message : e}`, false) }
+}
+const cist = (cesta) => readFileSync(cesta, 'utf8').split('\r\n').join('\n')
+const bezKomentaru = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
-const TRANSAKCE = {
-  id: 't1',
-  vs: '20260001',
-  castkaHaleru: 500000,
-  protistrana: 'ABC Velkoobchod s.r.o.',
-  datum: '2026-10-05',
+/* --- IBAN: stejné příklady jako databáze ----------------------------------- */
+
+console.log('\n== IBAN: TS (ibanZUctu) = databáze (app.normalizovat_ucet) na sdílených příkladech ==')
+{
+  // Příklady leží JEDNOU, ve scénáři krok112 mezi značkami — databáze je
+  // ověří v PGlite, tady je ověří TS. Když se pravidla rozejdou, spadne jedno.
+  const scenar = cist('supabase/tests/krok112_scenar.sql')
+  const blok = scenar.slice(scenar.indexOf('-- PRIKLADY_UCTU_ZACATEK'), scenar.indexOf('-- PRIKLADY_UCTU_KONEC'))
+  const priklady = [...blok.matchAll(/\(\s*'((?:[^']|'')*)'\s*,\s*(?:'([^']*)'|null)\s*\)/g)]
+    .map((m) => ({ vstup: m[1].replace(/''/g, "'"), iban: m[2] ?? null }))
+  const sIban = priklady.filter((p) => p.iban !== null).length
+  ok(`příklady účtů: aspoň 10, platné i neplatné — naměřeno: ${priklady.length} / s IBAN ${sIban}`,
+    priklady.length >= 10 && sIban >= 3 && priklady.length - sIban >= 3)
+  for (const p of priklady) zkus(`ibanZUctu(${JSON.stringify(p.vstup)}) → ${p.iban ?? 'null'}`, () => ibanZUctu(p.vstup) === p.iban)
+  ok('ibanZUctu(null/undefined) → null', ibanZUctu(null) === null && ibanZUctu(undefined) === null)
 }
 
-console.log('\n== Dokonalá shoda ==')
+/* --- Automatické párování --------------------------------------------------- */
 
-ok('VS + částka + jméno + datum: jistota je 1 (plný strop)',
-  jistotaShody(TRANSAKCE, { id: 'f1', vs: '20260001', castkaHaleru: 500000, dodavatel: 'ABC Velkoobchod s.r.o.', datum: '2026-10-05' }) === 1)
-
-console.log('\n== VS + částka bez shody jména/data NEDOSÁHNE prahu ==')
-
-const jenVsACastka = jistotaShody(TRANSAKCE, { id: 'f2', vs: '20260001', castkaHaleru: 500000, dodavatel: 'Úplně jiná firma', datum: '2026-01-01' })
-ok('VS+částka samy o sobě (0.8) jsou pod prahem 0.9', jenVsACastka < PRAH_NAVRHU)
-ok('ale nejsou nulové — je to částečná shoda', jenVsACastka >= 0.8)
-
-console.log('\n== Jen částka (náhodná shoda čísla) musí zůstat hluboko pod prahem ==')
-
-const jenCastka = jistotaShody(TRANSAKCE, { id: 'f3', vs: '99999999', castkaHaleru: 500000, dodavatel: 'Úplně Jiná Entita', datum: '2020-01-01' })
-ok('jen shodná částka: jistota je nízká (slabá shoda)', jenCastka <= 0.35)
-ok('a rozhodně pod prahem návrhu', jenCastka < PRAH_NAVRHU)
-
-console.log('\n== Jen podobné jméno (bez VS, bez částky) zůstává nízko ==')
-
-const jenJmeno = jistotaShody(TRANSAKCE, { id: 'f4', vs: '11112222', castkaHaleru: 123456, dodavatel: 'ABC Velkoobchod s.r.o.', datum: '2020-05-05' })
-ok('jen podobnost jména: jistota je nízká', jenJmeno <= 0.25)
-
-console.log('\n== VS se nesmí shodovat na prefix/postfix, jen přesně ==')
-
-ok('„20260001" vs „120260001" (navíc číslice) se NESHODUJE — jen částka (0.3), žádný bonus za VS',
-  jistotaShody(TRANSAKCE, { id: 'f5', vs: '120260001', castkaHaleru: 500000, dodavatel: null, datum: null }) === 0.3)
-
-console.log('\n== Blízkost data: klesá s odstupem, ne skokem ==')
-
-const blizko = jistotaShody(TRANSAKCE, { id: 'f6', vs: null, castkaHaleru: 1, dodavatel: null, datum: '2026-10-06' })
-const daleko = jistotaShody(TRANSAKCE, { id: 'f7', vs: null, castkaHaleru: 1, dodavatel: null, datum: '2026-12-06' })
-ok('den po transakci je blíž než o dva měsíce později', blizko > daleko)
-ok('víc než 30 dní odstupu dá nulový příspěvek data', daleko === 0)
-
-console.log('\n== Chybějící údaje na straně faktury (null) nespadnou, jen nepřidají body ==')
-
-ok('faktura bez VS, bez dodavatele, bez data: žádná chyba, nízká jistota',
-  jistotaShody(TRANSAKCE, { id: 'f8', vs: null, castkaHaleru: 500000, dodavatel: null, datum: null }) === 0.3)
-
-console.log('\n== navrhnoutParovani: vybere nejlepší kandidáta, nic pod prahem ==')
-
-const kandidati = [
-  { id: 'slaba', vs: '00000000', castkaHaleru: 1, dodavatel: null, datum: null },
-  { id: 'silna', vs: '20260001', castkaHaleru: 500000, dodavatel: 'ABC Velkoobchod s.r.o.', datum: '2026-10-05' },
-  { id: 'stredni', vs: '20260001', castkaHaleru: 500000, dodavatel: 'Jiná firma', datum: '2020-01-01' },
-]
-
-const navrh = navrhnoutParovani(TRANSAKCE, kandidati)
-ok('vybere tu nejsilnější fakturu, ne první v pořadí', navrh?.fakturaId === 'silna')
-ok('jistota návrhu je nad prahem', (navrh?.jistota ?? 0) >= PRAH_NAVRHU)
-
-const samaSlaba = navrhnoutParovani(TRANSAKCE, [kandidati[0]])
-ok('když je k dispozici jen slabý kandidát, vrátí se null (žádný návrh), ne vynucená shoda', samaSlaba === null)
-
-const prazdnySeznam = navrhnoutParovani(TRANSAKCE, [])
-ok('prázdný seznam faktur dá null, ne spadne', prazdnySeznam === null)
-
-console.log('\n== Automatické párování: jen jednoznačná shoda ==')
+console.log('\n== Automatické párování: jen jistá shoda (VS + částka + IBAN) ==')
+const UCET = 'CZ6508000000192000145399'
 {
-  const t = (id, vs, castka, datum = '2026-10-05', jine = {}) => ({ id, vs, castkaHaleru: castka, protistrana: 'ABC Velkoobchod', datum, alokovanoHaleru: 0, zdroj: 'banka_api', mena: 'CZK', smer: 'vydaj', davkaId: null, ...jine })
-  const f = (id, vs, castka, stav = 'Ke kontrole úhrady', datum = '2026-09-20', jine = {}) => ({ id, vs, castkaHaleru: castka, dodavatel: 'ABC Velkoobchod s.r.o.', datum, stav, alokovanoHaleru: 0, duplicita: false, archivovana: false, mena: 'CZK', ...jine })
+  const t = (id, vs, castka, datum = '2026-10-05', jine = {}) => ({ id, vs, castkaHaleru: castka, protistrana: 'ABC Velkoobchod', protiucet: UCET, datum, alokovanoHaleru: 0, zdroj: 'banka_api', mena: 'CZK', smer: 'vydaj', davkaId: null, ...jine })
+  // Účet dodavatele na faktuře v českém zápisu — po normalizaci tentýž IBAN.
+  const f = (id, vs, castka, stav = 'Ke kontrole úhrady', datum = '2026-09-20', jine = {}) => ({ id, vs, castkaHaleru: castka, dodavatel: 'ABC Velkoobchod s.r.o.', datum, stav, alokovanoHaleru: 0, duplicita: false, archivovana: false, mena: 'CZK', ucetDodavatele: '19-2000145399/0800', ...jine })
   const auto = (tt, ff, moznosti) => vybratAutomatickaParovani(tt, ff, moznosti)
 
   const jasne = auto([t('t1', '2026001', 500000)], [f('f1', '2026001', 500000), f('f2', '2026002', 500000)])
-  ok('stejný VS + přesná částka, jediný kandidát → spáruje se sám', jasne.length === 1 && jasne[0].transakceId === 't1' && jasne[0].fakturaId === 'f1' && jasne[0].castkaHaleru === 500000 && jasne[0].castkaFakturyHaleru === 500000)
+  ok('stejný VS + přesná částka + stejný účet (IBAN ↔ český zápis), jediný kandidát → spáruje se sám', jasne.length === 1 && jasne[0].transakceId === 't1' && jasne[0].fakturaId === 'f1' && jasne[0].castkaHaleru === 500000 && jasne[0].castkaFakturyHaleru === 500000)
+
+  ok('IBAN: platba bez účtu protistrany → nic', auto([t('t1', '1', 100, '2026-10-05', { protiucet: '' })], [f('f1', '1', 100)]).length === 0)
+  ok('IBAN: platba z jiného účtu → nic', auto([t('t1', '1', 100, '2026-10-05', { protiucet: 'DE89370400440532013000' })], [f('f1', '1', 100)]).length === 0)
+  ok('IBAN: faktura bez účtu dodavatele → nic', auto([t('t1', '1', 100)], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { ucetDodavatele: null })]).length === 0)
+  ok('IBAN: stejný NEPLATNÝ účet na obou stranách se neshoduje → nic',
+    auto([t('t1', '1', 100, '2026-10-05', { protiucet: '123456789/0100' })], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { ucetDodavatele: '123456789/0100' })]).length === 0)
+  ok('IBAN: text „účet u dodavatele" na obou stranách → nic',
+    auto([t('t1', '1', 100, '2026-10-05', { protiucet: 'účet u dodavatele' })], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { ucetDodavatele: 'účet u dodavatele' })]).length === 0)
 
   ok('jiná částka (i o haléř) → nic', auto([t('t1', '2026001', 499999)], [f('f1', '2026001', 500000)]).length === 0)
   ok('jen částka bez VS → nic (to je jen návrh)', auto([t('t1', '', 500000)], [f('f1', '', 500000)]).length === 0)
   ok('jiný VS → nic', auto([t('t1', '2026009', 500000)], [f('f1', '2026001', 500000)]).length === 0)
-  ok('VS s nulami navíc („0012345" proti „12345") se sám nespáruje', auto([t('t1', '12345', 100)], [f('f1', '0012345', 100)]).length === 0)
+  ok('VS s nulami navíc („12345" = „0012345") je stejný VS — jako v databázi (app.normalizovat_vs)', auto([t('t1', '12345', 100)], [f('f1', '0012345', 100)]).length === 1)
 
   ok('dvě faktury se stejným VS a částkou → nic (rozhodne člověk)',
     auto([t('t1', '777', 1500000)], [f('leden', '777', 1500000), f('unor', '777', 1500000)]).length === 0)
@@ -138,13 +115,16 @@ console.log('\n== Automatické párování: jen jednoznačná shoda ==')
   ok('platba z banky přes API (banka_api) → smí', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'banka_api' })], [f('f1', '1', 100)]).length === 1)
   ok('staré jméno zdroje (fio_api, bankovni_agregator) už jako platba z banky neprojde', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'fio_api' })], [f('f1', '1', 100)]).length === 0
     && auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'bankovni_agregator' })], [f('f1', '1', 100)]).length === 0)
-  ok('výpis CSV bez důvěryhodné dávky → nic (CSV si může napsat kdokoli)', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd1' })], [f('f1', '1', 100)]).length === 0)
-  ok('výpis CSV z dávky, kterou nahrál správce Faktur → smí', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd1' })], [f('f1', '1', 100)], { duveryhodneDavky: new Set(['d1']) }).length === 1)
-  ok('… ale jen ta dávka', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd2' })], [f('f1', '1', 100)], { duveryhodneDavky: new Set(['d1']) }).length === 0)
+  // Dávku výpisu, kterou právě nahrál člověk, posuzuje jen databáze pod jeho
+  // přihlášením (sparovat_jiste_z_davky) — úloha bez přihlášeného jí nevěří,
+  // ani když jí někdo dávku podstrčí (stará volba duveryhodneDavky).
+  ok('výpis CSV bez potvrzení banky → nic, ani s podstrčenou „důvěryhodnou" dávkou',
+    auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd1' })], [f('f1', '1', 100)]).length === 0
+      && auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd1' })], [f('f1', '1', 100)], { duveryhodneDavky: new Set(['d1']) }).length === 0)
   // Výpis nahraný dřív, potom stažení z banky: stažení se podruhé nezapíše
   // a jen potvrdí řádek výpisu (transakce_potvrzeni_banky). Ten řádek je
   // pak ta platba z banky — i v dalších bězích, ne jen při nahrání výpisu.
-  ok('výpis CSV potvrzený stažením z banky → smí (i bez důvěryhodné dávky)',
+  ok('výpis CSV potvrzený stažením z banky → smí',
     auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd-stara', potvrzenoBankou: true })], [f('f1', '1', 100)]).length === 1)
   ok('potvrzení banky u ručního zápisu nebo pokladny nic nemění → nic',
     ['rucni', 'csv_pokladna', 'pos_adapter'].every((zdroj) =>
@@ -156,20 +136,27 @@ console.log('\n== Automatické párování: jen jednoznačná shoda ==')
         && autoTransakceZRadku(radekVypisu, new Set(['jiny'])).potvrzenoBankou === false
         && autoTransakceZRadku(radekVypisu).potvrzenoBankou === false
         && autoTransakceZRadku({ ...radekVypisu, zdroj: 'rucni' }, new Set(['v1'])).potvrzenoBankou === false)
-    ok('platbaZBanky: potvrzený řádek výpisu ano, nepotvrzený bez dávky ne, banka_api ano, ruční ne',
-      platbaZBanky({ zdroj: 'csv_banka', davkaId: 'd-stara', potvrzenoBankou: true }, new Set())
-        && !platbaZBanky({ zdroj: 'csv_banka', davkaId: 'd-stara', potvrzenoBankou: false }, new Set())
-        && platbaZBanky({ zdroj: 'banka_api', davkaId: null }, new Set())
-        && !platbaZBanky({ zdroj: 'rucni', davkaId: null, potvrzenoBankou: true }, new Set()))
+    ok('platbaZBanky: potvrzený řádek výpisu ano, nepotvrzený ne, banka_api ano, ruční ne',
+      platbaZBanky({ zdroj: 'csv_banka', potvrzenoBankou: true })
+        && !platbaZBanky({ zdroj: 'csv_banka', potvrzenoBankou: false })
+        && platbaZBanky({ zdroj: 'banka_api' })
+        && !platbaZBanky({ zdroj: 'rucni', potvrzenoBankou: true }))
+    ok('autoTransakceZRadku: prázdná měna zůstane prázdná (ne „CZK")', autoTransakceZRadku({ ...radekVypisu, mena: null }).mena === '')
+    ok('autoTransakceZRadku: storno i stornovaný pohyb jsou „stornovano"',
+      autoTransakceZRadku({ ...radekVypisu, storno_of: 'x' }).stornovano === true
+        && autoTransakceZRadku(radekVypisu, undefined, new Set(['v1'])).stornovano === true
+        && autoTransakceZRadku(radekVypisu).stornovano === false)
   }
 
+  // Měna: obě vyplněné a stejné. Prázdná nikdy jistě (otázka 111).
   ok('faktura v EUR, platba v CZK (stejné číslo) → nic', auto([t('t1', '1', 100)], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { mena: 'EUR' })]).length === 0)
-  ok('platba i faktura v EUR → nic (automaticky jen Kč)', auto([t('t1', '1', 100, '2026-10-05', { mena: 'EUR' })], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { mena: 'EUR' })]).length === 0)
-  ok('měna faktury neuvedená = CZK', auto([t('t1', '1', 100)], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { mena: null })]).length === 1)
+  ok('platba i faktura v EUR → smí (stejná vyplněná měna, jako databáze)', auto([t('t1', '1', 100, '2026-10-05', { mena: 'EUR' })], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { mena: 'EUR' })]).length === 1)
+  ok('měna faktury neuvedená → nic (prázdná měna nikdy jistě)', auto([t('t1', '1', 100)], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { mena: null })]).length === 0)
+  ok('měna platby prázdná → nic', auto([t('t1', '1', 100, '2026-10-05', { mena: '' })], [f('f1', '1', 100)]).length === 0)
+  ok('„ czk " = „CZK" (mezery, malá písmena)', auto([t('t1', '1', 100, '2026-10-05', { mena: ' czk ' })], [f('f1', '1', 100)]).length === 1)
+
   ok('úplně jiná protistrana než dodavatel → nic', auto([t('t1', '1', 100, '2026-10-05', { protistrana: 'Kovošrot Zlín' })], [f('f1', '1', 100)]).length === 0)
   ok('jiná firma se stejnou právní formou („s.r.o.") → nic (kolo 2)', auto([t('t1', '1', 100, '2026-10-05', { protistrana: 'Novák Stavby s.r.o.' })], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { dodavatel: 'Alza.cz s.r.o.' })]).length === 0)
-  ok('… ani „a.s." / „spol. s r.o."', auto([t('t1', '1', 100, '2026-10-05', { protistrana: 'ALZA.CZ A.S.' })], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { dodavatel: 'ČEZ Prodej, a.s.' })]).length === 0 &&
-    auto([t('t1', '1', 100, '2026-10-05', { protistrana: 'Kovo Brno spol. s r.o.' })], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { dodavatel: 'Pekárna Praha spol. s r.o.' })]).length === 0)
   ok('stejná firma jinak zapsaná (MAKRO … CR s.r.o. / Makro … ČR) → smí', auto([t('t1', '1', 100, '2026-10-05', { protistrana: 'MAKRO Cash & Carry CR s.r.o.' })], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { dodavatel: 'Makro Cash & Carry ČR' })]).length === 1)
   ok('protistrana z banky prázdná → rozhoduje zbytek', auto([t('t1', '1', 100, '2026-10-05', { protistrana: '' })], [f('f1', '1', 100)]).length === 1)
 
@@ -179,6 +166,10 @@ console.log('\n== Automatické párování: jen jednoznačná shoda ==')
     auto([t('t1', '1', 100, '2026-10-05'), t('vraceni', '', 100, '2026-10-07', { smer: 'prijem', protistrana: 'ABC VELKOOBCHOD' })], [f('f1', '1', 100)]).length === 0)
   ok('jiný příjem (jiná částka) platbu neblokuje',
     auto([t('t1', '1', 100, '2026-10-05'), t('trzba', '1', 999, '2026-10-07', { smer: 'prijem' })], [f('f1', '1', 100)]).length === 1)
+
+  ok('stornovaná platba → nic', auto([t('t1', '1', 100, '2026-10-05', { stornovano: true })], [f('f1', '1', 100)]).length === 0)
+  ok('stornovaný dvojník soupeřem není → druhá platba se spáruje',
+    auto([t('t1', '1', 100, '2026-10-05', { stornovano: true }), t('t2', '1', 100, '2026-10-06')], [f('f1', '1', 100)]).map((p) => p.transakceId).join() === 't2')
 
   ok('platba 31 dní PŘED fakturou → nic', auto([t('t1', '1', 100, '2026-08-20')], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20')]).length === 0)
   ok('platba 10 dní před fakturou (záloha) → spáruje se', auto([t('t1', '1', 100, '2026-09-10')], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20')]).length === 1)
@@ -211,20 +202,17 @@ console.log('\n== Jméno protistrany a vrácené platby (kolo 3) ==')
 
 console.log('\n== Protiúčet ve vlastním sloupci (Finance Fáze 0, krok 1): pravidla platí jako dřív ==')
 {
-  // Do kroku 1 banka psala číslo účtu do `protistrana`, když jméno chybělo.
-  // Teď je v `protiucet` — a pravidla párování stojí na neprázdné protistraně.
-  const UCET = 'CZ6508000000192000145399'
   const radek = (id, smer, castka, datum, jine = {}) => ({ id, vs: '', castka_haleru: castka, protistrana: '', protiucet: '', datum, zdroj: 'banka_api', mena: 'CZK', smer, import_davka_id: null, ...jine })
-  const makro = { id: 'fm', vs: '2026001', castkaHaleru: 500000, dodavatel: 'Makro Cash & Carry ČR s.r.o.', datum: '2026-09-20', stav: 'Ke kontrole úhrady', alokovanoHaleru: 0, duplicita: false, archivovana: false, mena: 'CZK' }
+  const makro = { id: 'fm', vs: '2026001', castkaHaleru: 500000, dodavatel: 'Makro Cash & Carry ČR s.r.o.', datum: '2026-09-20', stav: 'Ke kontrole úhrady', alokovanoHaleru: 0, duplicita: false, archivovana: false, mena: 'CZK', ucetDodavatele: UCET }
 
   const bezJmena = autoTransakceZRadku(radek('t1', 'vydaj', 500000, '2026-10-05', { vs: '2026001', protiucet: UCET }))
   ok('pohyb bez jména: protistrana pro párování = číslo účtu (jak dřív)', bezJmena.protistrana === UCET && bezJmena.protiucet === UCET)
-  ok('výdaj bez jména z cizího účtu se dodavateli sám nespáruje (pravidlo protistrany platí dál)',
+  ok('výdaj bez jména se dodavateli sám nespáruje (pravidlo protistrany platí dál)',
     vybratAutomatickaParovani([bezJmena], [makro]).length === 0)
 
   const platbaMakro = autoTransakceZRadku(radek('t2', 'vydaj', 500000, '2026-10-05', { vs: '2026001', protistrana: 'MAKRO CASH', protiucet: UCET }))
   const vraceniBezJmena = autoTransakceZRadku(radek('t3', 'prijem', 500000, '2026-10-07', { protiucet: UCET }))
-  ok('kontrolní: platba se jménem dodavatele bez vrácení se spáruje', vybratAutomatickaParovani([platbaMakro], [makro]).length === 1)
+  ok('kontrolní: platba se jménem dodavatele a jeho účtem, bez vrácení, se spáruje', vybratAutomatickaParovani([platbaMakro], [makro]).length === 1)
   ok('vrácení bez VS a bez jména z téhož účtu se pozná → platba se sama nespáruje',
     vybratAutomatickaParovani([platbaMakro, vraceniBezJmena], [makro]).length === 0)
   ok('… i když jméno nemá ani platba (oba pohyby jen s číslem účtu)', jeVracena(bezJmena, [vraceniBezJmena]))
@@ -232,17 +220,17 @@ console.log('\n== Protiúčet ve vlastním sloupci (Finance Fáze 0, krok 1): pr
     !jeVracena(platbaMakro, [autoTransakceZRadku(radek('t4', 'prijem', 500000, '2026-10-07', { protiucet: 'DE89370400440532013000' }))]))
 
   // Úloha párování je `server-only` a Node ji nespustí — hlídá se, že
-  // pohyby čte i s protiúčtem a převádí je touhle funkcí (přesně tady
-  // byla chyba: sloupec se nevybíral).
-  const uloha = readFileSync('lib/finance-automaticke-parovani.ts', 'utf8')
+  // pohyby čte i s protiúčtem a stornem a převádí je touhle funkcí.
+  const uloha = cist('lib/finance-automaticke-parovani.ts')
   ok('úloha párování: dotaz na pohyby čte výčet SLOUPCE_AUTOMATICKEHO_PAROVANI',
     /from\('transakce'\)\s*\.select\(SLOUPCE_AUTOMATICKEHO_PAROVANI\)/.test(uloha))
-  ok('úloha párování: pohyby převádí autoTransakceZRadku i s potvrzeními banky',
-    /transakce\.map\(\(t\) => autoTransakceZRadku\(t, potvrzeneBankou\)\)/.test(uloha))
+  ok('úloha párování: pohyby převádí autoTransakceZRadku i s potvrzeními banky a storny',
+    /transakce\.map\(\(t\) => autoTransakceZRadku\(t, potvrzeneBankou, stornovane\)\)/.test(uloha))
   ok('úloha párování: potvrzení čte z transakce_potvrzeni_banky (transakce_id) své firmy',
     /from\('transakce_potvrzeni_banky'\)\.select\('transakce_id'\)\s*\.eq\('tenant_id', tenantId\)/.test(uloha)
       && /potvrzeneBankou\.add\(r\.transakce_id\)/.test(uloha))
-  const strankaPlateb = readFileSync('app/[rozsah]/finance/platby/page.tsx', 'utf8')
+  ok('SLOUPCE_AUTOMATICKEHO_PAROVANI čte storno_of', SLOUPCE_AUTOMATICKEHO_PAROVANI.split(',').map((s) => s.trim()).includes('storno_of'))
+  const strankaPlateb = cist('app/[rozsah]/finance/platby/page.tsx')
   ok('Platby: vrácení a seznam protistranu doplní číslem účtu',
     (strankaPlateb.match(/protistranaNeboUcet\(/g) ?? []).length >= 3 && /protiucet: t\.protiucet/.test(strankaPlateb))
   ok('Platby: potvrzená párování čtou výčet SLOUPCE_POTVRZENEHO_PAROVANI',
@@ -252,15 +240,14 @@ console.log('\n== Protiúčet ve vlastním sloupci (Finance Fáze 0, krok 1): pr
   ok('Platby: seznam plateb čte výčet sloupceSeznamuPlateb (firma i pobočka)',
     /const sloupceTransakci: string = sloupceSeznamuPlateb\(Boolean\(pobocka\)\)/.test(strankaPlateb)
       && /from\('transakce'\)\.select\(sloupceTransakci\)/.test(strankaPlateb))
-  const exportUcetni = readFileSync('app/api/ucetni/export/route.ts', 'utf8')
+  const exportUcetni = cist('app/api/ucetni/export/route.ts')
   ok('účetní export: protistrana = jméno, jinak číslo účtu', /protistrana: protistranaNeboUcet\(t\.protistrana, t\.protiucet\)/.test(exportUcetni))
   ok('účetní export: čte výčet sloupceTransakciExportu', /from\('transakce'\)\s*\.select\(sloupceTransakciExportu\(Boolean\(pobocka\)\)\)/.test(exportUcetni))
-  const pozornost = readFileSync('lib/finance-pozornost.ts', 'utf8')
+  const pozornost = cist('lib/finance-pozornost.ts')
   ok('Přehled (pozornost): návrhy čtou výčet SLOUPCE_NAVRHU_POZORNOSTI',
     /from\('transakce'\)\s*\.select\(SLOUPCE_NAVRHU_POZORNOSTI\)/.test(pozornost))
   ok('Přehled (pozornost): protistrana pro návrh = jméno, jinak číslo účtu',
-    /const protistrana = protistranaNeboUcet\(t\.protistrana, t\.protiucet\)/.test(pozornost)
-      && /navrhnoutParovani\(\{[^}]*\bprotistrana\b[^}]*\}/.test(pozornost) && !/protistrana: t\.protistrana/.test(pozornost))
+    /const protistrana = protistranaNeboUcet\(t\.protistrana, t\.protiucet\)/.test(pozornost) && !/protistrana: t\.protistrana/.test(pozornost))
 }
 
 console.log('\n== Výčty sloupců s protistranou nesou i protiúčet ==')
@@ -301,7 +288,7 @@ console.log('\n== Výčty sloupců s protistranou nesou i protiúčet ==')
   ok(`žádný dotaz v app/ a lib/ nečte protistranu bez protiúčtu${bezProtiuctu.length ? ' — ' + bezProtiuctu.join(' | ') : ''}`, soubory.length > 100 && bezProtiuctu.length === 0)
 }
 
-console.log('\n== Dorovnání stavu ve Fakturách podle párování ==')
+console.log('\n== Dorovnání stavu (jen kandidáti — stav zapíše databáze) ==')
 {
   const faktury = [
     { id: 'cela', castkaHaleru: 1000, stav: 'Ke kontrole úhrady' },
@@ -310,56 +297,185 @@ console.log('\n== Dorovnání stavu ve Fakturách podle párování ==')
     { id: 'nic', castkaHaleru: 1000, stav: 'Neuhrazeno' },
     { id: 'odmitnuta', castkaHaleru: 1000, stav: 'Odmítnuto' },
     { id: 'neschvalena', castkaHaleru: 1000, stav: 'Ke schválení' },
+    { id: 'upominka', castkaHaleru: 1000, stav: 'Upomínka - zkontrolovat' },
     { id: 'preplacena', castkaHaleru: 1000, stav: 'Částečně uhrazeno' },
     { id: 'eur', castkaHaleru: 1000, stav: 'Ke kontrole úhrady', mena: 'EUR' },
   ]
-  const alokace = new Map([['cela', 1000], ['cast', 400], ['uz', 1000], ['odmitnuta', 1000], ['neschvalena', 1000], ['preplacena', 1200], ['eur', 1000]])
+  const alokace = new Map([['cela', 1000], ['cast', 400], ['uz', 1000], ['odmitnuta', 1000], ['neschvalena', 1000], ['upominka', 1000], ['preplacena', 1200], ['eur', 1000]])
   const zmeny = dorovnatStavy(faktury, alokace)
   const z = Object.fromEntries(zmeny.map((x) => [x.fakturaId, x.stav]))
   ok('celá částka spárovaná → Uhrazeno', z.cela === 'Uhrazeno')
   ok('část → Částečně uhrazeno', z.cast === 'Částečně uhrazeno')
   ok('přeplacená → Uhrazeno', z.preplacena === 'Uhrazeno')
   ok('už uhrazená, bez párování, odmítnutá, neschválená → beze změny', !('uz' in z) && !('nic' in z) && !('odmitnuta' in z) && !('neschvalena' in z))
-  ok('faktura v cizí měně se nedorovnává (párování je v haléřích)', !('eur' in z))
-  ok('změna nese původní stav (zápis jen podmíněně)', zmeny.find((x) => x.fakturaId === 'cela')?.puvodni === 'Ke kontrole úhrady')
+  ok('upomínka se nedorovnává (jako app.faktura_stav_podle_plateb)', !('upominka' in z))
+  ok('faktura v cizí měně se tu nedorovnává (párování je v haléřích)', !('eur' in z))
+  ok('změna nese původní stav', zmeny.find((x) => x.fakturaId === 'cela')?.puvodni === 'Ke kontrole úhrady')
 }
 
-console.log('\n== Ruční „Uhrazeno" a zpět ==')
+console.log('\n== Ruční „Uhrazeno": kdy appka tlačítko nabídne ==')
 {
   for (const stav of ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno']) ok(`ze stavu „${stav}" ručně Uhrazeno smí`, smiOznacitUhrazenou(stav))
   for (const stav of ['Ke schválení', 'Upomínka - zkontrolovat', 'Nutná ruční kontrola (x)', 'Odmítnuto', 'Uhrazeno', null]) ok(`ze stavu „${stav}" ručně Uhrazeno NEsmí`, !smiOznacitUhrazenou(stav))
-  ok('vrátit bez plateb → Ke kontrole úhrady', stavPoVraceni(0, 1000) === 'Ke kontrole úhrady')
-  ok('vrátit, když je část zaplacená z výpisu → Částečně uhrazeno', stavPoVraceni(400, 1000) === 'Částečně uhrazeno')
-  ok('vrátit, když je podle plateb zaplacená celá → nejde (null)', stavPoVraceni(1000, 1000) === null && stavPoVraceni(1500, 1000) === null)
+  ok('menaNeboCzk / jeVKorunach: prázdná = CZK pro součty a návrhy', menaNeboCzk(null) === 'CZK' && menaNeboCzk(' eur ') === 'EUR' && jeVKorunach('') && !jeVKorunach('EUR'))
 }
 
-console.log('\n== Návrhy jen s fakturami v Kč (eurové centy ≠ haléře) ==')
+/* --- Návrhy párování -------------------------------------------------------- */
+
+console.log('\n== Návrhy párování (navrhyParovani) ==')
 {
-  // Faktura na 1 000,00 EUR (100 000 centů) se stejným VS a datem jako
-  // platba 1 000 Kč (100 000 haléřů): čísla se „shodují", peníze ne.
-  const vydaj = { id: 't-eur', vs: '2026100', castkaHaleru: 100000, protistrana: 'Acme GmbH', datum: '2026-10-16' }
-  const faktura = (currency) => ({ id: 'f-' + currency, variable_symbol: '2026100', castka_haleru: 100000, supplier: 'Acme GmbH', due_date: '2026-10-15', issue_date: null, currency })
-  ok('eurová faktura se do návrhů nedostane', kandidatiProNavrhy([faktura('EUR')]).length === 0
-    && navrhnoutParovani(vydaj, kandidatiProNavrhy([faktura('EUR')])) === null)
-  // Kladná kontrola — jinak by první prošla i nad prázdným vstupem.
-  ok('táž faktura v Kč návrh dá', navrhnoutParovani(vydaj, kandidatiProNavrhy([faktura('CZK')]))?.fakturaId === 'f-CZK')
-  ok('„ czk " (mezery, malá) je taky Kč; bez měny = Kč (jako automatika)',
-    kandidatiProNavrhy([faktura(' czk ')]).length === 1 && jeVKorunach(null) && !jeVKorunach('EUR'))
-  // Obě obrazovky musí brát návrhy ze sdílené funkce — jednotkový test
-  // výš by zůstal zelený, i kdyby jedna z nich filtr obešla.
-  for (const cesta of ['app/[rozsah]/finance/platby/page.tsx', 'lib/finance-pozornost.ts']) {
-    const zdroj = readFileSync(cesta, 'utf8').split('\r\n').join('\n')
-    ok(`${cesta}: návrhy ze sdílené kandidatiProNavrhy`, /kandidatiProNavrhy\(/.test(zdroj) && !/castkaHaleru: f\.castka_haleru/.test(zdroj.replace(/const naKandidata[\s\S]*?\}\)\n/, '')))
-    // Bez měny ve výčtu sloupců by chybějící měna znamenala „Kč" a eurové
-    // faktury by se do návrhů potichu vrátily (jednotkový test výš to nevidí).
-    ok(`${cesta}: dotaz na faktury načítá měnu (currency:mena)`, /fakturyFirmy\([^)]*'[^']*currency:mena[^']*'/.test(zdroj))
+  const p = (id, castka, jine = {}) => ({ id, vs: '', zbyvaHaleru: castka, protistrana: 'Pekárna Novák s.r.o.', protiucet: '', datum: '2026-10-10', mena: 'CZK', smer: 'vydaj', ...jine })
+  const fa = (id, castka, jine = {}) => ({ id, vs: null, castkaHaleru: castka, zbyvaHaleru: Math.abs(castka), dodavatel: 'Pekárna Novák s.r.o.', ucetDodavatele: null, datumVystaveni: '2026-10-01', splatnost: '2026-10-15', mena: 'CZK', stav: 'Ke kontrole úhrady', duplicita: false, archivovana: false, ...jine })
+  const jeden = (pp, ff, moznosti) => navrhyParovani(pp, ff, moznosti)
+
+  // Stupně
+  {
+    const n = jeden([p('t', 1000, { vs: '77', protiucet: UCET })], [fa('f', 1000, { vs: '0077', ucetDodavatele: '19-2000145399/0800' })])
+    ok('VS + částka + IBAN → „vs+castka+ucet" 0.95', n.length === 1 && n[0].duvod === 'vs+castka+ucet' && n[0].jistota === 0.95 && n[0].castkaHaleru === 1000)
   }
-  const platby = readFileSync('app/[rozsah]/finance/platby/page.tsx', 'utf8')
-  ok('ruční párování píše částku cizí měny s její měnou, ne jako Kč',
-    /jeVKorunach\(f\.mena\) \? koruny\(f\.castkaHaleru\) : /.test(platby))
-  const pozornost = readFileSync('lib/finance-pozornost.ts', 'utf8')
-  ok('Přehled: součet faktur ke kontrole jen v Kč',
-    /keKontrole\.filter\(\(f\) => jeVKorunach\(f\.currency\)\)\.reduce/.test(pozornost))
+  {
+    const n = jeden([p('t', 1000, { vs: '77', protistrana: 'Někdo úplně jiný' })], [fa('f', 1000, { vs: '77' })])
+    ok('VS + částka (bez účtu, jiné jméno) → „vs+castka" 0.9', n.length === 1 && n[0].duvod === 'vs+castka' && n[0].jistota === 0.9)
+  }
+  {
+    const n = jeden([p('t', 1000)], [fa('f', 1000)])
+    ok('částka + dodavatel (jméno) + datum v okně → „castka+dodavatel+okno" 0.7', n.length === 1 && n[0].duvod === 'castka+dodavatel+okno' && n[0].jistota === 0.7)
+  }
+  {
+    const n = jeden([p('t', 1000, { protistrana: '', protiucet: UCET })], [fa('f', 1000, { ucetDodavatele: UCET, dodavatel: 'Úplně jiné jméno' })])
+    ok('… dodavatel poznaný jen podle IBAN (jméno chybí) → návrh', n.length === 1 && n[0].duvod === 'castka+dodavatel+okno')
+  }
+  ok('částka + jiný dodavatel → nic', jeden([p('t', 1000, { protistrana: 'Kovošrot Zlín' })], [fa('f', 1000)]).length === 0)
+  ok('dodavatel bez stejné částky (a bez VS) → nic', jeden([p('t', 999)], [fa('f', 1000)]).length === 0)
+
+  // Okno: OKNO_NAVRHU_PRED_VYSTAVENIM dní před vystavením až OKNO_NAVRHU_PO_SPLATNOSTI po splatnosti
+  const vOkne = (datum) => jeden([p('t', 1000, { datum })], [fa('f', 1000)]).length === 1
+  ok(`okno: ${OKNO_NAVRHU_PRED_VYSTAVENIM} dny před vystavením ano, o den dřív ne`, OKNO_NAVRHU_PRED_VYSTAVENIM === 3 && vOkne('2026-09-28') && !vOkne('2026-09-27'))
+  ok(`okno: ${OKNO_NAVRHU_PO_SPLATNOSTI} dní po splatnosti ano, o den později ne`, OKNO_NAVRHU_PO_SPLATNOSTI === 30 && vOkne('2026-11-14') && !vOkne('2026-11-15'))
+  ok('okno: faktura bez data → jen podle VS, „částka + dodavatel" ne',
+    jeden([p('t', 1000)], [fa('f', 1000, { datumVystaveni: null, splatnost: null })]).length === 0)
+  ok('okno: bez splatnosti 30 dní po vystavení',
+    jeden([p('t', 1000, { datum: '2026-10-31' })], [fa('f', 1000, { splatnost: null })]).length === 1
+      && jeden([p('t', 1000, { datum: '2026-11-01' })], [fa('f', 1000, { splatnost: null })]).length === 0)
+
+  // Částka nikdy přes zbytek
+  {
+    const n = jeden([p('t', 3000, { vs: '5' })], [fa('f', 3000, { vs: '5', zbyvaHaleru: 3000 })])
+    ok('částka návrhu = zbytek platby, když sedí se zbytkem faktury', n.length === 1 && n[0].castkaHaleru === 3000)
+  }
+  ok('zbytek faktury ≠ zbytek platby → VS sám nestačí na „vs+castka"',
+    jeden([p('t', 3000, { vs: '5', protistrana: 'X' })], [fa('f', 5000, { vs: '5', zbyvaHaleru: 2000 })]).length === 0)
+  ok('platba už celá spárovaná (zbytek 0) → nic', jeden([p('t', 0, { vs: '5' })], [fa('f', 1000, { vs: '5' })]).length === 0)
+  ok('faktura už celá zaplacená (zbytek 0) → nic', jeden([p('t', 1000, { vs: '5' })], [fa('f', 1000, { vs: '5', zbyvaHaleru: 0 })]).length === 0)
+
+  // Nejlepší stupeň, stejné nejvýš 3
+  {
+    const n = jeden([p('t', 1000, { vs: '9' })], [fa('slabsi', 1000), fa('lepsi', 1000, { vs: '9' })])
+    ok('víc kandidátů různých stupňů → jen nejlepší stupeň', n.length === 1 && n[0].fakturaId === 'lepsi')
+  }
+  {
+    const ff = ['a', 'b', 'c', 'd', 'e'].map((id, i) => fa(id, 1000, { splatnost: `2026-10-${String(10 + i).padStart(2, '0')}` }))
+    const n = jeden([p('t', 1000, { datum: '2026-10-12' })], ff)
+    ok(`stejně dobrých víc → nejvýš ${NEJVIC_NAVRHU_NA_POHYB}, nejbližší datem`, NEJVIC_NAVRHU_NA_POHYB === 3 && n.length === 3
+      && n.map((x) => x.fakturaId).sort().join() === 'b,c,d')
+  }
+
+  // Co se nenavrhuje
+  ok('dvojice už v platby_faktury (zamítnutá, navržená, potvrzená) → znovu ne',
+    jeden([p('t', 1000)], [fa('f', 1000)], { vyloucene: new Set(['t|f']) }).length === 0)
+  ok('stornovaný pohyb → nic', jeden([p('t', 1000, { stornovano: true })], [fa('f', 1000)]).length === 0)
+  for (const [popis, jine] of [['archivovaná', { archivovana: true }], ['duplicita', { duplicita: true }], ['Ke schválení', { stav: 'Ke schválení' }],
+    ['Uhrazeno', { stav: 'Uhrazeno' }], ['Upomínka', { stav: 'Upomínka - zkontrolovat' }], ['bez částky', { castkaHaleru: 0, zbyvaHaleru: 0 }]]) {
+    ok(`faktura ${popis} → nic`, jeden([p('t', 1000, { vs: '1' })], [fa('f', 1000, { vs: '1', ...jine })]).length === 0)
+  }
+  ok('„Částečně uhrazeno" se zbytkem → návrh na zbytek',
+    jeden([p('t', 400, { vs: '1' })], [fa('f', 1000, { vs: '1', stav: 'Částečně uhrazeno', zbyvaHaleru: 400 })]).map((x) => x.castkaHaleru).join() === '400')
+
+  // Směr a dobropis
+  ok('příjem k (kladné) faktuře → nic', jeden([p('t', 1000, { vs: '1', smer: 'prijem' })], [fa('f', 1000, { vs: '1' })]).length === 0)
+  {
+    const n = jeden([p('t', 500, { smer: 'prijem', vs: '42' })], [fa('d', -500, { vs: '42' })])
+    ok('vratka k dobropisu (příjem = |dobropis|, stejný VS) → „dobropis+vratka" 0.8', n.length === 1 && n[0].duvod === 'dobropis+vratka' && n[0].jistota === 0.8 && n[0].castkaHaleru === 500)
+  }
+  ok('výdaj k dobropisu → nic', jeden([p('t', 500, { vs: '42' })], [fa('d', -500, { vs: '42' })]).length === 0)
+  ok('vratka jiné částky → nic', jeden([p('t', 400, { smer: 'prijem', vs: '42' })], [fa('d', -500, { vs: '42' })]).length === 0)
+
+  // Jiná měna
+  {
+    const n = jeden([p('t', 250000, { vs: '31', mena: 'CZK' })], [fa('f', 10000, { vs: '31', mena: 'EUR' })])
+    ok('platba v Kč, faktura v EUR, stejný VS a dodavatel → „jina_mena" 0.5 s částkou PLATBY', n.length === 1 && n[0].duvod === 'jina_mena' && n[0].jistota === 0.5 && n[0].castkaHaleru === 250000)
+  }
+  ok('jiná měna bez VS → nic (částky porovnat nejde)', jeden([p('t', 10000, { mena: 'CZK' })], [fa('f', 10000, { mena: 'EUR' })]).length === 0)
+  ok('jiná měna, stejný VS, jiný dodavatel → nic', jeden([p('t', 10000, { vs: '31', protistrana: 'Kovošrot' })], [fa('f', 10000, { vs: '31', mena: 'EUR' })]).length === 0)
+  ok('prázdná měna = CZK pro návrh (ne „jiná měna")', jeden([p('t', 1000, { vs: '1', mena: '' })], [fa('f', 1000, { vs: '1', mena: null })]).map((x) => x.duvod).join() === 'vs+castka')
+  ok('EUR platba na EUR fakturu → normální stupeň', jeden([p('t', 1000, { vs: '1', mena: 'EUR' })], [fa('f', 1000, { vs: '1', mena: 'eur' })]).map((x) => x.duvod).join() === 'vs+castka')
+
+  // Důvody: stejné kódy jako databáze (CHECK platby_faktury_duvod_kod a zapsat_navrhy_parovani)
+  const migrace = cist('supabase/migrations/20261120100000_parovani_pravidla.sql')
+  const kodyTs = Object.keys(DUVODY_NAVRHU).sort().join()
+  const vZapisu = /v_duvod not in \(([^)]*)\)/.exec(migrace)?.[1] ?? ''
+  const kodyDb = [...vZapisu.matchAll(/'([^']+)'/g)].map((m) => m[1]).sort().join()
+  ok(`kódy důvodů TS = databáze (zapsat_navrhy_parovani) — TS: ${kodyTs} / DB: ${kodyDb}`, kodyTs.length > 0 && kodyTs === kodyDb)
+  ok('každý důvod má větu pro lidi', Object.values(DUVODY_NAVRHU).every((v) => typeof v === 'string' && v.length > 15))
+}
+
+/* --- Kód volá databázi, ne vlastní zápis stavu ------------------------------ */
+
+console.log('\n== Stav faktury, jisté shody a návrhy jdou přes databázi ==')
+{
+  const uloha = bezKomentaru(cist('lib/finance-automaticke-parovani.ts'))
+  ok('úloha: dorovnání stavu přes rpc prepocitat_stav_faktury, žádný přímý update faktury',
+    /rpc\('prepocitat_stav_faktury'/.test(uloha) && !/from\('faktury'\)\s*\.update/.test(uloha))
+  ok('úloha: žádné duveryhodneDavky (dávku posuzuje databáze)', !/duveryhodneDavky/.test(uloha))
+  ok('úloha: faktury čte i s účtem dodavatele (IBAN)', /ucet_dodavatele/.test(uloha) && /ucetDodavatele: f\.ucet_dodavatele/.test(uloha))
+
+  const importAkce = bezKomentaru(cist('app/[rozsah]/finance/platby/import/akce.ts'))
+  ok('import výpisu: jisté shody přes rpc sparovat_jiste_z_davky pod přihlášeným (supabase z akce)',
+    /supabase\.rpc\('sparovat_jiste_z_davky', \{ p_tenant: tenantId, p_davka: davkaId \}\)/.test(importAkce))
+  ok('import výpisu: bez automatickyParovatPlatby a bez vlastní kontroly faktury.manage',
+    !/automatickyParovatPlatby/.test(importAkce) && !/faktury\.manage/.test(importAkce))
+  ok('import výpisu: potom hledá návrhy', /najitNavrhyParovani\(tenantId/.test(importAkce))
+
+  const banka = bezKomentaru(cist('app/api/uloha/banka-synchronizace/route.ts'))
+  ok('synchronizace banky: po automatice hledá návrhy (najitNavrhyParovani)',
+    banka.indexOf('automatickyParovatPlatby(tenantId') > 0 && banka.indexOf('najitNavrhyParovani(tenantId') > banka.indexOf('automatickyParovatPlatby(tenantId'))
+
+  const navrhy = bezKomentaru(cist('lib/finance-navrhy-parovani.ts'))
+  ok('hledání návrhů: zápis jen rpc zapsat_navrhy_parovani, žádný přímý insert',
+    /rpc\('zapsat_navrhy_parovani'/.test(navrhy) && !/\.insert\(/.test(navrhy))
+  ok('hledání návrhů: vynechá dvojice z platby_faktury, ruční úhrady a Jiné platby',
+    /navrhyParovani\(pohyby, faktury, \{ vyloucene \}\)/.test(navrhy) && /from\('faktury_rucni_uhrady'\)/.test(navrhy) && /from\('jine_platby'\)/.test(navrhy))
+  ok('hledání návrhů: do Faktur přes bránu úlohy', /pristupKFakturamUlohy\(tenantId\)/.test(navrhy) && /fakturyFirmy\(pristup,/.test(navrhy))
+
+  const fakturyAkce = bezKomentaru(cist('app/[rozsah]/finance/faktury/akce.ts'))
+  ok('Faktury: ručně „Uhrazeno" = rpc rucne_uhradit_fakturu s částkou a důvodem',
+    /rpc\('rucne_uhradit_fakturu', \{[^}]*p_castka_haleru: castkaHaleru, p_duvod: duvod/.test(fakturyAkce))
+  ok('Faktury: „Vrátit mezi neuhrazené" = rpc vratit_fakturu_mezi_neuhrazene, bez služby',
+    /rpc\('vratit_fakturu_mezi_neuhrazene'/.test(fakturyAkce) && !/klientUlohy/.test(fakturyAkce))
+  ok('Faktury: nikde přímý zápis stavu „Uhrazeno"', !/update\(\{\s*stav:\s*STAV_UHRAZENO/.test(fakturyAkce) && !/update\(\{\s*stav:\s*'Uhrazeno'/.test(fakturyAkce))
+  ok('Faktury: vyřazení souvisejících faktur nesahá na zaplacené',
+    /\.not\('stav', 'in', `\("\$\{STAV_UHRAZENO\}","\$\{STAV_CASTECNE\}"\)`\)/.test(fakturyAkce))
+  ok('Faktury: upomínka jen z fronty ke schválení',
+    /update\(\{ stav: 'Upomínka - zkontrolovat', poznamka_kontroly: null, archivovano: false \}\)\s*\.eq\('tenant_id', p\.tenantId\)\.eq\('id', id\)\.eq\('stav', STAV_KE_SCHVALENI\)/.test(fakturyAkce))
+  const { STAVY_RUCNIHO_ZADANI } = await import('../lib/faktury-types.ts')
+  ok('Faktury → Nová: ručně zadat nejde „Uhrazeno" ani „Částečně uhrazeno"',
+    !STAVY_RUCNIHO_ZADANI.includes('Uhrazeno') && !STAVY_RUCNIHO_ZADANI.includes('Částečně uhrazeno') && STAVY_RUCNIHO_ZADANI.length >= 1)
+
+  const platbyAkce = bezKomentaru(cist('app/[rozsah]/finance/platby/akce.ts'))
+  ok('Platby: zrušení párování chce důvod (duvodZFormulare) a pošle ho databázi',
+    /const duvod = duvodZFormulare\(formData\)/.test(platbyAkce) && /p_duvod: duvod,/.test(platbyAkce))
+  ok('Platby: potvrzení a odmítnutí návrhu jen podle id návrhu',
+    /rpc\('potvrdit_navrh_parovani', \{ p_tenant: tenantId, p_navrh: navrhId \}\)/.test(platbyAkce)
+      && /rpc\('odmitnout_navrh_parovani', \{ p_tenant: tenantId, p_navrh: navrhId \}\)/.test(platbyAkce))
+  ok('Platby: návrh v jiné měně → ruční úhrada s platbou a fakturou Z NÁVRHU',
+    /p_faktura: n\.faktura, p_castka_haleru: castkaHaleru, p_duvod: duvod, p_transakce: n\.transakce_id/.test(platbyAkce))
+
+  const strankaPlateb = cist('app/[rozsah]/finance/platby/page.tsx')
+  ok('Platby: návrhy se nepočítají při načtení — odkaz na frontu', /finance\/platby\/navrhy`/.test(strankaPlateb) && !/navrhnoutParovani|kandidatiProNavrhy/.test(strankaPlateb))
+  const pozornost = cist('lib/finance-pozornost.ts')
+  ok('Přehled: návrhy z uložené fronty (platby_faktury navrzeno), odkaz na frontu',
+    /from\('platby_faktury'\)\s*\.select\('transakce_id, faktura'\)\s*\.eq\('tenant_id', tenantId\)\.eq\('stav', 'navrzeno'\)/.test(pozornost)
+      && /finance\/platby\/navrhy`/.test(pozornost) && !/navrhnoutParovani/.test(pozornost))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

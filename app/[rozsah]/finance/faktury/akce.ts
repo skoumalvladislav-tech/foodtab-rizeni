@@ -7,11 +7,8 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { fakturyFirmy, pristupKFakturam, type PristupKFakturam } from '@/lib/faktury-pristup'
 import { halereZFormulare } from '@/lib/faktury-sloupce'
 import { typPrilohy, MAX_VELIKOST_PRILOHY } from '@/lib/faktury-prevod'
-import { MENY_RUCNIHO_ZADANI, STAV_KE_SCHVALENI, STAV_UHRAZENO, STAVY_RUCNIHO_ZADANI } from '@/lib/faktury-types'
-import { klientUlohy } from '@/lib/supabase/uloha'
-import { STAVY_PRO_RUCNI_UHRAZENI, stavPoVraceni } from '@/lib/finance-parovani'
+import { MENY_RUCNIHO_ZADANI, STAV_CASTECNE, STAV_KE_SCHVALENI, STAV_UHRAZENO, STAVY_RUCNIHO_ZADANI } from '@/lib/faktury-types'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
-import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
  * Server akce modulu Faktury.
@@ -166,96 +163,68 @@ export async function obnovitFakturu(formData: FormData): Promise<void> {
   redirect(`/${rozsah}/finance/faktury/seznam`)
 }
 
+/** Hláška databáze pro člověka (česky, bez id), jinak obecná věta. */
+function hlaskaProLidi(error: { code?: string; message: string }, zalozni: string): string {
+  const vlastni = (error.code === '23514' || error.code === '42501' || error.code === 'P0001')
+    && !/violates|relation|constraint|function|column/i.test(error.message)
+  return vlastni ? error.message : zalozni
+}
+
 /**
  * Ručně „Uhrazeno" — zaplaceno mimo výpis (hotově, kartou, z jiného účtu).
- * Šéfík 8. 10. 2026: „…a nebo přesunout ručně". Jen ze SCHVÁLENÝCH stavů
- * (Ke kontrole úhrady, Neuhrazeno, Částečně uhrazeno): neschválený doklad,
- * upomínka nebo nečitelný dokument by se jinak přes „Uhrazeno" a „Vrátit
- * mezi neuhrazené" dostal mezi schválené faktury bez kontroly.
+ * Šéfík 8. 10. 2026: „…a nebo přesunout ručně". Finance Fáze 0, krok 2:
+ * „Ruční zaplaceno zůstává, ale s důvodem a autorem" — zapisuje se
+ * ruční úhrada (`rucne_uhradit_fakturu`: částka v měně faktury, důvod
+ * aspoň 5 znaků, autor = přihlášený) a stav přepočítá databáze ze všech
+ * plateb. Jen schválená faktura (Ke kontrole úhrady, Neuhrazeno,
+ * Částečně uhrazeno) — rozhoduje databáze, ne formulář.
  */
 export async function oznacitUhrazenou(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
   // Faktury patří celé firmě — stav úhrady mění jen správce za celou firmu.
   const p = await pripravit(TENANT_SCOPE_SEGMENT, 'faktury.manage')
+  const chyba = (text: string): never => redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent(text)}`)
 
-  const { data } = await p.supabase.from('faktury').update({ stav: STAV_UHRAZENO })
-    .eq('tenant_id', p.tenantId).eq('id', id)
-    .in('stav', [...STAVY_PRO_RUCNI_UHRAZENI]).select('id')
+  const castkaHaleru = halereZFormulare(String(formData.get('castka') ?? ''))
+  const duvod = String(formData.get('duvod') ?? '').trim().slice(0, 300)
+  if (castkaHaleru === null || castkaHaleru <= 0) chyba('Vyplňte uhrazenou částku v měně faktury (kladnou, nejvýš dvě desetinná místa).')
+  if (duvod.length < 5) chyba('Napište, proč je faktura zaplacená mimo výpis (aspoň 5 znaků) — např. „hotově z pokladny 12. 11.".')
+
+  const { error } = await p.supabase.rpc('rucne_uhradit_fakturu', {
+    p_tenant: p.tenantId, p_faktura: id, p_castka_haleru: castkaHaleru, p_duvod: duvod,
+  })
   revalidatePath(`/${rozsah}/finance/faktury`)
-  if ((data ?? []).length === 0) {
-    redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Fakturu nejde označit jako uhrazenou — není schválená k úhradě (nejdřív ji schvalte).')}`)
-  }
+  if (error) chyba(hlaskaProLidi(error, 'Úhradu se nepodařilo zapsat — zkuste to znovu.'))
   redirect(`/${rozsah}/finance/faktury/seznam`)
 }
 
 /**
- * Zpět mezi neuhrazené. Člověk tím říká, že faktura zaplacená NENÍ:
- * AUTOMATICKÁ párování k ní se proto zruší (zamítnutá — automatika je
- * znovu nezaloží). Z ručních párování pak: bez nich → „Ke kontrole úhrady",
- * část → „Částečně uhrazeno", celá → nejde (ruční párování ruší ten, kdo
- * má právo na Platby — jinak by stav neodpovídal penězům). Rozhodnutí je
- * stavPoVraceni v lib/finance-parovani.ts. Párování se čtou a ruší
- * službou (výjimka zapsaná v lib/supabase/uloha.ts): kdo nemá právo na
- * Platby, by je jinak neviděl.
+ * Zpět mezi neuhrazené. Člověk tím říká, že faktura zaplacená NENÍ.
+ * Celé v JEDNÉ databázové transakci (`vratit_fakturu_mezi_neuhrazene`,
+ * Finance Fáze 0 krok 2): zruší ruční úhrady a automatická párování
+ * faktury a stav přepočítá z toho, co zbyde. Ručně potvrzená párování
+ * zůstanou — když kryjí celou fakturu, nezmění se nic (ruší je ten, kdo
+ * má právo na Platby). Dřív to appka skládala ze tří kroků službou
+ * a po chybě uprostřed zůstala párování zrušená a stav nezměněný.
  */
 export async function vratitNeuhrazenou(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
-  // Ruší i párování plateb (službou) — jen správce Faktur za CELOU firmu.
   const p = await pripravit(TENANT_SCOPE_SEGMENT, 'faktury.manage')
-  const tenantId = p.tenantId
+  const duvod = String(formData.get('duvod') ?? '').trim().slice(0, 300)
 
-  // Když se párování nedají zjistit, radši nic — jinak by se stav
-  // přepínal tam a zpátky s každou synchronizací banky.
-  const nelze: () => never = () => redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Nepodařilo se ověřit platby k faktuře — zkuste to znovu.')}`)
-  const sluzba = klientUlohy()
-  if (!sluzba) nelze()
-  const { data: faktura } = await fakturyFirmy(p, 'castka_haleru, stav, mena').eq('id', id).maybeSingle()
-  const platby = await sluzba.from('platby_faktury').select('id, castka_haleru, zpusob')
-    .eq('tenant_id', tenantId).eq('faktura', id).eq('stav', 'potvrzeno')
-  if (platby.error || !platby.data || !faktura) nelze()
-  const f = faktura as unknown as { castka_haleru: number; stav: string; mena: string | null }
-  // Stav se ověří PŘED rušením párování (zrušené párování je natrvalo
-  // zamítnuté — nesmí zůstat zamítnuté, když se vrácení stejně neprovede).
-  if (f.stav !== STAV_UHRAZENO) {
-    redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Faktura není ve stavu Uhrazeno — nic se nezměnilo.')}`)
-  }
-  const radky = platby.data as { id: string; castka_haleru: number; zpusob: string }[]
-  const rucne = radky.filter((r) => r.zpusob !== 'automaticky').reduce((s, r) => s + r.castka_haleru, 0)
-  // Párování se vede v haléřích (Kč); u faktury v cizí měně se částky
-  // porovnat nedají — ruční párování pak rozhodne člověk v Platbách.
-  const vKc = (f.mena ?? 'CZK').trim().toUpperCase() === 'CZK'
-  if (!vKc && rucne > 0) {
-    redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Faktura je v cizí měně a má ručně potvrzenou platbu — párování zkontrolujte ve Financích → Platby.')}`)
-  }
-  // Rozhodnout NEJDŘÍV (podle ručních párování) — automatická se ruší, až
-  // když je jisté, že vrácení projde; jinak by zůstala zbytečně zamítnutá.
-  const cil = stavPoVraceni(rucne, f.castka_haleru)
-  if (cil === null) {
-    const vidiPlatby = (await zkusPristup(tenantId, 'finance.read', rozsah)).stav === 'ok'
-    const zprava = 'Faktura je podle ručně potvrzené platby z výpisu zaplacená celá. Když platba k faktuře nepatří, musí párování zrušit někdo s právem na Finance → Platby.'
+  const { error } = await p.supabase.rpc('vratit_fakturu_mezi_neuhrazene', {
+    p_tenant: p.tenantId, p_faktura: id, p_duvod: duvod || null,
+  })
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  if (error) {
+    const zprava = hlaskaProLidi(error, 'Fakturu se nepodařilo vrátit mezi neuhrazené — zkuste to znovu.')
+    // Zaplacená celá ručně potvrzenou platbou → do Plateb (kdo je vidí).
+    const vidiPlatby = /zaplacená celá/.test(zprava) && (await zkusPristup(p.tenantId, 'finance.read', TENANT_SCOPE_SEGMENT)).stav === 'ok'
     redirect(vidiPlatby
       ? `/${rozsah}/finance/platby?faktura=${encodeURIComponent(id)}&chyba=${encodeURIComponent(zprava)}`
       : `/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent(zprava)}`)
-  }
-
-  const { data: prihlaseny } = await (await getServerSupabase()).auth.getUser()
-  for (const r of radky) {
-    if (r.zpusob !== 'automaticky') continue
-    const { error } = await sluzba.rpc('zrusit_automaticke_parovani_faktury', {
-      p_tenant: tenantId, p_alokace: r.id,
-      p_duvod: `Ve Fakturách vráceno mezi neuhrazené (uživatel ${prihlaseny.user?.id ?? 'neznámý'}).`,
-    })
-    if (error) nelze()
-  }
-
-  const { data: zmeneno, error: chybaZmeny } = await p.supabase.from('faktury').update({ stav: cil })
-    .eq('tenant_id', tenantId).eq('id', id).eq('stav', STAV_UHRAZENO).select('id')
-  revalidatePath(`/${rozsah}/finance/faktury`)
-  if (chybaZmeny || (zmeneno ?? []).length === 0) {
-    // Automatická párování už jsou zrušená; další klik to dokončí.
-    redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Stav faktury se nepodařilo změnit (mezitím ho mohl změnit někdo jiný) — zkuste to znovu.')}`)
   }
   redirect(`/${rozsah}/finance/faktury/seznam`)
 }
@@ -320,9 +289,12 @@ export async function oznacitJakoUpominku(formData: FormData): Promise<void> {
   const { data } = await fakturyFirmy(p, 'dodavatel, email_odesilatel').eq('id', id).maybeSingle()
   const faktura = data as unknown as { dodavatel: string | null; email_odesilatel: string | null } | null
 
+  // Jen dokument z fronty ke schválení (jako potvrditFakturu) — podvržený
+  // formulář by jinak udělal upomínku i ze zaplacené faktury (databáze
+  // změnu stavu faktury s platbou odmítne, spoušť trg_faktury_hlida_uhradu).
   await p.supabase.from('faktury')
     .update({ stav: 'Upomínka - zkontrolovat', poznamka_kontroly: null, archivovano: false })
-    .eq('tenant_id', p.tenantId).eq('id', id)
+    .eq('tenant_id', p.tenantId).eq('id', id).eq('stav', STAV_KE_SCHVALENI)
 
   const vyrazeno = await najitSouvisejiciFaktury(p, id, faktura?.dodavatel, faktura?.email_odesilatel, STAV_KE_SCHVALENI)
   if (vyrazeno.size > 0) {
@@ -430,11 +402,19 @@ async function vyradSouvisejiciFaktury(
         ? `Automaticky vyřazeno – jiný dokument od dodavatele „${jmenoDodavatele}“ byl právě označen, že to není faktura.`
         : `Automaticky vyřazeno – jiný dokument od stejného odesílatele (${jmenoOdesilatele}) byl právě označen, že to není faktura.`
 
-    const { error } = await p.supabase.from('faktury')
-      .update({ stav: 'Odmítnuto', poznamka_kontroly: poznamka, archivovano: true })
-      .eq('tenant_id', p.tenantId).in('id', ids)
-
-    return error ? 0 : ids.length
+    // Zaplacené a spárované faktury se nevyřazují: zaplacená faktura je
+    // účetní fakt (Finance Fáze 0, krok 2) a databáze změnu stavu faktury
+    // s platbou odmítne. Po jedné, ať jedno odmítnutí nezastaví ostatní.
+    let vyrazeno = 0
+    for (const fakturaId of ids) {
+      const { data, error } = await p.supabase.from('faktury')
+        .update({ stav: 'Odmítnuto', poznamka_kontroly: poznamka, archivovano: true })
+        .eq('tenant_id', p.tenantId).eq('id', fakturaId)
+        .not('stav', 'in', `("${STAV_UHRAZENO}","${STAV_CASTECNE}")`)
+        .select('id')
+      if (!error) vyrazeno += (data ?? []).length
+    }
+    return vyrazeno
   } catch {
     return 0
   }

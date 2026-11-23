@@ -7,7 +7,7 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import type { RadekImportu } from '@/lib/finance-csv-import'
 import { zapsatVypis } from '@/lib/banka/zapis'
-import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
+import { najitNavrhyParovani } from '@/lib/finance-navrhy-parovani'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 
 /**
@@ -78,16 +78,21 @@ export async function potvrditImport(formData: FormData): Promise<void> {
   const davkaId = zapis.davkaId
   const pocetVlozenych = zapis.pocetNovych
 
-  // Nové platby z výpisu → jednoznačné shody s fakturami se spárují samy
-  // a faktura přejde na „Uhrazeno" (Šéfík 8. 10. 2026). Jen když import
-  // dělá člověk, který smí spravovat Faktury za celou firmu — CSV si může
-  // napsat kdokoli s financemi a bez téhle podmínky by jím „zaplatil"
-  // fakturu, kterou sám ručně označit nesmí. Důvěryhodná je jen TAHLE dávka.
-  const smiFaktury = (await zkusPristup(tenantId, 'faktury.manage', TENANT_SCOPE_SEGMENT)).stav === 'ok'
-  const parovani = smiFaktury
-    ? await automatickyParovatPlatby(tenantId, { konecMs: Date.now() + 20_000, duveryhodneDavky: [{ id: davkaId, pocet: pocetVlozenych }] })
-    : { sparovano: 0 }
+  // Nové platby z výpisu → jisté shody (VS + částka + IBAN dodavatele) se
+  // spárují samy a faktura přejde na „Uhrazeno" (Šéfík 8. 10. 2026,
+  // Finance Fáze 0 krok 2). Rozhoduje DATABÁZE pod přihlášením toho, kdo
+  // import dělá (`sparovat_jiste_z_davky`): jen dávka, kterou nahrál on
+  // sám, jen s právem potvrzovat párování (finance.manage + faktury.read)
+  // a jen když v dávce je přesně to, co zapsal import. CSV si může napsat
+  // kdokoli s financemi — appka sama nic nepouští. Bez práva vrátí 0.
+  let sparovano = 0
+  if (pocetVlozenych > 0) {
+    const { data, error } = await supabase.rpc('sparovat_jiste_z_davky', { p_tenant: tenantId, p_davka: davkaId })
+    if (!error && typeof data === 'number') sparovano = data
+  }
+  // Ostatní pohyby dostanou návrhy do fronty Návrhy párování (potvrzuje člověk).
+  if (pocetVlozenych > 0) await najitNavrhyParovani(tenantId, { konecMs: Date.now() + 15_000 })
 
   revalidatePath(`/${rozsah}/finance/platby`)
-  redirect(`/${rozsah}/finance/platby?importovano=${pocetVlozenych}&sparovano=${parovani.sparovano}`)
+  redirect(`/${rozsah}/finance/platby?importovano=${pocetVlozenych}&sparovano=${sparovano}`)
 }

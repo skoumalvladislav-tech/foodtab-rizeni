@@ -14,14 +14,10 @@ import { koruny } from '@/lib/mzdy'
 import {
   jeVKorunach,
   jeVracena,
-  kandidatiProNavrhy,
-  navrhnoutParovani,
   SLOUPCE_POTVRZENEHO_PAROVANI,
   SLOUPCE_PRIJMU_PRO_VRACENI,
   sloupceSeznamuPlateb,
   type KandidatFaktura,
-  type KandidatTransakce,
-  type Navrh,
 } from '@/lib/finance-parovani'
 import { protistranaNeboUcet } from '@/lib/banka/ucet'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
@@ -38,10 +34,11 @@ export const dynamic = 'force-dynamic'
 /**
  * Finance — Platby.
  *
- * Ruční zápis pohybu, přehled posledních transakcí a fronta návrhů
- * párování s fakturami. Návrhy se POČÍTAJÍ při každém načtení (nic se
- * neukládá jako „navrženo“) — uložený řádek v `platby_faktury` vzniká
- * teprve potvrzením, vždy lidským kliknutím (zadání, oddíl 5).
+ * Ruční zápis pohybu, přehled posledních transakcí, ruční párování
+ * a odkazy na dvě fronty (Finance Fáze 0, krok 2): Návrhy párování
+ * (uložené `platby_faktury` 'navrzeno', hledá je synchronizace banky
+ * a import výpisu — lib/finance-navrhy-parovani.ts) a Platby bez faktury
+ * (pro účetní). Návrh nic neplatí: potvrzuje ho vždy člověk.
  *
  * ---------------------------------------------------------------------
  * NA POBOČCE (Šéfík 13. 10. 2026: „mám otevřený Bernard Bar, budou
@@ -212,19 +209,26 @@ async function nactiPotvrzeneAlokace(
 /** PostgREST vrací nejvýš 1000 řádků na dotaz; aktivních faktur je víc (7.10.2026: 1872). */
 const STRANKA_FAKTUR = 1000
 
-async function nactiNavrhyParovani(
+/**
+ * Faktury pro ruční párování a počet návrhů ve frontě. Návrhy se tu už
+ * nepočítají (dřív při každém načtení jen z 30 posledních plateb) —
+ * fronta je uložená a stejná pro Platby, Návrhy párování i Přehled.
+ */
+async function nactiParovani(
   tenantId: string,
-  transakce: readonly Transakce[],
-  alokovanoMapa: ReadonlyMap<string, number>,
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
   vidiFaktury: boolean,
-): Promise<{ navrhy: { navrh: Navrh; faktura: KandidatFaktura }[]; faktury: KandidatFaktura[]; zavreno: string | null }> {
-  if (!vidiFaktury) return { navrhy: [], faktury: [], zavreno: null }
+): Promise<{ pocetNavrhu: number; faktury: KandidatFaktura[]; zavreno: string | null }> {
+  if (!vidiFaktury) return { pocetNavrhu: 0, faktury: [], zavreno: null }
   const pristupFaktury = await pristupKFakturam(tenantId)
   // Zavřené Faktury (stěhují se, vrácené, chyba) — říct proč, ne mlčet.
   if (pristupFaktury.stav !== 'ok') {
-    return { navrhy: [], faktury: [], zavreno: `${hlaskaBrany(pristupFaktury).text} Párování s fakturami teď nejde.` }
+    return { pocetNavrhu: 0, faktury: [], zavreno: `${hlaskaBrany(pristupFaktury).text} Párování s fakturami teď nejde.` }
   }
-  const nenacteno = { navrhy: [], faktury: [], zavreno: 'Faktury pro párování se nepodařilo načíst — zkuste stránku obnovit.' }
+  const nenacteno = { pocetNavrhu: 0, faktury: [], zavreno: 'Faktury pro párování se nepodařilo načíst — zkuste stránku obnovit.' }
+  const { count: pocetNavrhu, error: chybaNavrhu } = await supabase.from('platby_faktury')
+    .select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('stav', 'navrzeno')
+  if (chybaNavrhu) return nenacteno
 
   const faktury: Faktura[] = []
   try {
@@ -242,42 +246,17 @@ async function nactiNavrhyParovani(
     return nenacteno
   }
 
-  if (faktury.length === 0) return { navrhy: [], faktury: [], zavreno: null }
-
-  const naKandidata = (f: Faktura): KandidatFaktura => ({
+  // Ruční párování nabízí všechny nezaplacené; jinou měnu než platba
+  // databáze odmítne s větou (párování se vede v jedné měně).
+  const kandidati: KandidatFaktura[] = faktury.map((f) => ({
     id: f.id,
     vs: f.variable_symbol,
     castkaHaleru: f.castka_haleru,
     dodavatel: f.supplier,
     datum: f.due_date ?? f.issue_date,
     mena: f.currency,
-  })
-  // Ruční párování nabízí všechny; NÁVRHY jen faktury v Kč — platby jsou
-  // v Kč a centy eurové faktury by se porovnaly s haléři (stejně jako
-  // automatické párování, vybratAutomatickaParovani).
-  const kandidati: KandidatFaktura[] = faktury.map(naKandidata)
-  const kandidatiNavrhu: KandidatFaktura[] = kandidatiProNavrhy(faktury)
-
-  const vysledky: { navrh: Navrh; faktura: KandidatFaktura }[] = []
-  for (const t of transakce) {
-    // Jen plně nespárované NEBO částečně spárované s nevyčerpaným
-    // zbytkem (hromadná platba) — appka transakci nepustí z očí jen
-    // proto, že na ni leží JEDNA dřívější alokace.
-    const zbyva = t.castka_haleru - (alokovanoMapa.get(t.id) ?? 0)
-    if (t.smer !== 'vydaj' || zbyva <= 0) continue
-    const kandidatTransakce: KandidatTransakce = {
-      id: t.id,
-      vs: t.vs,
-      castkaHaleru: zbyva,
-      protistrana: t.protistrana,
-      datum: t.datum,
-    }
-    const navrh = navrhnoutParovani(kandidatTransakce, kandidatiNavrhu)
-    if (!navrh) continue
-    const faktura = kandidatiNavrhu.find((k) => k.id === navrh.fakturaId)
-    if (faktura) vysledky.push({ navrh, faktura })
-  }
-  return { navrhy: vysledky, faktury: kandidati, zavreno: null }
+  }))
+  return { pocetNavrhu: pocetNavrhu ?? 0, faktury: kandidati, zavreno: null }
 }
 
 export default async function FinancePlatby({
@@ -369,10 +348,10 @@ export default async function FinancePlatby({
   const vidiFaktury = canSee(pristup.ctx, 'faktury.read')
   // Párování (návrhy, ruční, potvrzená) jen za celou firmu — na pobočce
   // se nenačítá ani databáze Faktur.
-  const parovani: Awaited<ReturnType<typeof nactiNavrhyParovani>> = pobocka
-    ? { navrhy: [], faktury: [], zavreno: null }
-    : await nactiNavrhyParovani(tenantId, transakce, alokovanoMapa, vidiFaktury)
-  const { navrhy, faktury: fakturyKandidati } = parovani
+  const parovani: Awaited<ReturnType<typeof nactiParovani>> = pobocka
+    ? { pocetNavrhu: 0, faktury: [], zavreno: null }
+    : await nactiParovani(tenantId, supabase, vidiFaktury)
+  const { pocetNavrhu, faktury: fakturyKandidati } = parovani
   const potvrzeneAlokace: PotvrzenaAlokace[] = pobocka
     ? []
     : await nactiPotvrzeneAlokace(tenantId, supabase, vidiFaktury, fakturaFiltr?.trim() || null)
@@ -401,7 +380,7 @@ export default async function FinancePlatby({
         {importovano ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>
             Import hotový — zapsáno {importovano} {importovano === '1' ? 'nová platba' : 'nových plateb'}.
-            {sparovano && sparovano !== '0' ? ` Jednoznačně spárováno s fakturami: ${sparovano} (ve Fakturách se přepnou na Uhrazeno nejpozději při příští synchronizaci).` : ''}
+            {sparovano && sparovano !== '0' ? ` Jistě spárováno s fakturami (VS, částka i účet dodavatele): ${sparovano} — faktury jsou rovnou vedené jako uhrazené.` : ''}
           </p>
         ) : null}
         {prebytek ? (
@@ -450,42 +429,20 @@ export default async function FinancePlatby({
           <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>{parovani.zavreno}</p>
         ) : null}
 
-        {navrhy.length > 0 ? (
-          <section style={{ display: 'grid', gap: '10px' }}>
-            <h2 style={{ margin: 0, fontSize: '15px' }}>Návrhy párování ({navrhy.length})</h2>
-            {navrhy.map(({ navrh, faktura }) => {
-              const transakceNavrhu = transakce.find((t) => t.id === navrh.transakceId)
-              // Zbytek platby, ne celá — u hromadné platby (víc faktur na
-              // jednu transakci) UŽ část mohla být alokovaná dřív.
-              const zbyvaHaleru = transakceNavrhu ? zbyvaNaTransakci(transakceNavrhu) : 0
-              // Alokovat NEJVÝŠ tolik, kolik z platby ještě zbývá — dřív
-              // se sem natvrdo dávala celá částka faktury, takže platba
-              // nižší než faktura (částečná úhrada) by appku nahlásila
-              // jako plně uhrazenou. `app.potvrdit_alokaci_platby` tohle
-              // i tak ověří (nikdy nedůvěřuje jen klientovi), tohle je
-              // jen rozumná výchozí hodnota pro tlačítko.
-              const castkaKAlokaciHaleru = Math.min(zbyvaHaleru, faktura.castkaHaleru)
-              return (
-                <div key={`${navrh.transakceId}-${navrh.fakturaId}`} style={{ ...karta, display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                  <div>
-                    <div style={{ fontSize: '13.5px' }}>
-                      Zbývá {koruny(zbyvaHaleru)} ↔ faktura {faktura.dodavatel ?? '—'} ({koruny(faktura.castkaHaleru)})
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Jistota {Math.round(navrh.jistota * 100)} %</div>
-                  </div>
-                  {smiPsat ? (
-                    <form action={potvrditParovani}>
-                      <input type="hidden" name="rozsah" value={rozsah} />
-                      <input type="hidden" name="transakce_id" value={navrh.transakceId} />
-                      <input type="hidden" name="faktura_id" value={navrh.fakturaId} />
-                      <input type="hidden" name="castka_haleru" value={castkaKAlokaciHaleru} />
-                      <input type="hidden" name="jistota" value={navrh.jistota} />
-                      <button type="submit" className="ft-tl ft-tl-hlavni">Potvrdit párování</button>
-                    </form>
-                  ) : null}
-                </div>
-              )
-            })}
+        {!pobocka && vidiFaktury && !parovani.zavreno ? (
+          <section style={{ ...karta, display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '15px' }}>Návrhy párování ({pocetNavrhu})</h2>
+              <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--muted)' }}>
+                {pocetNavrhu > 0
+                  ? 'Platby, ke kterým appka našla pravděpodobnou fakturu. Sama je nezaplatí — potvrďte nebo odmítněte.'
+                  : 'Žádný návrh nečeká. Appka hledá nové po každé synchronizaci banky a importu výpisu.'}
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <Link href={`/${rozsah}/finance/platby/navrhy`} className={pocetNavrhu > 0 ? 'ft-tl ft-tl-hlavni' : 'ft-tl'}>Návrhy párování</Link>
+              <Link href={`/${rozsah}/finance/platby/bez-faktury`} className="ft-tl">Platby bez faktury</Link>
+            </div>
           </section>
         ) : null}
 
@@ -547,7 +504,7 @@ export default async function FinancePlatby({
                     {a.transakce ? ` · ${a.transakce.protistrana || '—'} (${a.transakce.datum})` : ''}
                   </div>
                   {a.automaticky ? (
-                    <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Spárováno automaticky (stejný VS a částka) — když nesedí, zrušte.</div>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Spárováno automaticky (stejný VS, částka i účet dodavatele) — když nesedí, zrušte.</div>
                   ) : null}
                   {a.moznaVracena ? (
                     <div role="alert" style={{ fontSize: '12px', color: 'var(--pozor)' }}>
@@ -556,9 +513,20 @@ export default async function FinancePlatby({
                   ) : null}
                 </div>
                 {smiPsat ? (
-                  <form action={zrusitAlokaci}>
+                  <form action={zrusitAlokaci} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <input type="hidden" name="rozsah" value={rozsah} />
                     <input type="hidden" name="alokace_id" value={a.id} />
+                    {/* Důvod zrušení je povinný — zůstane v historii (audit). */}
+                    <input
+                      type="text"
+                      name="duvod"
+                      required
+                      minLength={5}
+                      maxLength={300}
+                      aria-label="Důvod zrušení párování"
+                      placeholder="Proč párování rušíte"
+                      style={{ ...pole, width: 'auto', minWidth: '200px' }}
+                    />
                     <button type="submit" className="ft-tl">Zrušit párování</button>
                   </form>
                 ) : null}

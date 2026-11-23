@@ -3,8 +3,8 @@ import 'server-only'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
 import { naFaktury, type RadekFaktury } from '@/lib/faktury-sloupce'
-import { jeNezaplacena, potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
-import { jeVKorunach, kandidatiProNavrhy, navrhnoutParovani, SLOUPCE_NAVRHU_POZORNOSTI } from '@/lib/finance-parovani'
+import { potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
+import { jeVKorunach, SLOUPCE_NAVRHU_POZORNOSTI } from '@/lib/finance-parovani'
 import { protistranaNeboUcet } from '@/lib/banka/ucet'
 import { prazdnoPozornosti } from '@/lib/faktury-brana'
 import { koruny } from '@/lib/mzdy'
@@ -14,10 +14,9 @@ import { koruny } from '@/lib/mzdy'
  * appkou už spočítané signály (žádná vymyšlená řádka jen aby seděl
  * počet se vzorem obrazovky):
  *
- *   1. Návrhy párování plateb s fakturami (stejný algoritmus jako
- *      app/[rozsah]/finance/platby/page.tsx, jen přes vlastní dotaz —
- *      viz komentář tam, proč se to nerozebírá do jedné sdílené
- *      funkce: `lib/finance-parovani.ts` je vědomě bez IO).
+ *   1. Návrhy párování plateb s fakturami — uložené ve frontě
+ *      (`platby_faktury` ve stavu 'navrzeno', Finance Fáze 0 krok 2),
+ *      stejné jako Platby → Návrhy párování.
  *   2. Faktury, které potřebují ruční kontrolu (`potrebujeKontrolu`).
  *
  * Když appka Fakturám nedosáhne (`pristupKFakturam()` není ok, nebo
@@ -79,56 +78,57 @@ export async function nactiPolozkyKPozornosti(
     return nenacteno
   }
 
-  // 1. Návrhy párování — nezaplacené faktury v Kč proti nedávným výdajovým
-  // transakcím (stejná sdílená funkce jako v Platbách).
-  const kandidati = kandidatiProNavrhy(faktury.filter(jeNezaplacena))
-  if (kandidati.length > 0) {
-
+  // 1. Návrhy párování — ULOŽENÉ ve frontě (Finance Fáze 0, krok 2: hledá
+  // je synchronizace banky a import výpisu, lib/finance-navrhy-parovani.ts).
+  // Stejná data jako Platby → Návrhy párování, jeden řádek na platbu.
+  {
     const supabase = await getServerSupabase()
-    const [transakceRes, sparovaneRes] = await Promise.all([
-      supabase
+    const { data: navrhyData, error: navrhyChyba } = await supabase.from('platby_faktury')
+      .select('transakce_id, faktura')
+      .eq('tenant_id', tenantId).eq('stav', 'navrzeno')
+      .order('created_at', { ascending: false })
+      .limit(limitTransakci * 3)
+    if (navrhyChyba) return nenacteno
+    const navrhy = (navrhyData ?? []) as { transakce_id: string; faktura: string | null }[]
+    const fakturaPlatby = new Map<string, string | null>()
+    for (const n of navrhy) if (!fakturaPlatby.has(n.transakce_id)) fakturaPlatby.set(n.transakce_id, n.faktura)
+
+    if (fakturaPlatby.size > 0) {
+      const { data: transakceData, error: transakceChyba } = await supabase
         .from('transakce')
         .select(SLOUPCE_NAVRHU_POZORNOSTI)
         .eq('tenant_id', tenantId)
-        .eq('smer', 'vydaj')
-        .order('datum', { ascending: false })
-        .limit(limitTransakci),
-      supabase.from('platby_faktury').select('transakce_id').eq('tenant_id', tenantId),
-    ])
+        .in('id', [...fakturaPlatby.keys()].slice(0, limitTransakci))
+      if (transakceChyba) return nenacteno
 
-    const jizSparovane = new Set(((sparovaneRes.data ?? []) as { transakce_id: string }[]).map((r) => r.transakce_id))
+      type RadekTransakce = {
+        id: string
+        castka_haleru: number
+        datum: string
+        protistrana: string | null
+        protiucet: string | null
+        vs: string
+        platebni_ucty: { branch_id: string | null; nazev: string } | { branch_id: string | null; nazev: string }[] | null
+      }
+      const dodavatele = new Map(faktury.map((f) => [f.id, f.supplier]))
 
-    type RadekTransakce = {
-      id: string
-      castka_haleru: number
-      datum: string
-      protistrana: string | null
-      protiucet: string | null
-      vs: string
-      platebni_ucty: { branch_id: string | null; nazev: string } | { branch_id: string | null; nazev: string }[] | null
-    }
-
-    for (const t of (transakceRes.data ?? []) as RadekTransakce[]) {
-      if (jizSparovane.has(t.id)) continue
-      // Protistrana = jméno, jinak číslo účtu — stejně jako v Platbách
-      // (do kroku 1 stálo číslo účtu přímo v protistraně).
-      const protistrana = protistranaNeboUcet(t.protistrana, t.protiucet)
-      const navrh = navrhnoutParovani({ id: t.id, vs: t.vs, castkaHaleru: t.castka_haleru, protistrana, datum: t.datum }, kandidati)
-      if (!navrh) continue
-      const faktura = kandidati.find((k) => k.id === navrh.fakturaId)
-      if (!faktura) continue
-
-      const ucet = Array.isArray(t.platebni_ucty) ? t.platebni_ucty[0] : t.platebni_ucty
-      polozky.push({
-        klic: `parovani-${t.id}`,
-        typ: 'parovani',
-        popis: `Platba ${koruny(t.castka_haleru)} ↔ faktura ${faktura.dodavatel ?? '—'}`,
-        stredisko: ucet?.nazev ?? '—',
-        castkaHaleru: t.castka_haleru,
-        stav: 'ceka',
-        akceHref: `/${rozsah}/finance/platby`,
-        akceText: 'Spárovat',
-      })
+      for (const t of (transakceData ?? []) as RadekTransakce[]) {
+        // Protistrana = jméno, jinak číslo účtu — stejně jako v Platbách
+        // (do kroku 1 stálo číslo účtu přímo v protistraně).
+        const protistrana = protistranaNeboUcet(t.protistrana, t.protiucet)
+        const fakturaId = fakturaPlatby.get(t.id) ?? null
+        const ucet = Array.isArray(t.platebni_ucty) ? t.platebni_ucty[0] : t.platebni_ucty
+        polozky.push({
+          klic: `parovani-${t.id}`,
+          typ: 'parovani',
+          popis: `Platba ${koruny(t.castka_haleru)} (${protistrana || '—'}) ↔ faktura ${(fakturaId && dodavatele.get(fakturaId)) || '—'}`,
+          stredisko: ucet?.nazev ?? '—',
+          castkaHaleru: t.castka_haleru,
+          stav: 'ceka',
+          akceHref: `/${rozsah}/finance/platby/navrhy`,
+          akceText: 'Zkontrolovat návrh',
+        })
+      }
     }
   }
 

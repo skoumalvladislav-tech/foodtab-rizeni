@@ -1,10 +1,12 @@
 /**
  * Párování bankovních/pokladních transakcí s fakturami.
  *
- * Zadání (docs/Foodtab_Claude_Code_nocni_zadani.md, oddíl 5): VS přesná
- * shoda (+0.5), částka (+0.3), protistrana fuzzy (+0.2), blízkost data
- * (+0.1). Jistota ≥ `PRAH_NAVRHU` se NABÍDNE, nikdy se nepotvrdí sama —
- * potvrzení je vždy lidský klik (`platby_faktury.stav`).
+ * Finance Fáze 0, krok 2 (docs/finance-faze0-zadani.md): (1) VS + částka
+ * + IBAN dodavatele = jisté, spáruje se samo (`vybratAutomatickaParovani`,
+ * v databázi `app.posoudit_jistou_shodu`); (2) částka + dodavatel + datum
+ * v rozumném okně = návrh (`navrhyParovani`, potvrzuje vždy člověk);
+ * (3) jinak nespárováno (fronta Platby bez faktury). Dřívější bodování
+ * (VS +0.5, částka +0.3, …) nahradily pevné stupně návrhů.
  *
  * Čistá logika, žádné IO — proto bez `import 'server-only'`, testovatelná
  * přímo Nodem (scripts/finance-parovani.test.mjs). Volající (server akce
@@ -13,7 +15,7 @@
  */
 
 import { ZDROJ_BANKY_API } from './banka/konektor.ts'
-import { protistranaNeboUcet } from './banka/ucet.ts'
+import { ibanZUctu, protistranaNeboUcet } from './banka/ucet.ts'
 
 export type KandidatTransakce = {
   id: string
@@ -34,111 +36,26 @@ export type KandidatFaktura = {
   mena?: string | null
 }
 
-export type Navrh = {
-  transakceId: string
-  fakturaId: string
-  jistota: number
-}
-
-/** Jistota ≥ tohle se nabídne jako návrh — ale nikdy se nepotvrdí sama. */
-export const PRAH_NAVRHU = 0.9
-
-/** Bez diakritiky, malá písmena, bez okrajových mezer — na porovnání textu, ne na zobrazení. */
-function normalizovat(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ' ')
-}
-
-/** Přesná shoda VS po trimu nuly vlevo nejsou — „123" a „0123" se neshodují, banky je nedoplňují samy. */
-function shodaVs(a: string, b: string | null): boolean {
-  if (!b) return false
-  const ta = a.trim()
-  const tb = b.trim()
-  return ta.length > 0 && ta === tb
-}
-
-/** Podíl slov protistrany, která se objeví i v názvu dodavatele (a naopak) — nejhorší ze dvou směrů vyhrává přísnost. */
-function podobnostProtistrany(a: string, b: string | null): number {
-  if (!b) return 0
-  const na = normalizovat(a)
-  const nb = normalizovat(b)
-  if (!na || !nb) return 0
-  if (na === nb) return 1
-  if (na.includes(nb) || nb.includes(na)) return 0.8
-
-  const slovaA = new Set(na.split(' ').filter((s) => s.length > 2))
-  const slovaB = new Set(nb.split(' ').filter((s) => s.length > 2))
-  if (slovaA.size === 0 || slovaB.size === 0) return 0
-
-  let shoda = 0
-  for (const s of slovaA) if (slovaB.has(s)) shoda++
-  return shoda / Math.max(slovaA.size, slovaB.size)
-}
-
-/** Dny mezi dvěma kalendářními daty (`'YYYY-MM-DD'`), bez posunu pásmem. */
-function rozdilDni(a: string, b: string): number {
-  const [ay, am, ad] = a.split('-').map(Number)
-  const [by, bm, bd] = b.split('-').map(Number)
-  return Math.abs(Date.UTC(ay, am - 1, ad) - Date.UTC(by, bm - 1, bd)) / 86_400_000
-}
-
-/** Plná váha do 3 dnů, lineárně klesá k nule po 30 dnech. */
-function blizkostData(a: string, b: string | null): number {
-  if (!b) return 0
-  const d = rozdilDni(a, b)
-  if (d <= 3) return 1
-  if (d >= 30) return 0
-  return 1 - (d - 3) / 27
-}
-
-/** Jistota shody jedné transakce s jednou fakturou, 0 až 1. */
-export function jistotaShody(transakce: KandidatTransakce, faktura: KandidatFaktura): number {
-  let jistota = 0
-  if (shodaVs(transakce.vs, faktura.vs)) jistota += 0.5
-  if (transakce.castkaHaleru === faktura.castkaHaleru) jistota += 0.3
-  jistota += 0.2 * podobnostProtistrany(transakce.protistrana, faktura.dodavatel)
-  jistota += 0.1 * blizkostData(transakce.datum, faktura.datum)
-  return Math.min(1, Math.round(jistota * 1000) / 1000)
-}
-
-/**
- * Nejlepší návrh pro jednu transakci napříč fakturami — jen pod prahem
- * se nic nevrátí, ať se slabá shoda nenabízí jako by byla jistá.
- */
-export function navrhnoutParovani(
-  transakce: KandidatTransakce,
-  faktury: readonly KandidatFaktura[],
-): Navrh | null {
-  let nejlepsi: Navrh | null = null
-  for (const f of faktury) {
-    const jistota = jistotaShody(transakce, f)
-    if (jistota < PRAH_NAVRHU) continue
-    if (!nejlepsi || jistota > nejlepsi.jistota) {
-      nejlepsi = { transakceId: transakce.id, fakturaId: f.id, jistota }
-    }
-  }
-  return nejlepsi
-}
-
 /* ---------------------------------------------------------------------
  * Automatické párování (Šéfík 8. 10. 2026: „faktury se mají automaticky
  * přesunout do uhrazených ve chvíli spárování s platbou z výpisu").
  *
  * Sama se potvrdí jen JEDNOZNAČNÁ shoda — vše ostatní zůstává návrhem
- * k ručnímu potvrzení (`navrhnoutParovani` výš). Jednoznačná znamená
+ * k ručnímu potvrzení (`navrhyParovani` níž). Finance Fáze 0, krok 2:
+ * jistá shoda = VS + částka + IBAN dodavatele. Jednoznačná znamená
  * všechno najednou (pravidla zpřísněná po dvou kolech kontroly kódu):
  *   - platba přišla Z BANKY přes API (zdroj `banka_api`) — ty zapisuje jen
- *     synchronizace (pojistka v databázi). Výpis CSV jen z dávky, kterou
- *     nahrál člověk s právem spravovat Faktury (volající ji předá), nebo
- *     řádek výpisu, který potvrdilo stažení z banky (`platbaZBanky`);
- *     ruční zápis ani pokladna nikdy;
- *   - stejný variabilní symbol (přesně) A přesně stejná částka, obojí
- *     v Kč (párování se vede v haléřích); jméno protistrany musí sedět
- *     s dodavatelem (většina významných slov, bez „s.r.o.", „a.s.");
+ *     synchronizace (pojistka v databázi) — nebo řádek výpisu, který
+ *     potvrdilo stažení z banky (`platbaZBanky`); ruční zápis ani pokladna
+ *     nikdy. Dávku výpisu, kterou právě nahrál člověk, posuzuje jen
+ *     databáze (`sparovat_jiste_z_davky`, práva i počet řádků dávky);
+ *   - nestornovaná a nestornující;
+ *   - stejný variabilní symbol (bez mezer a úvodních nul) A přesně stejná
+ *     částka, obojí ve STEJNÉ vyplněné měně — prázdná měna nikdy jistě
+ *     (otázka 111); jméno protistrany musí sedět s dodavatelem (většina
+ *     významných slov, bez „s.r.o.", „a.s.");
+ *   - účet protistrany je platný IBAN (nebo český účet převeditelný na
+ *     IBAN) a je to TÝŽ účet, který je na faktuře (`ibanZUctu`);
  *   - JEDNOZNAČNOST nad VŠEMI fakturami (i uhrazenými, archivovanými,
  *     odmítnutými) a všemi výdaji za 180 dní: VS se porovná bez mezer
  *     a úvodních nul („0012345" = „12345") a za soupeře se bere i faktura
@@ -171,6 +88,8 @@ export type AutoTransakce = KandidatTransakce & {
    * tenhle řádek je ta platba z banky.
    */
   potvrzenoBankou?: boolean
+  /** Pohyb je storno jiného, nebo ho jiný pohyb stornoval (`transakce.storno_of`). */
+  stornovano?: boolean
 }
 
 /*
@@ -183,7 +102,7 @@ export type AutoTransakce = KandidatTransakce & {
  */
 
 /** Úloha automatického párování (lib/finance-automaticke-parovani.ts). */
-export const SLOUPCE_AUTOMATICKEHO_PAROVANI = 'id, vs, castka_haleru, protistrana, protiucet, datum, zdroj, mena, smer, import_davka_id'
+export const SLOUPCE_AUTOMATICKEHO_PAROVANI = 'id, vs, castka_haleru, protistrana, protiucet, datum, zdroj, mena, smer, import_davka_id, storno_of'
 
 /** Platby → potvrzená párování: platba u faktury. */
 export const SLOUPCE_POTVRZENEHO_PAROVANI = 'id, datum, protistrana, protiucet, vs, castka_haleru'
@@ -204,6 +123,7 @@ export function sloupceSeznamuPlateb(naPobocce: boolean): string {
 export type RadekTransakceParovani = {
   id: string; vs: string | null; castka_haleru: number; protistrana: string | null; protiucet: string | null; datum: string
   zdroj: string; mena: string | null; smer: string; import_davka_id: string | null
+  storno_of?: string | null
 }
 
 /**
@@ -214,28 +134,37 @@ export type RadekTransakceParovani = {
  * bez VS z téhož účtu se pozná.
  *
  * `potvrzeneBankou` = id řádků výpisu, které potvrdilo stažení z banky
- * (`transakce_potvrzeni_banky.transakce_id`).
+ * (`transakce_potvrzeni_banky.transakce_id`). `stornovane` = id pohybů,
+ * na které ukazuje `storno_of` jiného pohybu (stornované bankou).
+ *
+ * Měna se NEDOPLŇUJE: prázdná zůstane prázdná a jistá shoda ji nevezme
+ * (otázka 111) — pro součty a stav platí prázdná = CZK (`menaNeboCzk`).
  */
-export function autoTransakceZRadku(t: RadekTransakceParovani, potvrzeneBankou?: ReadonlySet<string>): AutoTransakce {
+export function autoTransakceZRadku(
+  t: RadekTransakceParovani,
+  potvrzeneBankou?: ReadonlySet<string>,
+  stornovane?: ReadonlySet<string>,
+): AutoTransakce {
   return {
     id: t.id, vs: t.vs ?? '', castkaHaleru: t.castka_haleru,
     protistrana: protistranaNeboUcet(t.protistrana, t.protiucet), protiucet: t.protiucet ?? '',
-    datum: t.datum, alokovanoHaleru: 0, zdroj: t.zdroj, mena: t.mena ?? 'CZK',
+    datum: t.datum, alokovanoHaleru: 0, zdroj: t.zdroj, mena: t.mena ?? '',
     smer: t.smer === 'prijem' ? 'prijem' : 'vydaj', davkaId: t.import_davka_id,
     potvrzenoBankou: t.zdroj === 'csv_banka' && (potvrzeneBankou?.has(t.id) ?? false),
+    stornovano: (t.storno_of ?? null) !== null || (stornovane?.has(t.id) ?? false),
   }
 }
 
 /**
- * Věří se platbě jako platbě Z BANKY? Stažení přes API (zapisuje jen
- * synchronizace), řádek výpisu potvrzený stažením z banky, nebo řádek
- * výpisu z dávky, kterou právě nahrál člověk s právem spravovat Faktury.
- * Ruční zápis ani pokladna nikdy.
+ * Věří se platbě jako platbě Z BANKY (pro úlohu bez přihlášeného)?
+ * Stažení přes API (zapisuje jen synchronizace) nebo řádek výpisu
+ * potvrzený stažením z banky. Ruční zápis ani pokladna nikdy. Dávku
+ * výpisu, kterou právě nahrál člověk, posuzuje databáze sama
+ * (`sparovat_jiste_z_davky` — kdo ji nahrál, jeho práva, počet řádků).
  */
-export function platbaZBanky(t: Pick<AutoTransakce, 'zdroj' | 'davkaId' | 'potvrzenoBankou'>, duveryhodneDavky: ReadonlySet<string>): boolean {
+export function platbaZBanky(t: Pick<AutoTransakce, 'zdroj' | 'potvrzenoBankou'>): boolean {
   if (ZDROJE_Z_API.includes(t.zdroj)) return true
-  if (t.zdroj !== 'csv_banka') return false
-  return t.potvrzenoBankou === true || (t.davkaId !== null && duveryhodneDavky.has(t.davkaId))
+  return t.zdroj === 'csv_banka' && t.potvrzenoBankou === true
 }
 export type AutoFaktura = KandidatFaktura & {
   stav: string | null
@@ -243,6 +172,8 @@ export type AutoFaktura = KandidatFaktura & {
   duplicita: boolean
   archivovana: boolean
   mena: string | null
+  /** Účet dodavatele z faktury (`faktury.ucet_dodavatele`), jak ho přečetl příjem. */
+  ucetDodavatele?: string | null
 }
 
 /** Stavy faktury, které se smí zaplatit samy (schválené k úhradě). */
@@ -275,35 +206,19 @@ function mena(m: string | null | undefined): string {
   return (m ?? '').trim().toUpperCase() || 'CZK'
 }
 
+/** Měna pro součty, stav a návrhy: prázdná = CZK (jako `app.mena_nebo_czk`). */
+export function menaNeboCzk(m: string | null | undefined): string {
+  return mena(m)
+}
+
+/** Měna pro JISTOU shodu: prázdná = neznámá (null), nikdy „asi Kč". */
+function menaJiste(m: string | null | undefined): string | null {
+  return (m ?? '').trim().toUpperCase() || null
+}
+
 /** Je faktura v Kč (stejné pravidlo jako automatické párování)? */
 export function jeVKorunach(m: string | null | undefined): boolean {
   return mena(m) === 'CZK'
-}
-
-/**
- * Faktury pro NÁVRHY párování — jen v Kč. Platby jsou v Kč a částka
- * faktury je v nejmenší jednotce JEJÍ měny: eurové centy by se porovnaly
- * s haléři a faktura na 1 000 EUR by se „shodovala" s platbou 1 000 Kč
- * (kontrola 19. 10.). Sdílí ji Platby i Finance → Přehled, ať se návrhy
- * na obou místech neliší.
- */
-export function kandidatiProNavrhy(faktury: readonly {
-  id: string
-  variable_symbol: string | null
-  castka_haleru: number
-  supplier: string | null
-  due_date: string | null
-  issue_date: string | null
-  currency?: string | null
-}[]): KandidatFaktura[] {
-  return faktury.filter((f) => jeVKorunach(f.currency)).map((f) => ({
-    id: f.id,
-    vs: f.variable_symbol,
-    castkaHaleru: f.castka_haleru,
-    dodavatel: f.supplier,
-    datum: f.due_date ?? f.issue_date,
-    mena: 'CZK',
-  }))
 }
 
 /** Kladně = `datum` PO `vychozi`. */
@@ -370,17 +285,20 @@ export function jeVracena(platba: PohybVraceni, prijmy: readonly PohybVraceni[])
  * `transakce` = VŠECHNY pohyby (výdaje i příjmy) z posledních 180 dní,
  * `faktury` = VŠECHNY faktury (i uhrazené, archivované, odmítnuté, bez
  * částky) — jen tak jde poznat, že shoda není jednoznačná.
- * `zamitnute` = dvojice `transakceId|fakturaId`, které člověk zrušil;
- * `duveryhodneDavky` = dávky CSV výpisu, které nahrál člověk s právem
- * spravovat Faktury.
+ * `zamitnute` = dvojice `transakceId|fakturaId`, které člověk zrušil.
+ *
+ * Databáze (`app.posoudit_jistou_shodu`) totéž ověří znovu a přísněji
+ * (soupeři i mezi stornovanými, ruční úhrady, Jiné platby); tohle je
+ * výběr kandidátů, ne rozhodnutí. Navíc proti databázi: jméno
+ * protistrany a faktura bez VS se stejnou částkou — ty databáze nemá
+ * (otázka 135).
  */
 export function vybratAutomatickaParovani(
   transakce: readonly AutoTransakce[],
   faktury: readonly AutoFaktura[],
-  moznosti: { zamitnute?: ReadonlySet<string>; duveryhodneDavky?: ReadonlySet<string> } = {},
+  moznosti: { zamitnute?: ReadonlySet<string> } = {},
 ): AutomatickeParovani[] {
   const zamitnute = moznosti.zamitnute ?? new Set<string>()
-  const duveryhodneDavky = moznosti.duveryhodneDavky ?? new Set<string>()
 
   const fakturyPodleVs = new Map<string, AutoFaktura[]>()
   const fakturyBezVs: AutoFaktura[] = []
@@ -391,17 +309,20 @@ export function vybratAutomatickaParovani(
   }
   const vydaje = transakce.filter((t) => t.smer === 'vydaj')
   const prijmy = transakce.filter((t) => t.smer === 'prijem')
+  // Soupeřící platby: stejný VS a částka; stornovaný pár se nepočítá
+  // (stejně jako souper_platba v databázi).
   const vydajePodleKlice = new Map<string, number>()
   for (const t of vydaje) {
     const v = normalizovatVs(t.vs)
-    if (v && t.castkaHaleru > 0) vydajePodleKlice.set(`${v}|${t.castkaHaleru}`, (vydajePodleKlice.get(`${v}|${t.castkaHaleru}`) ?? 0) + 1)
+    if (v && t.castkaHaleru > 0 && !t.stornovano) vydajePodleKlice.set(`${v}|${t.castkaHaleru}`, (vydajePodleKlice.get(`${v}|${t.castkaHaleru}`) ?? 0) + 1)
   }
 
   const vysledek: AutomatickeParovani[] = []
   for (const t of vydaje) {
     const v = normalizovatVs(t.vs)
     if (!v || t.castkaHaleru <= 0 || t.alokovanoHaleru !== 0) continue
-    if (!platbaZBanky(t, duveryhodneDavky)) continue
+    if (t.stornovano) continue
+    if (!platbaZBanky(t)) continue
     if (vydajePodleKlice.get(`${v}|${t.castkaHaleru}`) !== 1) continue
 
     // Soupeři: stejný VS a stejná částka — nebo částka, kterou příjem nepřečetl.
@@ -413,10 +334,16 @@ export function vybratAutomatickaParovani(
       g.datum !== null && Math.abs(dnyOd(t.datum, g.datum)) <= NEJVIC_DNI_PO_FAKTURE)
     if (bezVsSoupei) continue
     const f = souperi[0]
-    if (f.castkaHaleru !== t.castkaHaleru || (f.vs ?? '').trim() !== t.vs.trim()) continue
+    // VS už sedí po normalizaci (klíč mapy) — „0012345" = „12345" jako v databázi.
+    if (f.castkaHaleru !== t.castkaHaleru) continue
     if (f.alokovanoHaleru !== 0 || f.duplicita || f.archivovana) continue
     if (f.stav === null || !STAVY_PRO_AUTOMATICKE_PAROVANI.includes(f.stav)) continue
-    if (mena(f.mena) !== 'CZK' || mena(t.mena) !== 'CZK') continue
+    // Stejná VYPLNĚNÁ měna na obou stranách (prázdná nikdy jistě).
+    const menaPlatby = menaJiste(t.mena)
+    if (menaPlatby === null || menaPlatby !== menaJiste(f.mena)) continue
+    // IBAN: platný a stejný na platbě i na faktuře.
+    const iban = ibanZUctu(t.protiucet)
+    if (iban === null || iban !== ibanZUctu(f.ucetDodavatele)) continue
     if (!f.datum) continue
     const dny = dnyOd(t.datum, f.datum)
     if (!Number.isFinite(dny) || dny < -NEJVIC_DNI_PRED_FAKTUROU || dny > NEJVIC_DNI_PO_FAKTURE) continue
@@ -431,8 +358,11 @@ export function vybratAutomatickaParovani(
   return vysledek
 }
 
-/** Stavy, které dorovnání smí přepnout na „Uhrazeno" / „Částečně uhrazeno". */
-const STAVY_K_DOROVNANI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno', 'Upomínka - zkontrolovat']
+/**
+ * Stavy, které dorovnání smí přepnout na „Uhrazeno" / „Částečně uhrazeno"
+ * (jako `app.faktura_stav_podle_plateb`: upomínku ani neschválenou ne).
+ */
+const STAVY_K_DOROVNANI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno']
 
 /**
  * Stav faktury podle POTVRZENÝCH párování: celá částka → „Uhrazeno",
@@ -466,25 +396,177 @@ export function cilovyStavPodlePlateb(alokovanoHaleru: number, castkaHaleru: num
 }
 
 /* ---------------------------------------------------------------------
- * Ruční „Uhrazeno" a zpět (Faktury → Seznam). Čistá rozhodnutí, ať jdou
- * otestovat; akce v app/[rozsah]/finance/faktury/akce.ts je jen provede.
+ * Návrhy párování (Finance Fáze 0, krok 2). Ukládají se jako
+ * `platby_faktury` ve stavu 'navrzeno' (fronta Finance → Platby →
+ * Návrhy párování) a potvrzuje je vždy člověk. Hledá je
+ * lib/finance-navrhy-parovani.ts nad VŠEMI nespárovanými pohyby; databáze
+ * (`app.zapsat_navrhy_parovani`) zápis ještě jednou ověří a částku omezí
+ * zbytkem platby i faktury.
+ *
+ * Stupně (pro jeden pohyb vyhrává nejvyšší, stejných nejvýš 3):
+ *   vs+castka+ucet          0.95  VS, částka i IBAN (jistá shoda, kterou
+ *                                 automatika nevzala — soupeř, výpis…)
+ *   vs+castka               0.90  VS a částka (zbytek faktury)
+ *   castka+dodavatel+okno   0.70  částka, dodavatel (jméno nebo IBAN)
+ *                                 a datum v okně kolem faktury
+ *   dobropis+vratka         0.80  příjem = zbytek dobropisu téhož dodavatele
+ *   jina_mena               0.50  jiná měna, stejný VS a dodavatel —
+ *                                 potvrzení je ruční úhrada v měně faktury
  * ------------------------------------------------------------------ */
 
-/** Ručně „Uhrazeno" jen ze schválených stavů — jinak by se přes „Uhrazeno" a „Vrátit" dostal neschválený doklad mezi schválené. */
+export type DuvodNavrhu = 'vs+castka+ucet' | 'vs+castka' | 'castka+dodavatel+okno' | 'dobropis+vratka' | 'jina_mena'
+
+/** Pro lidi: proč appka dvojici navrhla. */
+export const DUVODY_NAVRHU: Readonly<Record<DuvodNavrhu, string>> = {
+  'vs+castka+ucet': 'Stejný variabilní symbol, částka i účet dodavatele',
+  'vs+castka': 'Stejný variabilní symbol a částka',
+  'castka+dodavatel+okno': 'Stejná částka a dodavatel, platba v době splatnosti',
+  'dobropis+vratka': 'Dodavatel vrátil peníze za dobropis',
+  'jina_mena': 'Stejný variabilní symbol, ale platba je v jiné měně než faktura',
+}
+
+const JISTOTA_NAVRHU: Readonly<Record<DuvodNavrhu, number>> = {
+  'vs+castka+ucet': 0.95,
+  'vs+castka': 0.9,
+  'dobropis+vratka': 0.8,
+  'castka+dodavatel+okno': 0.7,
+  'jina_mena': 0.5,
+}
+
+// ROZHODNOUT: okno návrhu „částka + dodavatel" — platba nejdřív 3 dny před
+// vystavením a nejpozději 30 dní po splatnosti (bez splatnosti 30 dní po
+// vystavení). Otázka 127.
+export const OKNO_NAVRHU_PRED_VYSTAVENIM = 3
+export const OKNO_NAVRHU_PO_SPLATNOSTI = 30
+/** Nejvýš tolik stejně dobrých návrhů na jeden pohyb; víc = nechat na člověku. */
+export const NEJVIC_NAVRHU_NA_POHYB = 3
+
+/** Stavy faktury, ke kterým se návrh smí nabídnout (jako `app.zapsat_navrhy_parovani`). */
+export const STAVY_PRO_NAVRH: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno']
+
+export type NavrhovanyPohyb = {
+  id: string
+  vs: string
+  /** ZBYTEK pohybu (částka minus potvrzená párování a úhrady Jiných plateb), v haléřích jeho měny. */
+  zbyvaHaleru: number
+  protistrana: string
+  protiucet: string
+  datum: string
+  mena: string | null
+  smer: 'vydaj' | 'prijem'
+  stornovano?: boolean
+}
+
+export type NavrhovanaFaktura = {
+  id: string
+  vs: string | null
+  /** Částka se znaménkem (dobropis záporně), v nejmenší jednotce měny faktury. */
+  castkaHaleru: number
+  /** Zbývá zaplatit (absolutně): |částka| − párování v měně faktury − ruční úhrady. */
+  zbyvaHaleru: number
+  dodavatel: string | null
+  ucetDodavatele: string | null
+  datumVystaveni: string | null
+  splatnost: string | null
+  mena: string | null
+  stav: string | null
+  duplicita: boolean
+  archivovana: boolean
+}
+
+export type NavrhParovani = {
+  transakceId: string
+  fakturaId: string
+  castkaHaleru: number
+  duvod: DuvodNavrhu
+  jistota: number
+}
+
+function vOkne(datum: string, f: Pick<NavrhovanaFaktura, 'datumVystaveni' | 'splatnost'>): boolean {
+  const zacatek = f.datumVystaveni ?? f.splatnost
+  if (!zacatek) return false
+  const od = dnyOd(datum, zacatek)
+  if (!Number.isFinite(od) || od < -OKNO_NAVRHU_PRED_VYSTAVENIM) return false
+  const konec = f.splatnost ?? f.datumVystaveni
+  const po = dnyOd(datum, konec as string)
+  return Number.isFinite(po) && po <= OKNO_NAVRHU_PO_SPLATNOSTI
+}
+
+/** Stupeň návrhu pro dvojici; null = nenavrhovat. */
+function duvodNavrhu(t: NavrhovanyPohyb, f: NavrhovanaFaktura): DuvodNavrhu | null {
+  // Směr: faktura (kladná) ↔ výdaj, dobropis (záporný) ↔ příjem.
+  if (f.castkaHaleru > 0 && t.smer !== 'vydaj') return null
+  if (f.castkaHaleru < 0 && t.smer !== 'prijem') return null
+  if (f.castkaHaleru === 0 || f.zbyvaHaleru <= 0 || t.zbyvaHaleru <= 0) return null
+
+  const vs = normalizovatVs(t.vs)
+  const stejnyVs = vs !== null && vs === normalizovatVs(f.vs)
+  const iban = ibanZUctu(t.protiucet)
+  const stejnyUcet = iban !== null && iban === ibanZUctu(f.ucetDodavatele)
+  const stejnyDodavatel = stejnyUcet || (t.protistrana.trim() !== '' && protistranaSedi(t.protistrana, f.dodavatel))
+  const stejnaCastka = t.zbyvaHaleru === f.zbyvaHaleru
+
+  if (menaNeboCzk(t.mena) !== menaNeboCzk(f.mena)) {
+    // Částky v různých měnách porovnat nejde: VS a dodavatel musí sedět.
+    return stejnyVs && stejnyDodavatel ? 'jina_mena' : null
+  }
+  if (f.castkaHaleru < 0) {
+    return stejnaCastka && (stejnyVs || stejnyDodavatel) ? 'dobropis+vratka' : null
+  }
+  if (stejnyVs && stejnaCastka) return stejnyUcet ? 'vs+castka+ucet' : 'vs+castka'
+  if (stejnaCastka && stejnyDodavatel && vOkne(t.datum, f)) return 'castka+dodavatel+okno'
+  return null
+}
+
+/**
+ * Návrhy pro nespárované zbytky pohybů. `vyloucene` = dvojice
+ * `transakceId|fakturaId`, které už v `platby_faktury` jsou (potvrzené,
+ * zamítnuté i navržené) — znovu se nenavrhují.
+ */
+export function navrhyParovani(
+  pohyby: readonly NavrhovanyPohyb[],
+  faktury: readonly NavrhovanaFaktura[],
+  moznosti: { vyloucene?: ReadonlySet<string> } = {},
+): NavrhParovani[] {
+  const vyloucene = moznosti.vyloucene ?? new Set<string>()
+  const otevrene = faktury.filter((f) => !f.archivovana && !f.duplicita && f.stav !== null
+    && STAVY_PRO_NAVRH.includes(f.stav) && f.castkaHaleru !== 0 && f.zbyvaHaleru > 0)
+
+  const vysledek: NavrhParovani[] = []
+  for (const t of pohyby) {
+    if (t.stornovano || t.zbyvaHaleru <= 0) continue
+    const kandidati: { f: NavrhovanaFaktura; duvod: DuvodNavrhu; jistota: number; odstup: number }[] = []
+    for (const f of otevrene) {
+      if (vyloucene.has(`${t.id}|${f.id}`)) continue
+      const duvod = duvodNavrhu(t, f)
+      if (!duvod) continue
+      const datumFaktury = f.splatnost ?? f.datumVystaveni
+      const odstup = datumFaktury ? Math.abs(dnyOd(t.datum, datumFaktury)) : Number.POSITIVE_INFINITY
+      kandidati.push({ f, duvod, jistota: JISTOTA_NAVRHU[duvod], odstup: Number.isFinite(odstup) ? odstup : Number.POSITIVE_INFINITY })
+    }
+    if (kandidati.length === 0) continue
+    const nejlepsi = Math.max(...kandidati.map((k) => k.jistota))
+    const vybrani = kandidati.filter((k) => k.jistota === nejlepsi)
+      .sort((a, b) => a.odstup - b.odstup || a.f.id.localeCompare(b.f.id))
+      .slice(0, NEJVIC_NAVRHU_NA_POHYB)
+    for (const k of vybrani) {
+      // Částka: nejvýš zbytek pohybu i faktury (u jiné měny jen zbytek pohybu).
+      const castka = k.duvod === 'jina_mena' ? t.zbyvaHaleru : Math.min(t.zbyvaHaleru, k.f.zbyvaHaleru)
+      vysledek.push({ transakceId: t.id, fakturaId: k.f.id, castkaHaleru: castka, duvod: k.duvod, jistota: k.jistota })
+    }
+  }
+  return vysledek
+}
+
+/* ---------------------------------------------------------------------
+ * Ruční „Uhrazeno" a zpět (Faktury → Seznam). Od Finance Fáze 0, kroku 2
+ * rozhoduje databáze (`rucne_uhradit_fakturu`, `vratit_fakturu_mezi_
+ * neuhrazene`); tady zůstává jen, kdy appka tlačítko vůbec nabídne.
+ * ------------------------------------------------------------------ */
+
+/** Ručně „Uhrazeno" jen ze schválených stavů (jako `app.faktura_k_rucni_uhrade`). */
 export const STAVY_PRO_RUCNI_UHRAZENI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno']
 
 export function smiOznacitUhrazenou(stav: string | null): boolean {
   return stav !== null && STAVY_PRO_RUCNI_UHRAZENI.includes(stav)
-}
-
-/**
- * Kam vrátit ručně uhrazenou fakturu: bez plateb → „Ke kontrole úhrady",
- * část zaplacená → „Částečně uhrazeno", zaplacená celá podle plateb →
- * null (vrátit nejde, nejdřív zrušit párování — jinak by ji dorovnání
- * vrátilo na „Uhrazeno").
- */
-export function stavPoVraceni(alokovanoHaleru: number, castkaHaleru: number): 'Ke kontrole úhrady' | 'Částečně uhrazeno' | null {
-  const podlePlateb = cilovyStavPodlePlateb(alokovanoHaleru, castkaHaleru)
-  if (podlePlateb === null) return 'Ke kontrole úhrady'
-  return podlePlateb === 'Částečně uhrazeno' ? 'Částečně uhrazeno' : null
 }

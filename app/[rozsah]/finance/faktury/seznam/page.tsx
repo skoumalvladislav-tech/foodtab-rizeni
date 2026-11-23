@@ -284,9 +284,29 @@ export default async function FakturySeznam({
                                 </button>
                               </form>
                             ) : smiOznacitUhrazenou(f.status) ? (
-                              <form action={oznacitUhrazenou}>
+                              // Ruční úhrada: částka v měně faktury a důvod (zůstane i s autorem).
+                              <form action={oznacitUhrazenou} style={{ display: 'grid', gap: '6px', padding: '6px 10px' }}>
                                 <input type="hidden" name="rozsah" value={rozsah} />
                                 <input type="hidden" name="id" value={f.id} />
+                                <input
+                                  type="text"
+                                  name="castka"
+                                  required
+                                  inputMode="decimal"
+                                  defaultValue={(f.castka_haleru / 100).toFixed(2).replace('.', ',')}
+                                  aria-label={`Uhrazená částka (${f.currency || 'CZK'})`}
+                                  style={{ padding: '6px 8px', border: '1px solid var(--line-2)', borderRadius: 'var(--radius-sm)', background: 'var(--paper)', color: 'inherit', font: 'inherit', minHeight: '36px' }}
+                                />
+                                <input
+                                  type="text"
+                                  name="duvod"
+                                  required
+                                  minLength={5}
+                                  maxLength={300}
+                                  placeholder="Proč zaplaceno mimo výpis"
+                                  aria-label="Důvod ruční úhrady"
+                                  style={{ padding: '6px 8px', border: '1px solid var(--line-2)', borderRadius: 'var(--radius-sm)', background: 'var(--paper)', color: 'inherit', font: 'inherit', minHeight: '36px' }}
+                                />
                                 <button type="submit" className="ft-kebab-polozka" style={{ border: 0, background: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
                                   Označit jako uhrazenou
                                 </button>
