@@ -416,8 +416,9 @@ comment on function app.faktura_stav_podle_plateb(uuid, uuid) is
 
 revoke all on function app.faktura_stav_podle_plateb(uuid, uuid) from public, anon, authenticated, service_role;
 
--- Přepočítá a zapíše stav (je-li jiný). Vrací cílový stav (NULL = beze
--- změny podle pravidla). Volají ho všechny cesty, které mění platby.
+-- Přepočítá a zapíše stav (je-li jiný). Vrací stav faktury PO přepočtu
+-- (i když se nezměnil — volající ho ukazuje člověku). Volají ho všechny
+-- cesty, které mění platby.
 create function app.prepocitat_stav_faktury(p_tenant uuid, p_faktura uuid)
 returns text
 language plpgsql security definer set search_path = ''
@@ -431,7 +432,7 @@ begin
        set stav = v_stav
      where id = p_faktura and tenant_id = p_tenant and stav is distinct from v_stav;
   end if;
-  return v_stav;
+  return (select f.stav from public.faktury f where f.id = p_faktura and f.tenant_id = p_tenant);
 end $$;
 
 revoke all on function app.prepocitat_stav_faktury(uuid, uuid) from public, anon, authenticated, service_role;
@@ -1637,7 +1638,7 @@ begin
   end loop;
 
   v_stav := app.prepocitat_stav_faktury(p_tenant, p_faktura);
-  if (select f.stav from public.faktury f where f.id = p_faktura) = 'Uhrazeno' then
+  if v_stav = 'Uhrazeno' then
     raise exception 'Faktura je podle ručně potvrzené platby z výpisu zaplacená celá. Když platba k faktuře nepatří, musí párování zrušit někdo s právem na Finance → Platby.'
       using errcode = 'check_violation';
   end if;
