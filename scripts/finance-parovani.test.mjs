@@ -478,5 +478,26 @@ console.log('\n== Stav faktury, jisté shody a návrhy jdou přes databázi ==')
       && /finance\/platby\/navrhy`/.test(pozornost) && !/navrhnoutParovani/.test(pozornost))
 }
 
+console.log('\n== Zkouška 11: migrace kroku 2 nesahá omezeními na existující sloupce ==')
+{
+  // Scénář krok112 v databázi pozná jen omezení nad NOVÝMI sloupci
+  // (stav_pred_uhradou, duvod) — kdo existující sloupec zúží, ví o něm
+  // jen text migrace. Povolené: CHECK nad novým sloupcem duvod a částečný
+  // unikátní index návrhů (výslovně v zadání, ROZHODNOUT v migraci);
+  // cokoli dalšího jen NOT VALID.
+  const sql = cist('supabase/migrations/20261120100000_parovani_pravidla.sql').replace(/--.*$/gm, '')
+  const TABULKY = '(faktury|transakce|platby_faktury|kontakty)'
+  const prikazy = sql.split(';').map((s) => s.replace(/\s+/g, ' ').trim())
+  const omezeni = prikazy.filter((p) => new RegExp(`^alter table (only )?(if exists )?public\\.${TABULKY} `, 'i').test(p)
+    && /(add constraint|set not null|add (unique|primary key|check)|add column \S+ [^,]*\b(not null|unique)\b)/i.test(p))
+  const indexy = prikazy.filter((p) => new RegExp(`^create unique index .* on (only )?public\\.${TABULKY} `, 'i').test(p))
+  const navic = [
+    ...omezeni.filter((p) => !/add constraint platby_faktury_duvod_kod check \(duvod is null or duvod in /i.test(p) && !/ not valid$/i.test(p)),
+    ...indexy.filter((p) => p !== "create unique index platby_faktury_navrh_jednou on public.platby_faktury (transakce_id, faktura) where stav = 'navrzeno'"),
+  ]
+  ok(`zkouška 11: migrace nepřidává CHECK, NOT NULL ani unikátní index nad existujícími sloupci — navíc: ${navic.length ? navic.join(' | ') : 'nic'}`,
+    omezeni.length >= 1 && indexy.length >= 1 && navic.length === 0)
+}
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

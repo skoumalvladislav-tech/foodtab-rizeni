@@ -461,6 +461,15 @@ select pg_temp.kod_shody(:'firma', (select id from public.transakce where import
 select set_config('test.user_id', '', false);
 select pg_temp.check('jistá shoda z dávky: kdo nemá právo potvrzovat párování, tomu dávka nestačí → zdroj — naměřeno: ' || :'v',
   :'v' = 'zdroj');
+-- … a majitelce (právo má) nestačí dávka, kterou nahrál někdo jiný. Přímo
+-- posouzení: sparovat_jiste_z_davky hlídá autora dávky ještě jednou sama,
+-- takže kontrola níž (přes ni) by chybu v posouzení nepoznala.
+select set_config('test.user_id', :'maj', false);
+select pg_temp.kod_shody(:'firma', (select id from public.transakce where import_davka_id::text = :'davka_f'), :'f_f',
+                         :'davka_f'::uuid) as v \gset
+select set_config('test.user_id', '', false);
+select pg_temp.check('jistá shoda z dávky: cizí dávka nestačí ani s právem potvrzovat → zdroj — naměřeno: ' || :'v',
+  :'v' = 'zdroj');
 
 set role authenticated;
 select set_config('test.user_id', :'maj', false);
