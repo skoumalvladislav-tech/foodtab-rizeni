@@ -21,6 +21,12 @@
 --      * výpis omylem jako pokladní uzávěrka, stornovaný řádek výpisu,
 --        pokladna nebo výpis s vymyšleným id pohyb z banky nezablokují;
 --        pohyb z banky nezablokuje pokladní uzávěrku;
+--      * storno (kontrola 23. 11.): stornovaný řádek výpisu (pokladní
+--        uzávěrky) se dalším výpisem (uzávěrkou) nevrátí, stažení z banky
+--        ale nezablokuje (s id ani bez id); storno pohybu z banky výpis
+--        nezastaví (ROZHODNOUT); storno jen na pohyb téže firmy a účtu —
+--        cizí firma storno našeho pohybu nezapíše a synchronizaci
+--        nezdvojí;
 --      * každé id ze stažení je na účtu právě jednou: řádek `banka_api`,
 --        nebo potvrzení řádku výpisu;
 --      * přihlášený přímo zapíše jen ruční platbu; potvrzení nezapíše;
@@ -108,11 +114,12 @@ end $$;
 
 -- Řádek ve tvaru, jaký dává banka (Salt Edge: protiúčet i VS prázdné).
 -- Bez id = řádek výpisu.
-create or replace function pg_temp.r(p_datum text, p_id text default null, p_castka integer default 500)
+create or replace function pg_temp.r(p_datum text, p_id text default null, p_castka integer default 500,
+                                     p_protistrana text default 'Poplatek')
 returns jsonb language sql as $$
   select jsonb_strip_nulls(jsonb_build_object(
     'datum', p_datum, 'smer', 'vydaj', 'castka_haleru', p_castka, 'mena', 'CZK',
-    'protistrana', 'Poplatek', 'protiucet', '', 'vs', '', 'poznamka', '', 'externi_id', p_id))
+    'protistrana', p_protistrana, 'protiucet', '', 'vs', '', 'poznamka', '', 'externi_id', p_id))
 $$;
 
 -- Výsledek dotazu jako text, nebo NULL, když dotaz spadne (vypíše proč).
@@ -235,6 +242,10 @@ insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
 values (:'firma_a', null, 'Krok111 vymyšlené id', 'banka') returning id as u_podvrh \gset
 insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
 values (:'firma_a', null, 'Krok111 dvě od banky', 'banka') returning id as u_dve \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 storno a další výpis', 'banka') returning id as u_storno2 \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 cizí storno', 'banka') returning id as u_cizi_storno \gset
 
 
 \echo ''
@@ -487,6 +498,90 @@ select pg_temp.stahnout(:'firma_a', :'u_storno', 'krok111-storno-s', jsonb_build
 select pg_temp.check('stornovaný řádek výpisu, pak stažení: pohyb z banky se zapíše (1/1)',
   :'storno_v'::int = 1 and :'storno_s'::int = 1
   and exists (select 1 from public.transakce where ucet_id = :'u_storno' and zdroj = 'banka_api' and externi_id = 'krok111-storno-a'));
+-- … ani stažení BEZ id (počítá se podle obsahu): stornovaný řádek výpisu
+-- proti stažení z banky místo nedrží.
+select pg_temp.importovat(:'firma_a', :'u_storno', 'csv_banka', 'krok111-storno-v4',
+  jsonb_build_array(pg_temp.r('2033-06-19'))) as stn_v \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
+select :'firma_a', :'u_storno', 'vydaj', 500, '2033-06-19', 'rucni', t.id
+  from public.transakce t where t.ucet_id = :'u_storno' and t.zdroj = 'csv_banka' and t.datum = '2033-06-19';
+select pg_temp.stahnout(:'firma_a', :'u_storno', 'krok111-storno-s4', jsonb_build_array(pg_temp.r('2033-06-19'))) as stn_s \gset
+select pg_temp.check('stornovaný řádek výpisu, pak stažení BEZ id: pohyb z banky se zapíše (1/1)',
+  :'stn_v'::int = 1 and :'stn_s'::int = 1
+  and (select count(*) from public.transakce where ucet_id = :'u_storno' and zdroj = 'banka_api' and datum = '2033-06-19') = 1);
+
+-- Storno drží proti dalšímu VÝPISU (kontrola 23. 11.). Případ z kontroly:
+-- výpis „NOVAK JAN", banka stáhne týž pohyb jako „Jan Novák" (jiný klíč)
+-- → viditelná dvojice; majitelka stornuje řádek výpisu; pak navazující
+-- výpis (jiný soubor, překryv o den). Dřív se stornovaný řádek vrátil
+-- a dvojice s ním.
+select pg_temp.importovat(:'firma_a', :'u_storno2', 'csv_banka', 'krok111-st2-v1',
+  jsonb_build_array(pg_temp.r('2033-06-15', null, 600, 'NOVAK JAN'))) as st2_v1 \gset
+select pg_temp.stahnout(:'firma_a', :'u_storno2', 'krok111-st2-s',
+  jsonb_build_array(pg_temp.r('2033-06-15', 'krok111-st2-x', 600, 'Jan Novák'))) as st2_s \gset
+select coalesce((select id::text from public.transakce
+                  where ucet_id = :'u_storno2' and zdroj = 'csv_banka' and protistrana = 'NOVAK JAN'), '') as t_st2 \gset
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select pg_temp.check('majitelka stornuje řádek výpisu svého účtu přímým zápisem (storno na témže účtu projde)',
+  pg_temp.projde(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of) values (%L, %L, %L, 600, %L, %L, %L)',
+    :'firma_a', :'u_storno2', 'vydaj', '2033-06-15', 'rucni', :'t_st2')));
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.importovat(:'firma_a', :'u_storno2', 'csv_banka', 'krok111-st2-v2',
+  jsonb_build_array(pg_temp.r('2033-06-15', null, 600, 'NOVAK JAN'), pg_temp.r('2033-06-16', null, 600, 'Další'))) as st2_v2 \gset
+select pg_temp.check('storno řádku výpisu, pak překrývající se výpis: stornovaný řádek se nevrátí, zapíše se jen nový (1/1/1, NOVAK JAN jednou)',
+  :'st2_v1'::int = 1 and :'st2_s'::int = 1 and :'st2_v2'::int = 1
+  and (select count(*) from public.transakce
+        where ucet_id = :'u_storno2' and zdroj = 'csv_banka' and protistrana = 'NOVAK JAN') = 1);
+
+-- Dvě stejné platby téhož dne: výpis z půlky dne má první, majitelka ji
+-- stornuje, celodenní výpis má obě. Stornovaná drží své místo — doplní
+-- se jen druhá.
+select pg_temp.importovat(:'firma_a', :'u_storno2', 'csv_banka', 'krok111-st3-v1',
+  jsonb_build_array(pg_temp.r('2033-06-17'))) as st3_v1 \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
+select :'firma_a', :'u_storno2', 'vydaj', 500, '2033-06-17', 'rucni', t.id
+  from public.transakce t where t.ucet_id = :'u_storno2' and t.zdroj = 'csv_banka' and t.datum = '2033-06-17';
+select pg_temp.importovat(:'firma_a', :'u_storno2', 'csv_banka', 'krok111-st3-v2',
+  jsonb_build_array(pg_temp.r('2033-06-17'), pg_temp.r('2033-06-17'))) as st3_v2 \gset
+select pg_temp.check('dvě stejné platby, storno první, celodenní výpis: doplní jen druhou (1/1, řádků výpisu 2)',
+  :'st3_v1'::int = 1 and :'st3_v2'::int = 1
+  and (select count(*) from public.transakce
+        where ucet_id = :'u_storno2' and zdroj = 'csv_banka' and datum = '2033-06-17') = 2);
+
+-- Totéž u pokladní uzávěrky: stornovaná drží místo proti uzávěrkám.
+select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-st1',
+  jsonb_build_array(pg_temp.r('2033-06-18'))) as pokl_st1 \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
+select :'firma_a', :'u_pokl', 'vydaj', 500, '2033-06-18', 'rucni', t.id
+  from public.transakce t where t.ucet_id = :'u_pokl' and t.zdroj = 'csv_pokladna' and t.datum = '2033-06-18';
+select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-st2',
+  jsonb_build_array(pg_temp.r('2033-06-18'))) as pokl_st2 \gset
+select pg_temp.check('storno pokladní uzávěrky, pak táž uzávěrka znovu: nic nepřidá (1/0)',
+  :'pokl_st1'::int = 1 and :'pokl_st2'::int = 0);
+
+-- ROZHODNOUT (migrace, hlavička): storno pohybu z BANKY výpis se stejným
+-- obsahem nezastaví — řádek výpisu se zapíše (dvojice raději než
+-- chybějící platba). Opakované stažení téhož id nic nepřidá.
+select pg_temp.stahnout(:'firma_a', :'u_storno', 'krok111-storno-s5',
+  jsonb_build_array(pg_temp.r('2033-06-20', 'krok111-storno-b'))) as stb_s \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
+select :'firma_a', :'u_storno', 'vydaj', 500, '2033-06-20', 'rucni', t.id
+  from public.transakce t where t.ucet_id = :'u_storno' and t.zdroj = 'banka_api' and t.externi_id = 'krok111-storno-b';
+select pg_temp.importovat(:'firma_a', :'u_storno', 'csv_banka', 'krok111-storno-v5',
+  jsonb_build_array(pg_temp.r('2033-06-20'))) as stb_v \gset
+select pg_temp.stahnout(:'firma_a', :'u_storno', 'krok111-storno-s6',
+  jsonb_build_array(pg_temp.r('2033-06-20', 'krok111-storno-b'))) as stb_s2 \gset
+select pg_temp.check('stornovaný pohyb z banky, pak výpis se stejným obsahem: řádek výpisu se zapíše, opakované stažení nic (1/1/0)',
+  :'stb_s'::int = 1 and :'stb_v'::int = 1 and :'stb_s2'::int = 0);
+
+-- Řádek výpisu, jehož storno zkusí zapsat majitel cizí firmy (oddíl 4);
+-- stažení téhož pohybu až za oddílem 4.
+select pg_temp.importovat(:'firma_a', :'u_cizi_storno', 'csv_banka', 'krok111-cs-v',
+  jsonb_build_array(pg_temp.r('2033-06-21'))) as cs_v \gset
+select coalesce((select id::text from public.transakce
+                  where ucet_id = :'u_cizi_storno' and zdroj = 'csv_banka'), '') as t_cizi_storno \gset
 
 -- Pokladna (`pos_adapter`) a výpis se sloupcem „Externí ID" s id, které
 -- banka teprve pošle: pohyb z banky se zapíše (id jen v rámci zdroje).
@@ -589,6 +684,11 @@ select pg_temp.check('import do dávky cizí firmy spadne (spoušť, 23514)',
     '[{"datum":"2033-02-05","smer":"prijem","castka_haleru":5,"protistrana":"Cizí dávka","vs":"","poznamka":""}]'),
     '23514', 'Importní dávka nepatří'));
 select id as t_sv_volny from public.transakce where ucet_id = :'u_sv' and zdroj = 'csv_banka' \gset
+-- Storno jen na témže účtu (složený cizí klíč) — jinak by storno z jiného
+-- účtu (i jiné firmy) vyřadilo náš řádek výpisu z nároku synchronizace.
+select pg_temp.check('storno pohybu jiného účtu databáze nepustí (23503, storno jen na témže účtu)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of) values (%L, %L, %L, 1, %L, %L, %L)',
+    :'firma_a', :'u_b1', 'vydaj', '2033-02-07', 'rucni', :'t_sv_volny'), '23503', 'transakce_storno_tez_ucet'));
 select pg_temp.check('potvrzení z banky k řádku jiného účtu databáze nepustí (složený cizí klíč, 23503)',
   pg_temp.spadne_hlaskou(format('insert into public.transakce_potvrzeni_banky (tenant_id, ucet_id, transakce_id, externi_id, import_davka_id) values (%L, %L, %L, %L, %L)',
     :'firma_a', :'u_b1', :'t_sv_volny', 'krok111-fk-1', :'d_stary'), '23503', ''));
@@ -671,8 +771,25 @@ select pg_temp.check('import na účet, jehož platby přihlášený nevidí, od
     :'firma_a', :'u_firma', :'d_stary', 'csv_banka',
     '[{"datum":"2033-02-03","smer":"prijem","castka_haleru":1,"protistrana":"x","vs":"","poznamka":""}]'),
     '42501', 'vidíte'));
+
+-- Majitel cizí firmy (Bohdan) zná id našeho řádku výpisu (třeba jako
+-- účetní). Na svůj účet si „storno" našeho pohybu nezapíše — jinak by
+-- synchronizace naší banky řádek brala jako stornovaný a pohyb zapsala
+-- podruhé (kontrola 23. 11.). Stažení téhož pohybu níž.
+select set_config('test.user_id', :'cizi', false);
+select pg_temp.check('majitel cizí firmy nezapíše na svůj účet storno našeho pohybu (23503, storno jen téže firmy a účtu)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of) values (%L, %L, %L, 500, %L, %L, %L)',
+    :'firma_b', :'u_cizi', 'vydaj', '2033-06-21', 'rucni', :'t_cizi_storno'), '23503', 'transakce_storno_tez_ucet'));
 reset role;
 select set_config('test.user_id', '', false);
+
+select pg_temp.stahnout(:'firma_a', :'u_cizi_storno', 'krok111-cs-s',
+  jsonb_build_array(pg_temp.r('2033-06-21', 'krok111-cs-x'))) as cs_s \gset
+select pg_temp.check('po pokusu o cizí storno stažení téhož pohybu jen potvrdí náš řádek výpisu (1/0, na účtu 1, potvrzení 1)',
+  :'cs_v'::int = 1 and :'cs_s'::int = 0
+  and (select count(*) from public.transakce where ucet_id = :'u_cizi_storno') = 1
+  and (select count(*) from public.transakce_potvrzeni_banky
+        where ucet_id = :'u_cizi_storno' and externi_id = 'krok111-cs-x') = 1);
 
 select pg_temp.stahnout(:'firma_a', :'u_podvrh', 'krok111-pv-s2',
   jsonb_build_array(pg_temp.r('2033-06-14', 'krok111-pv-c'))) as pv_s2 \gset
@@ -1009,7 +1126,10 @@ select pg_temp.check('starý typ dávky fio_api neprojde (23514)',
   pg_temp.spadne_hlaskou(format('insert into public.import_davky (tenant_id, typ, soubor_hash, stav) values (%L, %L, %L, %L)',
     :'firma_a', 'fio_api', 'krok111-stary-typ', 'zpracovano'), '23514', 'import_davky_typ_check'));
 
--- Potvrzení z banky: jen přidávání, zapisuje jen služba.
+-- Potvrzení z banky: jen přidávání, zapisuje jen služba. Čistá databáze
+-- harnessu nemá výchozí práva Supabase (ta dávají všechno i službě), takže
+-- revoke od service_role tu nejde poznat — hlídá ho text migrace ve
+-- scripts/provoz-granty.test.mjs (tabulky jen pro přidávání).
 select pg_temp.check('potvrzení z banky: přihlášený jen čte, anon nic, služba čte a přidává, úpravu ani mazání nikdo',
   has_table_privilege('authenticated', 'public.transakce_potvrzeni_banky', 'select')
   and not has_table_privilege('authenticated', 'public.transakce_potvrzeni_banky', 'insert')

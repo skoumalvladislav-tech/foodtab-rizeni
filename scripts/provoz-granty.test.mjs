@@ -536,5 +536,52 @@ for (const t of tabulkyAppOdChoice) {
   ok(`žádná funkce nenastavuje vlastní parametr klauzulí SET (${vadne.join(', ') || 'žádná'})`, vadne.length === 0)
 }
 
+/* =====================================================================
+   TABULKY JEN PRO PŘIDÁVÁNÍ — ani služba je nesmaže a nevysype
+
+   Tabulka s pravidlem `on update … do instead nothing` je kniha, do které
+   se jen přidává. Výchozí práva Supabase ale dávají VŠECHNO i roli
+   service_role (hlavička) — bez `revoke` od service_role by si úloha se
+   service klíčem nechala DELETE a TRUNCATE (TRUNCATE obejde i audit).
+   Tak to dopadlo u `transakce_potvrzeni_banky` (kontrola kroku 1,
+   23. 11.): migrace odebrala práva jen anon a authenticated a scénář
+   krok111 „služba úpravu ani mazání nesmí" prošel jen proto, že čistá
+   databáze z run.sh výchozí práva nemá.
+
+   Bere se KAŽDÁ tabulka s takovým pravidlem, ne jmenovaný seznam.
+   Starší tabulky, kterým službu nikdo neodebral, jsou jmenovitě ve
+   STARSI_JEN_PRIDAVANI (dluh je vidět); jakmile je pozdější migrace
+   opraví, kontrola „výjimka je pořád potřeba" spadne a řádek se smaže.
+   ===================================================================== */
+console.log('\n== Tabulky jen pro přidávání: služba je nesmaže ani nevysype ==\n')
+
+const STARSI_JEN_PRIDAVANI = [
+  'audit_log',
+  'bankovni_zustatky',
+  'employee_rates',
+  'ingredient_purchase_prices',
+  'transakce',
+]
+const jenPridavani = [...new Set(
+  [...kod.matchAll(/create\s+rule\s+\w+\s+as\s+on\s+update\s+to\s+(?:public\.)?(\w+)\s+do\s+instead\s+nothing/gi)].map((m) => m[1]),
+)].filter((t) => !zahozene.has(t)).sort()
+
+console.log(`  ${jenPridavani.join(', ')}\n`)
+ok('tabulky jen pro přidávání se našly (aspoň 6, jinak kontrola pod tím nic nehlídá)', jenPridavani.length >= 6)
+ok('mezi nimi je transakce_potvrzeni_banky (krok 1)', jenPridavani.includes('transakce_potvrzeni_banky'))
+for (const t of jenPridavani) {
+  const delete_ = odebranoPravo(t, 'delete', 'service_role')
+  const truncate_ = odebranoPravo(t, 'truncate', 'service_role')
+  if (STARSI_JEN_PRIDAVANI.includes(t)) {
+    ok(`${t}: výjimka (starší tabulka, službě se práva neodebrala) je pořád potřeba`, !(delete_ && truncate_))
+  } else {
+    ok(`${t} odebírá delete roli service_role`, delete_)
+    ok(`${t} odebírá truncate roli service_role`, truncate_)
+  }
+}
+for (const t of STARSI_JEN_PRIDAVANI) {
+  ok(`výjimka ${t} je opravdu tabulka jen pro přidávání`, jenPridavani.includes(t))
+}
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

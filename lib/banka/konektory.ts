@@ -114,6 +114,11 @@ const kb: KonektorBanky = {
 
 // Enable Banking: souhlas a první zůstatek ano (app/api/integrace/enablebanking),
 // do úlohy synchronizace zapojený není (vědomá mezera, beze změny).
+// ROZHODNOUT: než se zapojí, rozhodnout dvojí zápis s výpisem — pohyb odsud
+// nemá VS ani protiúčet (lib/integrace-enablebanking.ts), takže se s řádkem
+// výpisu téže banky podle obsahu nepozná a překryv se zdvojí (migrace
+// 20261119100000, hlavička „DVOJÍ ZÁPIS", mez o poskytovateli bez VS). Totéž
+// platí pro Salt Edge.
 const enableBanking: KonektorBanky = {
   poskytovatel: 'enablebanking',
   nazev: 'Enable Banking',

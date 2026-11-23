@@ -70,20 +70,28 @@
 -- pořadí se pak počítalo jinak než ve výpisu (kontrola kroku 1, 20. 11.).
 --
 --   * Důvěryhodná sada účtu = pohyby téhož účtu ze stažení (`banka_api`)
---     a z výpisu (`csv_banka`), které přišly importem (mají dávku)
---     a nejsou stornované. Pokladní uzávěrka (`csv_pokladna`), pokladna
---     (`pos_adapter`) a ruční zápis se do ní nepočítají NIKDY — výpis
---     omylem nahraný jako pokladní uzávěrka pohyb z banky nezablokuje.
+--     a z výpisu (`csv_banka`), které přišly importem (mají dávku).
+--     Pokladní uzávěrka (`csv_pokladna`), pokladna (`pos_adapter`)
+--     a ruční zápis se do ní nepočítají NIKDY — výpis omylem nahraný jako
+--     pokladní uzávěrka pohyb z banky nezablokuje.
 --   * Řádek bez id (výpis; stažení bez id): za každý obsahový klíč se
 --     zapíše tolik řádků, o kolik jich má import víc než sada účtu. Dvě
 --     stejné platby ve výpisu zůstanou dvě, opakovaný nebo překrývající
 --     se výpis nic nepřidá. Pokladní uzávěrka se počítá jen proti
 --     pokladním uzávěrkám téhož účtu.
 --   * Řádek s id ze stažení: přeskočí se, když účet to id už má (řádek
---     `banka_api` nebo potvrzení); jinak si „nárokuje" nenárokovaný řádek
---     výpisu se stejným klíčem — zapíše se jen POTVRZENÍ
---     (`transakce_potvrzeni_banky`), že ten řádek výpisu banka potvrdila;
---     jinak se zapíše jako nový pohyb.
+--     `banka_api` nebo potvrzení); jinak si „nárokuje" nenárokovaný
+--     a nestornovaný řádek výpisu se stejným klíčem — zapíše se jen
+--     POTVRZENÍ (`transakce_potvrzeni_banky`), že ten řádek výpisu banka
+--     potvrdila; jinak se zapíše jako nový pohyb.
+--   * STORNO (oprava pohybu, `storno_of`) ukazuje vždy na pohyb téže
+--     firmy a téhož účtu (složený cizí klíč `transakce_storno_tez_ucet`).
+--     Stornovaný řádek výpisu dál DRŽÍ MÍSTO svého klíče proti dalším
+--     výpisům (a stornovaná pokladní uzávěrka proti uzávěrkám) — dvojice,
+--     kterou člověk stornem vyřešil, se s dalším překrývajícím se výpisem
+--     nevrátí. Proti stažení z banky stornovaný řádek místo nedrží: nedá
+--     se nárokovat a stažení bez id se proti němu nepočítá — pohyb z banky
+--     se kvůli stornovanému řádku nezahodí.
 --   * Výsledek pro každý klíč: řádků = víc z (výpisů, stažených), a každé
 --     id ze stažení je buď řádek `banka_api`, nebo potvrzení — žádné se
 --     neztratí, ani když banka stahuje po stránkách nebo okno začíná
@@ -91,7 +99,20 @@
 --   * Mez (ROZHODNOUT, otázka 120): výpis jen ČÁSTI dne, ve kterém je
 --     jen druhá ze dvou stejných plateb, ji nepřidá (klíč už na účtu
 --     je). Banky exportují po celých dnech; s napojenou bankou ji
---     doplní stažení (má vlastní id).
+--     doplní stažení (má vlastní id). Totéž po stornu: stornovaný řádek
+--     výpisu drží místo, takže výpis se stejnou platbou podruhé ji
+--     nepřidá (doplní ji jen stažení z banky).
+--   * Mez (ROZHODNOUT): storno pohybu z BANKY (`banka_api`) další výpis
+--     se stejným obsahem nezastaví — řádek výpisu se zapíše (viditelná
+--     dvojice raději než chybějící platba). Opakované stažení téhož id
+--     ho nezapíše (id zná).
+--   * Mez (ROZHODNOUT): poskytovatel, který nedává VS ani protiúčet
+--     (Salt Edge, Enable Banking — lib/integrace-saltedge.ts,
+--     lib/integrace-enablebanking.ts), má jiný obsahový klíč než výpis
+--     téže banky. Překryv výpisu a stažení se pak zdvojí (každý pohyb
+--     dvakrát, nárok se neuplatní). Dnes to nic nespustí: Enable Banking
+--     do synchronizace zapojený není, nové připojení Salt Edge se
+--     nenabízí. Rozhodnout dřív, než se některý zapojí.
 --   * Souběh (synchronizace a import výpisu téhož účtu najednou) řadí
 --     zámek na účet — druhý počká a uvidí, co zapsal první.
 --
@@ -479,6 +500,25 @@ alter table public.transakce
 alter table public.import_davky
   add constraint import_davky_firma_id unique (tenant_id, id);
 
+-- Storno ukazuje jen na pohyb TÉŽE firmy a TÉHOŽ účtu. Dřív stačilo
+-- jakékoli id pohybu (20261003120000): majitel jiné firmy, který zná id
+-- pohybu (třeba účetní s finance.read u nás), si u sebe zapsal ruční
+-- „storno" našeho řádku výpisu a synchronizace naší banky pak ten řádek
+-- brala jako stornovaný — místo potvrzení zapsala pohyb podruhé (kontrola
+-- kroku 1, 23. 11.). Cizí klíč platí pro každou roli i pro službu, takže
+-- import (app.import_roztridit, běží pod službou bez RLS) storno znovu
+-- firmou nefiltruje. 19. 11. žádný pohyb — kdyby storno jiného účtu
+-- v databázi bylo, migrace spadne nahlas.
+alter table public.transakce
+  add constraint transakce_storno_tez_ucet
+  foreign key (tenant_id, ucet_id, storno_of)
+  references public.transakce (tenant_id, ucet_id, id);
+
+-- Import se u každého řádku sady ptá, jestli je stornovaný.
+create index transakce_storno_of
+  on public.transakce (storno_of)
+  where storno_of is not null;
+
 
 /*
   OBSAHOVÝ KLÍČ POHYBU. Jediná implementace — volá ji import i dopočet níž.
@@ -555,9 +595,9 @@ create rule transakce_no_update as
   téhož id ho přeskočí.
 
   Jen přidávání (žádná úprava, žádné mazání mimo kaskádu účtu nebo
-  firmy). Zapisuje JEN public.importovat_transakce pod službou
-  (synchronizace) — přihlášený tabulku jen čte, a to jen u účtů, jejichž
-  platby vidí.
+  firmy — ani službou). Zapisuje JEN public.importovat_transakce pod
+  službou (synchronizace) — přihlášený tabulku jen čte, a to jen u účtů,
+  jejichž platby vidí.
 */
 create table public.transakce_potvrzeni_banky (
   id              uuid primary key default gen_random_uuid(),
@@ -591,10 +631,15 @@ create rule transakce_potvrzeni_banky_no_update as
 
 alter table public.transakce_potvrzeni_banky enable row level security;
 
--- Výchozí práva Supabase by authenticated/anon dala všechno — nejdřív vše
--- odebrat, pak vypsat, co kdo smí. Přihlášený jen čte (politika v oddílu 4),
--- služba čte a přidává (synchronizace).
-revoke all on public.transakce_potvrzeni_banky from public, anon, authenticated;
+-- Výchozí práva Supabase dávají anon, authenticated i service_role
+-- všechno — nejdřív vše odebrat VŠEM, pak vypsat, co kdo smí. Přihlášený
+-- jen čte (politika v oddílu 4), služba čte a přidává (synchronizace).
+-- Bez service_role v revoke by si služba nechala DELETE a TRUNCATE
+-- (TRUNCATE obejde i audit) a smazané potvrzení by vrátilo řádek výpisu
+-- mezi neověřené bankou (kontrola kroku 1, 23. 11.). Kaskáda od pohybu
+-- a firmy běží s právy vlastníka tabulky, té to nevadí. Čistá databáze
+-- z run.sh výchozí práva nemá — hlídá to text: scripts/provoz-granty.test.mjs.
+revoke all on public.transakce_potvrzeni_banky from public, anon, authenticated, service_role;
 grant select on public.transakce_potvrzeni_banky to authenticated;
 grant select, insert on public.transakce_potvrzeni_banky to service_role;
 
@@ -616,16 +661,21 @@ create trigger trg_audit_transakce_potvrzeni_banky
     * Id už známé = přeskočit: řádek téhož ZDROJE s tím id; u stažení
       z banky i potvrzení s tím id.
     * Řádek bez id, a každý řádek výpisu či pokladní uzávěrky: za každý
-      klíč nejvýš (kolik jich je v importu) − (kolik jich má důvěryhodná
-      sada účtu). Známé id se do „v importu" počítá, zapíše se ale jen
+      klíč nejvýš (kolik jich je v importu) − (kolik míst účet už drží,
+      `drzi_misto`). Známé id se do „v importu" počítá, zapíše se ale jen
       neznámé.
     * Řádek s id ze stažení: k-tý takový řádek s daným klíčem si nárokuje
-      k-tý nenárokovaný řádek výpisu (podle času zápisu); na co nezbude,
-      zapíše se jako nový pohyb.
+      k-tý nenárokovaný nestornovaný řádek výpisu (podle času zápisu); na
+      co nezbude, zapíše se jako nový pohyb.
 
-  Důvěryhodná sada = pohyby účtu z importu (mají dávku), nestornované,
-  samy nejsou storno; pro pokladní uzávěrku jen pokladní uzávěrky, jinak
-  jen stažení z banky a výpisy. Ruční zápis a pokladna nikdy.
+  Důvěryhodná sada = pohyby účtu z importu (mají dávku), samy nejsou
+  storno; pro pokladní uzávěrku jen pokladní uzávěrky, jinak jen stažení
+  z banky a výpisy. Ruční zápis a pokladna nikdy. Místo drží nestornované
+  řádky sady; u výpisu a pokladní uzávěrky i stornované řádky TÉHOŽ
+  zdroje (storno drží proti dalšímu výpisu). U stažení z banky stornovaný
+  řádek místo nedrží a nárokovat se nedá — pohyb z banky se kvůli němu
+  nezahodí. Storno je vždy na témže účtu (transakce_storno_tez_ucet),
+  firma storna se proto znovu nefiltruje.
 
   SECURITY INVOKER: u přihlášeného čte pod RLS (importovat_transakce proto
   pustí jen na účet, jehož platby vidí). Jen čte — zapisuje volající.
@@ -683,15 +733,24 @@ as $$
       from jednou j
   ),
   sada as (
-    select t.id, t.otisk, t.zdroj, t.created_at
+    select t.id, t.otisk, t.zdroj, t.created_at,
+           exists (select 1 from public.transakce x where x.storno_of = t.id) as stornovany
       from public.transakce t
      where t.ucet_id = p_ucet
        and t.otisk in (select s.klic from s_id s)
        and t.import_davka_id is not null
        and t.storno_of is null
-       and not exists (select 1 from public.transakce x where x.storno_of = t.id)
        and case when p_zdroj = 'csv_pokladna' then t.zdroj = 'csv_pokladna'
                 else t.zdroj in ('banka_api', 'csv_banka') end
+  ),
+  -- Kolik míst klíče účet drží. Stornovaný řádek výpisu (pokladní
+  -- uzávěrky) drží místo proti dalšímu výpisu (uzávěrce) — jinak by se
+  -- s každým překrývajícím se výpisem vrátil (kontrola kroku 1, 23. 11.).
+  drzi_misto as (
+    select a.otisk
+      from sada a
+     where not a.stornovany
+        or (p_zdroj in ('csv_banka', 'csv_pokladna') and a.zdroj = p_zdroj)
   ),
   pocitane as (
     select s.* from s_id s
@@ -700,7 +759,7 @@ as $$
   pocty as (
     select p.klic,
            count(*) as v_importu,
-           (select count(*) from sada a where a.otisk = p.klic) as na_uctu
+           (select count(*) from drzi_misto a where a.otisk = p.klic) as na_uctu
       from pocitane p
      group by p.klic
   ),
@@ -724,6 +783,7 @@ as $$
            row_number() over (partition by a.otisk order by a.created_at, a.id) as poradi_klice
       from sada a
      where a.zdroj = 'csv_banka'
+       and not a.stornovany
        and not exists (select 1 from public.transakce_potvrzeni_banky b where b.transakce_id = a.id)
   )
   select n.poradi_v_poli, n.datum, n.smer, n.castka_haleru, n.mena, n.protistrana, n.protiucet,
