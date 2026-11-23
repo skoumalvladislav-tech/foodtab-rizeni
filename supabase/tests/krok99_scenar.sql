@@ -141,7 +141,7 @@ insert into public.platebni_ucty (tenant_id, nazev, typ) values (:'tenant', 'Kro
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj)
 values (:'tenant', :'ucet', 'vydaj', 100000, current_date - 3, 'Dodavatel s.r.o.', '20260815', 'csv_banka') returning id as t1 \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj)
-values (:'tenant', :'ucet', 'vydaj', 77700, current_date - 2, 'Automat s.r.o.', '777', 'csv_banka') returning id as t2 \gset
+values (:'tenant', :'ucet', 'vydaj', 77700, current_date - 2, 'Automat s.r.o.', '7771', 'csv_banka') returning id as t2 \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj)
 values (:'tenant', :'ucet', 'vydaj', 50000, current_date - 2, 'Staré párování', '1', 'csv_banka') returning id as t3 \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj)
@@ -149,6 +149,13 @@ values (:'tenant', :'ucet', 'vydaj', 20000, current_date - 2, 'Visící párová
 -- Příchozí platba: s přijatou fakturou se párovat nesmí (patří Jiným platbám).
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj)
 values (:'tenant', :'ucet', 'prijem', 30000, current_date - 2, 'Odběratel s.r.o.', '20260815', 'csv_banka') returning id as t5 \gset
+-- Platby z banky (banka_api) s účtem protistrany pro automatické párování
+-- (krok 2, 20261120100000: jistá shoda chce i shodný IBAN a důvěryhodný
+-- zdroj; řádek výpisu bez potvrzení banky úloha nepáruje).
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, protiucet, vs, zdroj, externi_id)
+values (:'tenant', :'ucet', 'vydaj', 77700, current_date - 2, 'Automat s.r.o.', '19-2000145399/0800', '777', 'banka_api', 'krok99-t2a') returning id as t2a \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, protiucet, vs, zdroj, externi_id)
+values (:'tenant', :'ucet', 'vydaj', 77700, current_date - 2, 'Automat s.r.o.', '19-2000145399/0800', '779', 'banka_api', 'krok99-t2e') returning id as t2e \gset
 
 -- Schránka pro evidenci příjmu (vzor krok90).
 insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, externi_ucet)
@@ -653,19 +660,21 @@ select pg_temp.check('nové párování má uuid i text (pro starý kód po náv
 select pg_temp.check('víc, než platba nese → odmítnuto',
   pg_temp.spadne_hlaskou(format('select * from public.sparovat_platbu_s_fakturou(%L, %L, %L, 1, null)',
     :'tenant', :'t1', 'a0000000-0000-4000-8000-000000000001'), '23514', 'přesahuje částku platby'));
--- t2 je volná: faktura v EUR → spárovat jde, stav se nemění.
-select plne_uhrazeno as p2_plne, coalesce(stav_faktury, '') as p2_stav
-  from public.sparovat_platbu_s_fakturou(:'tenant', :'t2', 'a0000000-0000-4000-8000-000000000002', 100, null) \gset
-select pg_temp.check('faktura v EUR: párování zapsané, stav faktury beze změny (NULL)',
-  :'p2_stav' = '' and not :'p2_plne'::boolean
+-- t2 je volná: faktura v EUR, duplicitní, ve stavu „Nutná ruční kontrola"
+-- → od kroku 2 (20261120100000) se nespáruje vůbec (neschválená faktura
+-- i jiná měna; jiná měna = ruční úhrada v měně faktury).
+select pg_temp.check('faktura v EUR, duplicitní a neschválená: párování odmítnuto, nic nezapsáno',
+  pg_temp.spadne_hlaskou(format('select * from public.sparovat_platbu_s_fakturou(%L, %L, %L, 100, null)',
+    :'tenant', :'t2', 'a0000000-0000-4000-8000-000000000002'), '23514', 'schválenou k úhradě')
+  and not exists (select 1 from public.platby_faktury where transakce_id = :'t2')
   and (select stav from public.faktury where id = 'a0000000-0000-4000-8000-000000000002') = 'Nutná ruční kontrola (chybí IČO)');
-select id as p2_alokace from public.platby_faktury where transakce_id = :'t2' and stav = 'potvrzeno' \gset
-select coalesce(public.zrusit_parovani_faktury(:'tenant', :'p2_alokace', 'zkouška'), '') as p2_zruseno \gset
 select id as p1_alokace from public.platby_faktury where transakce_id = :'t1' and stav = 'potvrzeno' \gset
 select coalesce(public.zrusit_parovani_faktury(:'tenant', :'p1_alokace', 'zkouška'), '') as p1_zruseno \gset
-select pg_temp.check('zrušení posledního párování → „Neuhrazeno" ve stejné transakci',
-  :'p1_zruseno' = 'Neuhrazeno'
-  and (select stav from public.faktury where id = 'a0000000-0000-4000-8000-000000000004') = 'Neuhrazeno'
+-- Od kroku 2 vrací zrušení stav PŘED úhradou (faktury.stav_pred_uhradou),
+-- dřív pevně „Neuhrazeno".
+select pg_temp.check('zrušení posledního párování → stav před úhradou („Ke kontrole úhrady") ve stejné transakci',
+  :'p1_zruseno' = 'Ke kontrole úhrady'
+  and (select stav from public.faktury where id = 'a0000000-0000-4000-8000-000000000004') = 'Ke kontrole úhrady'
   and (select stav from public.platby_faktury where id = :'p1_alokace') = 'zamitnuto');
 -- Podruhé totéž (stará stránka, dvojí kliknutí) nesmí znovu přepočítat
 -- stav faktury — přepsal by, co mezitím nastavil člověk.
@@ -724,17 +733,21 @@ select set_config('test.user_id', '', false);
 -- Automatické párování (úloha): faktura 777,00 Kč a platba 777,00 Kč z banky.
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
-insert into public.faktury (tenant_id, dodavatel, cislo_faktury, variabilni_symbol, castka_haleru)
-values (:'tenant', 'Automat s.r.o.', 'A-777', '777', 77700) returning id as fa \gset
-insert into public.faktury (tenant_id, dodavatel, cislo_faktury, variabilni_symbol, castka_haleru, mena)
-values (:'tenant', 'Automat s.r.o.', 'A-778', '777', 77700, 'EUR') returning id as fa_eur \gset
+-- Od kroku 2 jistá shoda chce i účet dodavatele (platný IBAN) a datum
+-- faktury (okno); VS faktury v EUR je jiný, ať jí faktura v Kč není soupeřem.
+insert into public.faktury (tenant_id, dodavatel, cislo_faktury, variabilni_symbol, castka_haleru, ucet_dodavatele, datum_vystaveni)
+values (:'tenant', 'Automat s.r.o.', 'A-777', '777', 77700, '19-2000145399/0800', current_date - 5) returning id as fa \gset
+insert into public.faktury (tenant_id, dodavatel, cislo_faktury, variabilni_symbol, castka_haleru, mena, ucet_dodavatele, datum_vystaveni)
+values (:'tenant', 'Automat s.r.o.', 'A-778', '779', 77700, 'EUR', '19-2000145399/0800', current_date - 5) returning id as fa_eur \gset
 reset role;
 select set_config('test.user_id', '', false);
 set role service_role;
-select pg_temp.check('automatika: faktura v EUR se nespáruje', not public.automaticky_sparovat_fakturu(:'tenant', :'t2', :'fa_eur', 77700));
-select pg_temp.check('automatika: jiná částka než faktura → ne', not public.automaticky_sparovat_fakturu(:'tenant', :'t2', :'fa', 77600));
-select pg_temp.check('automatika: přesná shoda → spárováno', public.automaticky_sparovat_fakturu(:'tenant', :'t2', :'fa', 77700));
-select pg_temp.check('automatika: podruhé ne (už spárované)', not public.automaticky_sparovat_fakturu(:'tenant', :'t2', :'fa', 77700));
+select pg_temp.check('automatika: faktura v EUR s platbou v Kč se nespáruje', not public.automaticky_sparovat_fakturu(:'tenant', :'t2e', :'fa_eur', 77700));
+select pg_temp.check('automatika: jiná částka než faktura → ne', not public.automaticky_sparovat_fakturu(:'tenant', :'t2a', :'fa', 77600));
+select pg_temp.check('automatika: řádek výpisu bez potvrzení banky → ne (úloha výpis nepáruje)',
+  not public.automaticky_sparovat_fakturu(:'tenant', :'t2', :'fa', 77700));
+select pg_temp.check('automatika: přesná shoda → spárováno', public.automaticky_sparovat_fakturu(:'tenant', :'t2a', :'fa', 77700));
+select pg_temp.check('automatika: podruhé ne (už spárované)', not public.automaticky_sparovat_fakturu(:'tenant', :'t2a', :'fa', 77700));
 -- Id párování čte správce (service_role má na platby_faktury grant jen
 -- z výchozích práv Supabase, která čistá testovací databáze nemá).
 reset role;
@@ -743,7 +756,7 @@ set role service_role;
 select pg_temp.check('zrušení automatického párování: ano, podruhé ne',
   public.zrusit_automaticke_parovani_faktury(:'tenant', :'auto_alokace', 'zkouška')
   and not public.zrusit_automaticke_parovani_faktury(:'tenant', :'auto_alokace', 'zkouška'));
-select pg_temp.check('automatika: člověkem zrušené párování znovu nezaloží', not public.automaticky_sparovat_fakturu(:'tenant', :'t2', :'fa', 77700));
+select pg_temp.check('automatika: člověkem zrušené párování znovu nezaloží', not public.automaticky_sparovat_fakturu(:'tenant', :'t2a', :'fa', 77700));
 reset role;
 
 -- Jiné platby (#146, 20261016100000) a párování faktur sdílí bankovní
@@ -1013,8 +1026,8 @@ delete from storage.objects where bucket_id = 'faktury-prilohy' and name like :'
 delete from public.faktury_prijem where pripojeni_id = :'schranka';
 delete from public.jine_platby_historie where zaznam_id in (:'jp_cela', :'jp_volna');
 delete from public.jine_platby where id in (:'jp_cela', :'jp_volna');
-delete from public.platby_faktury where transakce_id in (:'t1', :'t2', :'t3', :'t4', :'t5', :'t6', :'t7');
-delete from public.transakce where id in (:'t1', :'t2', :'t3', :'t4', :'t5', :'t6', :'t7');
+delete from public.platby_faktury where transakce_id in (:'t1', :'t2', :'t2a', :'t2e', :'t3', :'t4', :'t5', :'t6', :'t7');
+delete from public.transakce where id in (:'t1', :'t2', :'t2a', :'t2e', :'t3', :'t4', :'t5', :'t6', :'t7');
 delete from public.platebni_ucty where id = :'ucet';
 delete from public.integrace_pripojeni where id = :'schranka';
 delete from public.faktury where tenant_id in (:'tenant', :'tenant_b');

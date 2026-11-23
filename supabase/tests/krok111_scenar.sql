@@ -496,10 +496,12 @@ select pg_temp.check('pokladní uzávěrka, pak stažení BEZ id: pohyb z banky 
   and (select count(*) from public.transakce where ucet_id = :'u_pokl' and zdroj = 'banka_api' and datum = '2033-06-09') = 1);
 
 -- Stornovaný řádek výpisu pohyb z banky nezablokuje.
+-- (Storna tu mají opačný směr než stornovaný výdaj — od kroku 2,
+-- 20261120100000, to hlídá spoušť trg_transakce_storno_kontrola.)
 select pg_temp.importovat(:'firma_a', :'u_storno', 'csv_banka', 'krok111-storno-v',
   jsonb_build_array(pg_temp.r('2033-06-11'))) as storno_v \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
-select :'firma_a', :'u_storno', 'vydaj', 500, '2033-06-11', 'rucni', t.id
+select :'firma_a', :'u_storno', 'prijem', 500, '2033-06-11', 'rucni', t.id
   from public.transakce t where t.ucet_id = :'u_storno' and t.zdroj = 'csv_banka';
 select pg_temp.stahnout(:'firma_a', :'u_storno', 'krok111-storno-s', jsonb_build_array(pg_temp.r('2033-06-11', 'krok111-storno-a'))) as storno_s \gset
 select pg_temp.check('stornovaný řádek výpisu, pak stažení: pohyb z banky se zapíše (1/1)',
@@ -510,7 +512,7 @@ select pg_temp.check('stornovaný řádek výpisu, pak stažení: pohyb z banky 
 select pg_temp.importovat(:'firma_a', :'u_storno', 'csv_banka', 'krok111-storno-v4',
   jsonb_build_array(pg_temp.r('2033-06-19'))) as stn_v \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
-select :'firma_a', :'u_storno', 'vydaj', 500, '2033-06-19', 'rucni', t.id
+select :'firma_a', :'u_storno', 'prijem', 500, '2033-06-19', 'rucni', t.id
   from public.transakce t where t.ucet_id = :'u_storno' and t.zdroj = 'csv_banka' and t.datum = '2033-06-19';
 select pg_temp.stahnout(:'firma_a', :'u_storno', 'krok111-storno-s4', jsonb_build_array(pg_temp.r('2033-06-19'))) as stn_s \gset
 select pg_temp.check('stornovaný řádek výpisu, pak stažení BEZ id: pohyb z banky se zapíše (1/1)',
@@ -532,7 +534,7 @@ set role authenticated;
 select set_config('test.user_id', :'maj', false);
 select pg_temp.check('majitelka stornuje řádek výpisu svého účtu přímým zápisem (storno na témže účtu projde)',
   pg_temp.projde(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of) values (%L, %L, %L, 600, %L, %L, %L)',
-    :'firma_a', :'u_storno2', 'vydaj', '2033-06-15', 'rucni', :'t_st2')));
+    :'firma_a', :'u_storno2', 'prijem', '2033-06-15', 'rucni', :'t_st2')));
 reset role;
 select set_config('test.user_id', '', false);
 select pg_temp.importovat(:'firma_a', :'u_storno2', 'csv_banka', 'krok111-st2-v2',
@@ -548,7 +550,7 @@ select pg_temp.check('storno řádku výpisu, pak překrývající se výpis: st
 select pg_temp.importovat(:'firma_a', :'u_storno2', 'csv_banka', 'krok111-st3-v1',
   jsonb_build_array(pg_temp.r('2033-06-17'))) as st3_v1 \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
-select :'firma_a', :'u_storno2', 'vydaj', 500, '2033-06-17', 'rucni', t.id
+select :'firma_a', :'u_storno2', 'prijem', 500, '2033-06-17', 'rucni', t.id
   from public.transakce t where t.ucet_id = :'u_storno2' and t.zdroj = 'csv_banka' and t.datum = '2033-06-17';
 select pg_temp.importovat(:'firma_a', :'u_storno2', 'csv_banka', 'krok111-st3-v2',
   jsonb_build_array(pg_temp.r('2033-06-17'), pg_temp.r('2033-06-17'))) as st3_v2 \gset
@@ -561,7 +563,7 @@ select pg_temp.check('dvě stejné platby, storno první, celodenní výpis: dop
 select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-st1',
   jsonb_build_array(pg_temp.r('2033-06-18'))) as pokl_st1 \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
-select :'firma_a', :'u_pokl', 'vydaj', 500, '2033-06-18', 'rucni', t.id
+select :'firma_a', :'u_pokl', 'prijem', 500, '2033-06-18', 'rucni', t.id
   from public.transakce t where t.ucet_id = :'u_pokl' and t.zdroj = 'csv_pokladna' and t.datum = '2033-06-18';
 select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-st2',
   jsonb_build_array(pg_temp.r('2033-06-18'))) as pokl_st2 \gset
@@ -574,7 +576,7 @@ select pg_temp.check('storno pokladní uzávěrky, pak táž uzávěrka znovu: n
 select pg_temp.stahnout(:'firma_a', :'u_storno', 'krok111-storno-s5',
   jsonb_build_array(pg_temp.r('2033-06-20', 'krok111-storno-b'))) as stb_s \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
-select :'firma_a', :'u_storno', 'vydaj', 500, '2033-06-20', 'rucni', t.id
+select :'firma_a', :'u_storno', 'prijem', 500, '2033-06-20', 'rucni', t.id
   from public.transakce t where t.ucet_id = :'u_storno' and t.zdroj = 'banka_api' and t.externi_id = 'krok111-storno-b';
 select pg_temp.importovat(:'firma_a', :'u_storno', 'csv_banka', 'krok111-storno-v5',
   jsonb_build_array(pg_temp.r('2033-06-20'))) as stb_v \gset
@@ -599,7 +601,7 @@ select pg_temp.check('stornovaný pohyb z banky, pak výpis se stejným obsahem:
 select pg_temp.stahnout(:'firma_a', :'u_stbez', 'krok111-stbez-1',
   jsonb_build_array(pg_temp.r('2033-06-24', null, 500, 'Beta'))) as stbez_1 \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
-select :'firma_a', :'u_stbez', 'vydaj', 500, '2033-06-24', 'rucni', t.id
+select :'firma_a', :'u_stbez', 'prijem', 500, '2033-06-24', 'rucni', t.id
   from public.transakce t where t.ucet_id = :'u_stbez' and t.zdroj = 'banka_api';
 select pg_temp.stahnout(:'firma_a', :'u_stbez', 'krok111-stbez-2',
   jsonb_build_array(pg_temp.r('2033-06-24', null, 500, 'Beta'))) as stbez_2 \gset
@@ -625,7 +627,7 @@ select pg_temp.importovat(:'firma_a', :'u_storno3', 'csv_banka', 'krok111-sp-v1'
 select pg_temp.stahnout(:'firma_a', :'u_storno3', 'krok111-sp-s1',
   jsonb_build_array(pg_temp.r('2033-06-22', 'krok111-sp-x'))) as sp_s1 \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
-select :'firma_a', :'u_storno3', 'vydaj', 500, '2033-06-22', 'rucni', t.id
+select :'firma_a', :'u_storno3', 'prijem', 500, '2033-06-22', 'rucni', t.id
   from public.transakce t
   join public.transakce_potvrzeni_banky b on b.transakce_id = t.id
  where t.ucet_id = :'u_storno3' and t.zdroj = 'csv_banka' and b.externi_id = 'krok111-sp-x';
