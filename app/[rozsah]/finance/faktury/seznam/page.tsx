@@ -174,12 +174,12 @@ export default async function FakturySeznam({
     for (const d of radky.filter((f) => f.castka_haleru < 0 && smiOznacitUhrazenou(f.status) && !f.is_archived && !f.is_duplicate)) {
       const ico = (d.supplier_ico ?? '').trim()
       const jmeno = (d.supplier ?? '').trim()
-      const zaklad = () => fakturyFirmy(pristupFaktury, 'id, dodavatel, cislo_faktury, castka_haleru, mena')
+      const otevreneFaktury = () => fakturyFirmy(pristupFaktury, 'id, dodavatel, cislo_faktury, castka_haleru, mena')
         .gt('castka_haleru', 0).in('stav', [...STAVY_PRO_RUCNI_UHRAZENI]).eq('archivovano', false).eq('duplicita', false)
         .neq('id', d.id).order('splatnost', { ascending: true, nullsFirst: false }).limit(30)
       const [podleIco, podleJmena] = await Promise.all([
-        ico ? zaklad().eq('dodavatel_ico', ico) : Promise.resolve({ data: [] }),
-        jmeno ? zaklad().ilike('dodavatel', jmeno.replace(/[%_\\]/g, (z) => `\\${z}`)) : Promise.resolve({ data: [] }),
+        ico ? otevreneFaktury().eq('dodavatel_ico', ico) : Promise.resolve({ data: [] }),
+        jmeno ? otevreneFaktury().ilike('dodavatel', jmeno.replace(/[%_\\]/g, (z) => `\\${z}`)) : Promise.resolve({ data: [] }),
       ])
       const nalezene = new Map<string, FakturaKZapocteni>()
       for (const k of [...(podleIco.data ?? []), ...(podleJmena.data ?? [])] as unknown as FakturaKZapocteni[]) {
