@@ -232,6 +232,8 @@ ok('migrace: nic nepřepisuje ani nemaže (žádné update/delete/insert dat)',
 const lib = (cesta) => zdroj(cesta)
 ok('KPI: pobočka má účet podle pobocky_bez_aktivniho_uctu, ne vlastním počítáním účtů',
   /async function pobockaMaUcet[\s\S]*?nactiPobockyBezUctu\(/.test(lib('lib/finance-kpi.ts')) && !/from\('platebni_ucty'\)/.test(lib('lib/finance-kpi.ts')))
+ok('KPI: když se funkce nepodaří zeptat, KPI spadne — ne „pobočka účet má"',
+  /const ma = maPobockaAktivniUcet\(vysledek, pobocka\)\n(\s*\/\/[^\n]*\n)*\s*if \(ma === null\) throw /.test(lib('lib/finance-kpi.ts')))
 ok('smiSpravovatUctyFirmy = finance.manage ZA CELOU FIRMU (hasAccess s null)',
   /export async function smiSpravovatUctyFirmy[\s\S]*?return hasAccess\(tenantId, 'finance\.manage', null\)/.test(lib('lib/finance-pristup.ts')))
 ok('stará věta BEZ_UCTU_POBOCKY (cesta pro každého) zmizela', !/BEZ_UCTU_POBOCKY\s*=/.test(lib('lib/finance-evidence-pobocka.ts')))
