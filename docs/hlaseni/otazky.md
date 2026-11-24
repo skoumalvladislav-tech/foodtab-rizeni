@@ -2548,3 +2548,226 @@ krok 1. Nic jsem na něm neměnil.**
   seznamu výjimek v testu oprávnění (`scripts/provoz-granty.test.mjs`). Udělat to jako samostatný krok mimo
   Fázi 0?
 - **Když to zůstane:** dnes nic nehoří, klíč služby je jen na serveru.
+
+## 127. Kdy se platba navrhne podle částky a dodavatele
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** když platba nemá variabilní symbol, ale sedí částka a dodavatel, Foodtab ji k faktuře jen
+  navrhne. Platba musí přijít nejdřív 3 dny před vystavením faktury a nejpozději 30 dní po splatnosti.
+  U faktury bez splatnosti platí 30 dní po vystavení. Spáruje pak člověk.
+- **Když to má být jinak:** jde o dvě čísla v `lib/finance-parovani.ts` (`OKNO_NAVRHU_*`) a dva testy.
+
+## 128. Přeplatek faktury při spárování s platbou
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** když je platba vyšší než to, co na faktuře zbývá, spárování projde. Faktura je Uhrazeno
+  a přebytek je vidět v auditu i jako varování na stránce. Ruční „Uhrazeno“ přeplatek nedovolí (otázka 143).
+- **Když to má být jinak:** databáze spárování nad zbytek faktury odmítne. Přeplatek se pak musí řešit
+  jinak, třeba vratkou.
+
+## 129. Důvod ruční úhrady
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** ruční „Uhrazeno“ i jeho zrušení chce důvod. Je to volný text, aspoň 5 znaků.
+- **Když to má být jinak:** pevný seznam důvodů (třeba „zaplaceno hotově“, „zápočet“). Lepší přehled,
+  méně volnosti.
+
+## 130. Faktury zaplacené před krokem 2
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** faktura si nově pamatuje, v jakém stavu byla před úhradou, a po zrušení úhrady se do něj
+  vrátí. Faktury zaplacené dřív si to nepamatují. Po zrušení úhrady skončí na „Ke kontrole úhrady“.
+- **Když to má být jinak:** jiný výchozí stav, jedno místo v databázi (ROZHODNOUT
+  v `app.faktura_stav_podle_plateb`).
+
+## 131. Kdo je „týž dodavatel“ u započtení dobropisu
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** dobropis jde započíst jen proti faktuře téhož dodavatele. Za téhož beru stejné jméno (po
+  sjednocení zápisu) nebo stejné IČO. Nepočítá se IČO vlastní firmy ani IČO, pod kterým jsou dva různé
+  názvy (sporné IČO z kroku 1).
+- **Když to má být jinak:** jen podle IČO (přísnější), nebo navíc podle čísla účtu.
+
+## 132. Storno od banky v napojených bankách
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** Foodtab umí přijmout od banky zprávu, že pohyb byl zrušen (storno). Pak zruší i spárování
+  a ruční úhrady s tím pohybem a faktura se vrátí mezi neuhrazené. Žádné napojení (Fio, Enable Banking,
+  KB) to ale zatím neposílá, takže se to dnes samo nestane.
+- **Otázka:** doplnit to do napojení bank? Každá banka storno hlásí jinak, je to samostatná práce.
+
+## 133. Pojistka proti dvěma stejným návrhům
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** databáze nedovolí dva otevřené návrhy pro tutéž dvojici platba a faktura. Zadání to chce
+  výslovně. Zkouška 11 ze zadání (a otázka 109) přitom nové pravidlo tohoto druhu nad existujícími
+  sloupci nechtěla. Nechal jsem pojistku podle zadání a označil ji ROZHODNOUT.
+- **Když to má být jinak:** pojistku smazat. Dvojice pak hlídá jen kód, který návrhy zapisuje.
+- Před nasazením viz otázka 137.
+
+## 134. Dobropis se jen navrhuje
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** dobropis se nikdy nespáruje sám, ani když sedí variabilní symbol, částka i účet. Vždy vznikne
+  jen návrh a potvrdí ho člověk.
+- **Když to má být jinak:** dobropis s jistou shodou by se spároval sám, stejně jako faktura.
+
+## 135. Dvě opatrné podmínky navíc v appce
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** automatické párování v appce kontroluje navíc jméno protistrany. Nepáruje ani tehdy, když
+  existuje i faktura bez variabilního symbolu se stejnou částkou. Párování z nahraného výpisu
+  v databázi tyhle dvě podmínky nemá, je tedy o chlup méně přísné.
+- **Když to má být jinak:** sjednotit. Buď obě podmínky doplnit do databáze (přísnější všude), nebo je
+  z appky vypustit.
+
+## 136. Údaj „kolik řádků bylo nových“ u nahraného výpisu
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** jistou shodu z nahraného výpisu databáze pustí jen tomu, kdo výpis sám nahrál a smí potvrzovat
+  párování. Autora zapisuje databáze sama. Přihlášený ale u svého výpisu smí přepsat údaj, kolik řádků
+  bylo nových. Ten údaj by měnit neměl nikdo.
+- **Otázka:** to oprávnění odebrat? Je to drobná změna v databázi.
+
+## 137. Kontrola těsně před nasazením kroku 2
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2). **Není to volba, je to připomínka.**
+
+- Migrace kroku 2 zavádí pojistku z otázky 133. Kdyby v ostré databázi už byly dva stejné otevřené
+  návrhy, migrace spadne a nic nezmění. Audit 18. 11. jich našel nula.
+- **Co udělat:** těsně před `db push` pustit jeden čtecí dotaz, který to ověří.
+
+## 138. Variabilní symbol z textu platby u Enable Banking
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2), upraveno 24. 11. po první revizi.
+
+- **Teď:** Enable Banking posílá variabilní symbol prázdný (otázka 124). Nově ho Foodtab vytáhne z textu
+  platby (pravidla v otázce 147). Tím se mění „otisk“, podle kterého Foodtab pozná tutéž platbu
+  z výpisu a z banky. Scénář krok112 (oddíl 9) ukazuje, že stažení s VS z textu a výpis se stejným VS
+  se dál poznají jako jedna platba. Dnes to nemá dopad: Enable Banking není připojené a pohybů je 0.
+- **Když to má být jinak:** VS nechat prázdný. Platby z Enable Banking pak nikdy nedosáhnou jisté shody,
+  vznikne jen návrh.
+
+## 139. Důvod zrušení spárování
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** appka chce při zrušení spárování důvod. Databáze sama ho nevyžaduje. Kdo by šel do databáze
+  napřímo, zruší spárování i bez důvodu (audit to zapíše).
+- **Když to má být jinak:** vynutit důvod i v databázi. Je to malá změna.
+
+## 140. Kdy se hledají návrhy párování
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** návrhy se hledají po stažení z banky, po nahrání výpisu a tlačítkem „Najít návrhy“. Po nahrání
+  výpisu je hledá serverová služba, a proto má v seznamu toho, co smí, o jednu výjimku víc.
+- **Když to má být jinak:** po nahrání výpisu nehledat, jen po stažení z banky a z tlačítka.
+
+## 141. Platby za část faktury
+
+**Vzniklo:** 23. 11. 2026 (Finance Fáze 0, krok 2).
+
+- **Teď:** návrh vzniká, jen když platba pokryje přesně to, co na faktuře zbývá. Platbu po částech spáruje
+  člověk v Platbách.
+- **Když to má být jinak:** navrhovat i dílčí platby. Víc návrhů, ale i víc šumu.
+
+## 142. Dobropis a platby v cizí měně
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 2, po první revizi).
+
+- **Teď:** dobropis v jiné měně se nenavrhuje. Jedna platba v jiné měně uhradí ruční úhradou jen jednu
+  fakturu.
+- **Když to má být jinak:** cizí měnu řešit kurzem a rozdělením platby. Je to samostatná práce.
+
+## 143. Přeplatek ruční úhradou
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 2, po první revizi).
+
+- **Teď:** ruční „Uhrazeno“ smí zapsat nejvýš to, co na faktuře zbývá. Přeplatit jde jen spárováním
+  s opravdovou platbou (otázka 128).
+- **Když to má být jinak:** povolit. Vrátí se ale riziko z revize, že jde ručně „zaplatit“ víc, než kolik
+  peněz odešlo.
+
+## 144. Co se stane s návrhem po zrušení ruční úhrady
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 2, po první revizi), změněno po druhé revizi.
+
+- **Teď:** když se zruší ruční úhrada, která vznikla potvrzením návrhu (platba v jiné měně), vrátí se
+  návrh do fronty Návrhy párování. Platí to i při „Vrátit mezi neuhrazené“. Návrh, který člověk
+  odmítl, se nevrací. Návrh k pohybu, který banka stornovala, taky ne.
+- **Když to má být jinak:** návrh trvale uzavřít. Platba pak zůstane v Platbách bez faktury a k faktuře
+  ji znovu přiřadí jen správce Faktur.
+
+## 145. Platby bez faktury na pobočce
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 2, po první revizi).
+
+- **Teď:** fronta Platby bez faktury ukazuje na pobočce jen účty té pobočky. Firemní účty bez pobočky
+  tam nejsou, stejně jako v Platbách.
+- **Když to má být jinak:** ukázat i firemní účty tomu, kdo smí finance celé firmy.
+
+## 146. Hledání návrhů u velkého počtu plateb
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 2, po první revizi).
+
+- **Teď:** každé hledání začne od nejnovějších plateb a má časový limit. Když má firma tolik plateb, že je
+  jeden běh nestihne, k nejstarším se nedostane. Appka pak napíše „nedokončeno“.
+- **Když to má být jinak:** pamatovat si, kde hledání skončilo. To znamená nové místo v databázi.
+
+## 147. Jak se čte variabilní symbol z textu platby
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 2, po první revizi).
+
+- **Teď:** hledá se značka „VS“ (velkými i malými písmeny), před ní nesmí být písmeno ani číslice a za ní
+  1 až 10 číslic. Dva různé symboly v textu znamenají žádný VS. Zápisy jako „var. symbol“ se neberou.
+- **Když to má být jinak:** přidat další zápisy. Zachytí se víc symbolů, ale přibude i omylů.
+
+## 148. Kdo smí zaplatit fakturu platbou, kterou nepotvrdila banka
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 2, po druhé revizi), přepsáno po třetí revizi.
+**Doporučuji rozhodnout před nasazením.**
+
+- **Teď:**
+  - ruční platbu a pokladnu smí s fakturou spárovat jen správce Faktur;
+  - ruční úhradu v jiné měně s platbou, kterou banka nepotvrdila, zapíše taky jen správce Faktur;
+  - řádek nahraného výpisu, který banka (zatím) nepotvrdila, spáruje každý, kdo smí párovat. Ručně
+    i automaticky jistou shodou z vlastního výpisu. Tak to chce zadání kroku 2, bod 1.
+- **Pozor:** výpis si nahraje každý se Správou financí. Kdo smí párovat, si tedy může „zaplatit“ fakturu
+  vymyšleným výpisem. Zůstane po něm stopa: kdo výpis nahrál, kdo párování potvrdil a záznam v auditu.
+  Databáze to ale nezastaví.
+- **Když to má být jinak:**
+  - zavřít úplně: platbu bez potvrzení banky spáruje jen správce Faktur (dvě místa v databázi). Výpis
+    k účtu bez napojené banky pak spáruje jen on;
+  - nebo „čtyři oči“: kdo výpis nahrál, ten ho nespáruje.
+  - V obou případech se upraví jedna kontrola ve scénáři krok112 (6d c).
+
+## 149. Tlačítka, která databáze odmítne
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 2, po druhé revizi).
+
+- **Teď:** appka ukazuje „Spárovat“, „Potvrdit“ a „Uhradit v jiné měně“ i u plateb, které dotyčnému
+  databáze odmítne (viz otázka 148). Po kliknutí ukáže srozumitelnou hlášku.
+- **Když to má být jinak:** tlačítka schovat předem. Appka by pak musela u každé platby znát, odkud je
+  a jestli ji banka potvrdila.
+
+## 150. „Vrátit mezi neuhrazené“ u faktury s přeplatkem ruční úhradou
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 2, po třetí revizi).
+
+- **Teď:** fakturu celou platí ručně potvrzené spárování s platbou a navíc má ruční úhradu (přeplatek).
+  „Vrátit mezi neuhrazené“ se u ní odmítne celé a ruční úhrada zůstane. Zrušit ji jde zvlášť tlačítkem
+  „Zrušit ruční úhradu“. Vybral jsem to proto, že tlačítko slibuje „mezi neuhrazené“, a tam by se
+  faktura stejně nedostala.
+- **Když to má být jinak:** úhradu zrušit a fakturu nechat Uhrazenou. Je to malá změna v databázi
+  a jedna kontrola ve scénáři.
