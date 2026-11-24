@@ -724,6 +724,20 @@ select pg_temp.check('přímý zápis: faktura se spárovanou platbou nepřepne 
 reset role;
 select set_config('test.user_id', '', false);
 set role service_role;
+select pg_temp.projde(format($s$insert into public.faktury (tenant_id, dodavatel, cislo_faktury, castka_haleru, stav)
+                               values (%L, 'Služba s.r.o.', 'K112-SL2', 1000, 'Ke schválení')$s$, :'firma'))
+  and pg_temp.projde(format($s$insert into public.faktury (tenant_id, dodavatel, cislo_faktury, castka_haleru, stav)
+                               values (%L, 'Služba s.r.o.', 'K112-SL3', 1000, 'Ke kontrole úhrady')$s$, :'firma'))
+  and pg_temp.projde(format($s$update public.faktury set stav = 'Uhrazeno' where tenant_id = %L and cislo_faktury = 'K112-SL3'$s$, :'firma')) as v \gset
+reset role;
+select pg_temp.check('služba: fakturu Ke schválení i Ke kontrole úhrady založí a přepne na Uhrazeno, stav před úhradou zapamatuje — naměřeno: '
+    || coalesce((select stav || '|' || coalesce(stav_pred_uhradou, '-') from public.faktury
+                  where tenant_id = :'firma' and cislo_faktury = 'K112-SL3'), 'žádná'),
+  :'v'
+  and (select stav || '|' || coalesce(stav_pred_uhradou, '-') from public.faktury
+        where tenant_id = :'firma' and cislo_faktury = 'K112-SL3') = 'Uhrazeno|Ke kontrole úhrady'
+  and (select stav from public.faktury where tenant_id = :'firma' and cislo_faktury = 'K112-SL2') = 'Ke schválení');
+set role service_role;
 select pg_temp.check('služba: fakturu jako Uhrazeno založit smí a přepnout zpět taky',
   pg_temp.projde(format($s$insert into public.faktury (tenant_id, dodavatel, cislo_faktury, castka_haleru, stav)
                            values (%L, 'Služba s.r.o.', 'K112-SL1', 1000, 'Uhrazeno')$s$, :'firma'))
@@ -1290,22 +1304,6 @@ select pg_temp.check('smazání faktury: automatický nepotvrzený návrh smazá
   and not exists (select 1 from public.platby_faktury where faktura = :'f_h11')
   and exists (select 1 from public.faktury where id = :'f_h12')
   and exists (select 1 from public.platby_faktury where faktura = :'f_h12'));
-
--- Služba: stav faktury mění i mimo „Uhrazeno" (převod, opravy).
-set role service_role;
-select pg_temp.check('služba: fakturu Ke schválení i Ke kontrole úhrady založí a přepne na Uhrazeno',
-  pg_temp.projde(format($s$insert into public.faktury (tenant_id, dodavatel, cislo_faktury, castka_haleru, stav)
-                           values (%L, 'Služba s.r.o.', 'K112-SL2', 1000, 'Ke schválení')$s$, :'firma'))
-  and pg_temp.projde(format($s$insert into public.faktury (tenant_id, dodavatel, cislo_faktury, castka_haleru, stav)
-                               values (%L, 'Služba s.r.o.', 'K112-SL3', 1000, 'Ke kontrole úhrady')$s$, :'firma'))
-  and pg_temp.projde(format($s$update public.faktury set stav = 'Uhrazeno' where tenant_id = %L and cislo_faktury = 'K112-SL3'$s$, :'firma')));
-reset role;
-select pg_temp.check('služba: přepnutí na Uhrazeno zapamatuje stav před úhradou — naměřeno: '
-    || coalesce((select stav || '|' || coalesce(stav_pred_uhradou, '-') from public.faktury
-                  where tenant_id = :'firma' and cislo_faktury = 'K112-SL3'), 'žádná'),
-  (select stav || '|' || coalesce(stav_pred_uhradou, '-') from public.faktury
-    where tenant_id = :'firma' and cislo_faktury = 'K112-SL3') = 'Uhrazeno|Ke kontrole úhrady'
-  and (select stav from public.faktury where tenant_id = :'firma' and cislo_faktury = 'K112-SL2') = 'Ke schválení');
 
 -- Storno z banky zruší i ruční úhradu s tou platbou.
 select coalesce(pg_temp.pohyb(:'firma', :'ucet', 'prijem', 50000, '11601', '19-2000145399/0800', 'banka_api', 'CZK', :'t_h1')::text, 'žádný') as t_h1s \gset
