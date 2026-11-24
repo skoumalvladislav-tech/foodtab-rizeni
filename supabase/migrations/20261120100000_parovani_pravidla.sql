@@ -678,12 +678,18 @@ begin
   -- Platba zapsaná rukou (zdroj 'rucni') nebo z pokladny není výpis
   -- z banky: spárovat ji s fakturou znamená „zaplaceno mimo výpis", tedy
   -- totéž jako ruční úhrada — smí jen správce Faktur (app.smi_rucne_uhradit).
-  -- Jinak by kdo smí zapisovat platby a párovat, „zaplatil" libovolnou
-  -- fakturu platbou, kterou si sám zapsal.
-  -- ROZHODNOUT (otázka 148): výpis z banky (csv_banka) i bez potvrzení
-  -- banky dál páruje každý, kdo párovat smí — zadání kroku 2 věří dávce
-  -- toho, kdo ji nahrál. Kdyby i výpis bez potvrzení měl párovat jen
-  -- správce Faktur, stačí podmínku níž zúžit na app.pohyb_potvrzeny_bankou.
+  -- POZOR, tohle zavírá jen nejkratší cestu (jeden ruční zápis platby).
+  -- Výpis z banky (csv_banka) i bez potvrzení banky dál páruje každý, kdo
+  -- párovat smí — a výpis si nahraje každý se Správou financí, tedy i ten,
+  -- kdo jen páruje. Vymyšleným výpisem si tak fakturu „zaplatit" může
+  -- (ručně tady, i automaticky jistou shodou z vlastní dávky,
+  -- app.sparovat_jiste_z_davky — tak to chce zadání kroku 2, bod 1).
+  -- Zůstane po tom stopa: dávka s autorem (import_davky.nahral), párování
+  -- s tím, kdo ho potvrdil (platby_faktury.potvrdil), a záznam v auditu.
+  -- ROZHODNOUT (otázka 148): zavřít to úplně jde jen zúžením na
+  -- app.pohyb_potvrzeny_bankou (nebo správce Faktur) TADY i v jisté shodě
+  -- z dávky (app.posoudit_jistou_shodu s p_davka) — pak ale výpis účtu
+  -- bez napojené banky spáruje jen správce Faktur.
   if coalesce(v_t.zdroj, '') not in ('banka_api', 'csv_banka') and not app.smi_rucne_uhradit(p_tenant) then
     raise exception 'Platbu zapsanou ručně (ne z výpisu banky) spáruje s fakturou jen ten, kdo spravuje přijaté faktury za celou firmu — je to jako ruční úhrada.'
       using errcode = 'insufficient_privilege';
@@ -913,6 +919,8 @@ begin
   -- věří se mu stejně jako banka_api i v úloze bez přihlášeného — zadání
   -- kroku 2 po kroku 1), nebo dávka, kterou právě nahrál člověk s právem
   -- potvrzovat párování. NEpotvrzený výpis úloha (bez přihlášeného) nikdy.
+  -- Dávce člověka se věří tak, jak chce zadání (bod 1) — ROZHODNOUT
+  -- (otázka 148): výpis si může vymyslet i ten, kdo jen páruje.
   if v_t.zdroj = 'banka_api' then
     null;
   elsif v_t.zdroj = 'csv_banka'
@@ -1471,6 +1479,8 @@ declare
   v_branch uuid;
   v_navrh  uuid;
   v_zbyva  bigint;
+  v_hash_transakce bigint := hashtextextended(p_transakce::text, 0);
+  v_hash_faktura   bigint := hashtextextended(p_faktura::text, 0);
 begin
   if char_length(btrim(coalesce(p_duvod, ''))) < 5 then
     raise exception 'Napište důvod ruční úhrady (aspoň 5 znaků).' using errcode = 'check_violation';
@@ -1490,6 +1500,19 @@ begin
     v_ucet := v_t.ucet_id;
     if not app.smi_potvrdit_parovani(p_tenant, v_t.branch_id, p_castka_haleru) then
       raise exception 'Nemáte oprávnění potvrzovat párování plateb s fakturami.' using errcode = 'insufficient_privilege';
+    end if;
+    -- Zámky pohybu a faktury (stejné klíče jako párování, storno a Jiné
+    -- platby) DŘÍV než řádek návrhu nebo faktury a v pořadí podle hashe
+    -- jako app.sparovat_platbu_s_fakturou. Spoušť storna z banky bere
+    -- zámek pohybu a teprve pak řádky návrhů; kdyby tahle funkce držela
+    -- řádek návrhu a čekala na zámek pohybu, zablokovaly by se navzájem
+    -- (deadlock, jedna z transakcí by spadla).
+    if v_hash_transakce <= v_hash_faktura then
+      perform pg_advisory_xact_lock(v_hash_transakce);
+      perform pg_advisory_xact_lock(v_hash_faktura);
+    else
+      perform pg_advisory_xact_lock(v_hash_faktura);
+      perform pg_advisory_xact_lock(v_hash_transakce);
     end if;
     -- Návrh zamknout: dvojí odeslání formuláře počká a uvidí ho vyřízený.
     select p.id into v_navrh
@@ -1513,11 +1536,10 @@ begin
     raise exception 'Faktury pro tuto firmu nejsou otevřené.' using errcode = 'insufficient_privilege';
   end if;
 
-  -- Stejné zámky jako párování a Jiné platby (pohyb, faktura).
-  if p_transakce is not null then
-    perform pg_advisory_xact_lock(hashtextextended(p_transakce::text, 0));
+  -- Bez pohybu jen zámek faktury (s pohybem už výš, před návrhem).
+  if p_transakce is null then
+    perform pg_advisory_xact_lock(v_hash_faktura);
   end if;
-  perform pg_advisory_xact_lock(hashtextextended(p_faktura::text, 0));
 
   v_f := app.faktura_k_rucni_uhrade(p_tenant, p_faktura);
 
@@ -1658,7 +1680,9 @@ begin
     raise exception 'Dobropis nejde započíst sám se sebou.' using errcode = 'check_violation';
   end if;
 
-  if p_dobropis < p_faktura then
+  -- Zámky obou faktur v pořadí podle hashe — stejné pořadí jako párování
+  -- a ruční úhrada (jedno pořadí pro všechny, jinak hrozí deadlock).
+  if hashtextextended(p_dobropis::text, 0) <= hashtextextended(p_faktura::text, 0) then
     perform pg_advisory_xact_lock(hashtextextended(p_dobropis::text, 0));
     perform pg_advisory_xact_lock(hashtextextended(p_faktura::text, 0));
   else
@@ -1817,22 +1841,29 @@ grant execute on function public.zrusit_rucni_uhradu(uuid, uuid, text) to authen
 -- „Vrátit mezi neuhrazené" (Faktury → Seznam) v JEDNÉ transakci: zruší
 -- ruční úhrady a automatická párování faktury a přepočítá stav. Jde
 -- z „Uhrazeno" i z „Částečně uhrazeno" (tlačítko je u obou). Ručně
--- potvrzená párování zůstanou — když po zrušení zůstane stav stejný
--- (kryjí celou fakturu, nebo jediné, co ji zčásti platí), nic se nezmění
--- a funkce to řekne (ruší je ten, kdo má právo na Platby). Návrhy
--- 'jina_mena', ze kterých zrušené úhrady vznikly, se vrátí do fronty.
--- Faktura se započteným dobropisem se nevrací (zrušte započtení).
+-- potvrzená párování zůstanou (ruší je ten, kdo má právo na Platby).
+-- Odmítne a nic nezmění ve dvou případech:
+--   * po zrušení by faktura zůstala „Uhrazeno" — celou ji platí ručně
+--     potvrzené párování (mezi neuhrazené se tím nedostane);
+--   * nebylo co zrušit a stav zůstal — fakturu zčásti platí jen ručně
+--     potvrzené párování.
+-- Jinak zruší, co jde, i když stav zůstane „Částečně uhrazeno" (zčásti
+-- platí ručně potvrzené párování, zbytek byla ruční úhrada) — stejně
+-- jako z „Uhrazeno" do „Částečně uhrazeno". Návrhy 'jina_mena', ze
+-- kterých zrušené úhrady vznikly, se vrátí do fronty. Faktura se
+-- započteným dobropisem se nevrací (zrušte započtení).
 create function app.vratit_fakturu_mezi_neuhrazene(p_tenant uuid, p_faktura uuid, p_duvod text)
 returns text
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  v_f     record;
-  v_a     record;
-  v_u     record;
-  v_stav  text;
-  v_autor uuid := (select pr.user_id from public.profiles pr where pr.user_id = (select auth.uid()));
-  v_duvod text := coalesce(nullif(btrim(coalesce(p_duvod, '')), ''), 'Ve Fakturách vráceno mezi neuhrazené.');
+  v_f       record;
+  v_a       record;
+  v_u       record;
+  v_stav    text;
+  v_zruseno integer := 0;
+  v_autor   uuid := (select pr.user_id from public.profiles pr where pr.user_id = (select auth.uid()));
+  v_duvod   text := coalesce(nullif(btrim(coalesce(p_duvod, '')), ''), 'Ve Fakturách vráceno mezi neuhrazené.');
 begin
   if not app.smi_rucne_uhradit(p_tenant) then
     raise exception 'Vrátit fakturu mezi neuhrazené smí jen ten, kdo spravuje přijaté faktury za celou firmu.'
@@ -1842,7 +1873,18 @@ begin
     raise exception 'Faktury pro tuto firmu nejsou otevřené.' using errcode = 'insufficient_privilege';
   end if;
 
+  -- Pořadí zámků jako zrušení párování, zrušení ruční úhrady a spoušť
+  -- storna: nejdřív řádky úhrad a párování, AŽ POTOM řádek faktury.
+  -- Obráceně (faktura, pak úhrady a párování) by se s nimi zablokovala
+  -- (deadlock). Nové úhrady a párování téže faktury mezitím nevzniknou
+  -- — všechny cesty, které je zapisují, berou zámek faktury.
   perform pg_advisory_xact_lock(hashtextextended(p_faktura::text, 0));
+  perform 1 from public.faktury_rucni_uhrady r
+   where r.tenant_id = p_tenant and r.faktura = p_faktura and r.zruseno_kdy is null
+     for update;
+  perform 1 from public.platby_faktury p
+   where p.tenant_id = p_tenant and p.faktura = p_faktura and p.stav = 'potvrzeno' and p.zpusob = 'automaticky'
+     for update;
   select f.stav into v_f from public.faktury f where f.id = p_faktura and f.tenant_id = p_tenant for no key update;
   if not found then
     raise exception 'Faktura nepatří této firmě.' using errcode = 'check_violation';
@@ -1861,14 +1903,15 @@ begin
      where tenant_id = p_tenant and faktura = p_faktura and zruseno_kdy is null
     returning navrh_id
   loop
+    v_zruseno := v_zruseno + 1;
     perform app.znovu_otevrit_navrh_uhrady(p_tenant, v_u.navrh_id);
   end loop;
 
   for v_a in
     select p.id from public.platby_faktury p
      where p.tenant_id = p_tenant and p.faktura = p_faktura and p.stav = 'potvrzeno' and p.zpusob = 'automaticky'
-     for update
   loop
+    v_zruseno := v_zruseno + 1;
     perform app.zrusit_parovani_interne(p_tenant, v_a.id, 'finance.automaticke_parovani_zruseno', v_duvod, null);
   end loop;
 
@@ -1877,9 +1920,9 @@ begin
     raise exception 'Faktura je podle ručně potvrzené platby z výpisu zaplacená celá. Když platba k faktuře nepatří, musí párování zrušit někdo s právem na Finance → Platby.'
       using errcode = 'check_violation';
   end if;
-  -- Z „Částečně" zase „Částečně": nebylo co vrátit (fakturu zčásti platí
-  -- jen ručně potvrzené párování) — celé zpět, nic se nezměnilo.
-  if v_stav = 'Částečně uhrazeno' and v_f.stav = 'Částečně uhrazeno' then
+  -- Nebylo co zrušit a stav se nezměnil: fakturu zčásti platí jen ručně
+  -- potvrzené párování. (Když se něco zrušilo, „Částečně" zůstat smí.)
+  if v_zruseno = 0 and v_stav = v_f.stav then
     raise exception 'Faktura je zčásti zaplacená ručně potvrzenou platbou z výpisu — vrátit ji nejde. Když platba k faktuře nepatří, musí párování zrušit někdo s právem na Finance → Platby.'
       using errcode = 'check_violation';
   end if;

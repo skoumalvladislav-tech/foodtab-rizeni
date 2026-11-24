@@ -34,6 +34,9 @@
 --      v téže dávce jako nárok řádku výpisu; zrušená úhrada vrátí návrh
 --      do fronty; zámek pohybu ve spoušti storna; ruční platbu páruje
 --      a úhradu v jiné měně bez potvrzení banky zapíše jen správce Faktur;
+--  6d. opravy po třetí revizi: „Vrátit" u Částečně s párováním i ruční
+--      úhradou; pořadí zámků (ruční úhrada, započtení, Vrátit); výpis,
+--      který si párovač sám nahrál, spáruje (otázka 148) a nese jeho jméno;
 --   7. granty a přímý zápis (obejití funkcí), RLS ručních úhrad;
 --   8. audit bez čísel účtů;
 --   9. ukázka: výpis × stažení z banky s jiným VS.
@@ -1457,8 +1460,9 @@ select pg_temp.check('storno z banky bere zámek stornovaného pohybu dřív, ne
               from pg_proc p where p.oid = 'app.transakce_storno_parovani()'::regprocedure), false));
 
 -- (e) Ruční platba (zapsaná rukou, ne z výpisu) a úhrada v jiné měně bez
--- potvrzení banky: kdo jen páruje (Hana), fakturu nezaplatí; správce
+-- potvrzení banky: kdo jen páruje (Hana), fakturu jimi nezaplatí; správce
 -- Faktur (Marie) ano. Hana si platby zapíše sama (finance.manage).
+-- Výpis, který si Hana sama nahraje, ale spárovat smí — viz 6d (c).
 select pg_temp.faktura(:'firma', 'K112-RP1', '11705', 250000) as f_rp1 \gset
 select pg_temp.faktura(:'firma', 'K112-RP2', '11706', 3456700) as f_rp2 \gset
 select pg_temp.faktura(:'firma', 'K112-RP3', '11707', 1700, 'EUR') as f_rp3 \gset
@@ -1532,6 +1536,84 @@ select pg_temp.check('… a když řádek výpisu banka potvrdí stažením, kdo
   :'v' and :'v2' = 'Uhrazeno'
   and exists (select 1 from public.transakce_potvrzeni_banky where transakce_id::text = :'t_rp3' and externi_id = 'k112-rp3')
   and pg_temp.stav(:'f_rp3') = 'Uhrazeno');
+
+
+\echo ''
+\echo '== 6d. Opravy po třetí revizi ============================================'
+
+-- (a) „Vrátit" u Částečně uhrazené, kterou zčásti platí ručně potvrzené
+-- párování a zbytek ruční úhrada: úhradu zruší, párování nechá, stav
+-- zůstane Částečně uhrazeno (stejně jako z Uhrazeno do Částečně).
+select pg_temp.faktura(:'firma', 'K112-VM', '11710', 100000) as f_vm \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 30000, '') as t_vm \gset
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select split_part(pg_temp.sparuj(:'firma', :'t_vm', :'f_vm', 30000), ';', 1) as v1 \gset
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 20000, 'Doplatek hotově')$s$, :'firma', :'f_vm')) as v2 \gset
+select pg_temp.hodnota(format($s$select public.vratit_fakturu_mezi_neuhrazene(%L, %L, 'Doplatek hotově nebyl')$s$, :'firma', :'f_vm')) as v3 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('Vrátit: Částečně uhrazená ručním párováním i ruční úhradou → úhrada zrušená, párování zůstalo, Částečně uhrazeno — naměřeno: '
+    || :'v1' || ' / ' || :'v2' || ' / ' || :'v3'
+    || ' / aktivních úhrad ' || (select count(*) from public.faktury_rucni_uhrady where faktura = :'f_vm' and zruseno_kdy is null),
+  :'v1' = 'Částečně uhrazeno' and :'v2' = 'Částečně uhrazeno' and :'v3' = 'Částečně uhrazeno'
+  and pg_temp.stav(:'f_vm') = 'Částečně uhrazeno'
+  and not exists (select 1 from public.faktury_rucni_uhrady where faktura = :'f_vm' and zruseno_kdy is null)
+  and exists (select 1 from public.faktury_rucni_uhrady where faktura = :'f_vm' and duvod_zruseni = 'Doplatek hotově nebyl')
+  and exists (select 1 from public.platby_faktury where transakce_id = :'t_vm' and faktura = :'f_vm' and stav = 'potvrzeno')
+  and app.uhrazeno_faktury(:'firma', :'f_vm') = 30000
+  and exists (select 1 from public.audit_log where tenant_id = :'firma' and action = 'faktury.vraceno_mezi_neuhrazene'
+                and entity_id = :'f_vm'));
+
+-- (b) Pořadí zámků (deadlock). Souběh dvou spojení PGlite ani scénář
+-- nepředvede — kontroly čtou těla funkcí. Pravidlo: zámky pohybu
+-- a faktury (pg_advisory_xact_lock) v pořadí podle hashe a DŘÍV než
+-- zamčené řádky; řádky párování a úhrad dřív než řádek faktury.
+select pg_temp.check('ruční úhrada bere zámky pohybu a faktury dřív než řádek návrhu a faktury (kontrola nad tělem funkce)',
+  coalesce((select position('pg_advisory_xact_lock(' in p.prosrc) between 1 and position('for update' in p.prosrc)
+                   and position('pg_advisory_xact_lock(' in p.prosrc) < position('app.faktura_k_rucni_uhrade(' in p.prosrc)
+              from pg_proc p where p.oid = 'app.rucne_uhradit_fakturu(uuid, uuid, integer, text, uuid)'::regprocedure), false));
+select pg_temp.check('ruční úhrada bere zámky pohybu a faktury v pořadí podle hashe jako párování (kontrola nad tělem funkce)',
+  coalesce((select p.prosrc like '%if v\_hash\_transakce <= v\_hash\_faktura then%'
+              from pg_proc p where p.oid = 'app.rucne_uhradit_fakturu(uuid, uuid, integer, text, uuid)'::regprocedure), false));
+select pg_temp.check('započtení dobropisu bere zámky obou faktur v pořadí podle hashe (kontrola nad tělem funkce)',
+  coalesce((select p.prosrc like '%if hashtextextended(p\_dobropis::text, 0) <= hashtextextended(p\_faktura::text, 0) then%'
+                   and p.prosrc not like '%p\_dobropis < p\_faktura%'
+              from pg_proc p where p.oid = 'app.zapocitat_dobropis(uuid, uuid, uuid, integer, text)'::regprocedure), false));
+select pg_temp.check('Vrátit zamkne úhrady a párování faktury dřív než řádek faktury (kontrola nad tělem funkce)',
+  coalesce((select position('perform 1 from public.faktury_rucni_uhrady' in p.prosrc) between 1 and position('for no key update' in p.prosrc)
+                   and position('perform 1 from public.platby_faktury' in p.prosrc) between 1 and position('for no key update' in p.prosrc)
+              from pg_proc p where p.oid = 'app.vratit_fakturu_mezi_neuhrazene(uuid, uuid, text)'::regprocedure), false));
+
+-- (c) ROZHODNOUT (otázka 148): výpis z banky bez potvrzení banky páruje
+-- každý, kdo párovat smí — i výpis, který si sám nahrál (zadání kroku 2,
+-- bod 1 věří dávce toho, kdo ji nahrál). Zákaz ruční platby (6c e) to
+-- nezavře. Kontrola volbu drží viditelnou: kdo pravidlo zúží, musí ji
+-- změnit spolu s otázkou. A hlídá stopu: dávka i párování nesou jméno.
+select pg_temp.faktura(:'firma', 'K112-VV', '11711', 260000) as f_vv \gset
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select pg_temp.nahrat(:'firma', :'ucet', 'csv_banka', 'k112-vv-vypis',
+                      jsonb_build_array(pg_temp.radek('vydaj', 260000, '11711'))) is not null as v \gset
+reset role;
+select set_config('test.user_id', '', false);
+select coalesce((select id::text from public.transakce
+                  where ucet_id = :'ucet' and zdroj = 'csv_banka' and vs = '11711'), 'žádný') as t_vv \gset
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select split_part(pg_temp.sparuj(:'firma', nullif(:'t_vv', 'žádný')::uuid, :'f_vv', 260000), ';', 1) as v1 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('výpis, který si sám nahrál a banka nepotvrdila, kdo jen páruje, spáruje (ROZHODNOUT, otázka 148) — dávka, párování i audit nesou jeho jméno — naměřeno: '
+    || :'t_vv' || ' / ' || :'v1',
+  :'v' and :'v1' = 'Uhrazeno' and pg_temp.stav(:'f_vv') = 'Uhrazeno'
+  and not exists (select 1 from public.transakce_potvrzeni_banky where transakce_id::text = :'t_vv')
+  and exists (select 1 from public.transakce t join public.import_davky d on d.id = t.import_davka_id
+               where t.id::text = :'t_vv' and d.nahral = :'han')
+  and exists (select 1 from public.platby_faktury where transakce_id::text = :'t_vv' and faktura = :'f_vv'
+                and stav = 'potvrzeno' and zpusob = 'rucne' and potvrdil = :'han')
+  and exists (select 1 from public.audit_log where tenant_id = :'firma' and action = 'finance.platba_alokovana'
+                and entity_id = :'f_vv' and actor_id = :'han'));
 
 
 \echo ''

@@ -212,9 +212,11 @@ export async function oznacitUhrazenou(formData: FormData): Promise<void> {
  * Finance Fáze 0 krok 2): zruší ruční úhrady a automatická párování
  * faktury a stav přepočítá z toho, co zbyde. Jde z „Uhrazeno" i ze
  * „Částečně uhrazeno" (tlačítko je u obou). Ručně potvrzená párování
- * zůstanou — když kryjí celou fakturu, nebo ji zčásti platí jen ona,
- * nezmění se nic a člověk jde do Plateb (ruší je ten, kdo má právo na
- * Platby). Návrh platby v jiné měně, ze kterého zrušená úhrada vznikla,
+ * zůstanou (ruší je ten, kdo má právo na Platby). Když kryjí celou
+ * fakturu, nebo ji zčásti platí jen ona a nebylo co zrušit, nezmění se
+ * nic a člověk jde do Plateb. Když ji zčásti platí ona a zbytek byla
+ * ruční úhrada, úhrada se zruší a faktura zůstane „Částečně uhrazeno".
+ * Návrh platby v jiné měně, ze kterého zrušená úhrada vznikla,
  * se vrátí do Návrhů párování. Dřív to appka skládala ze tří kroků službou
  * a po chybě uprostřed zůstala párování zrušená a stav nezměněný.
  */
