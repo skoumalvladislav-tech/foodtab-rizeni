@@ -1,5 +1,8 @@
 # Stav k 23. 11. 2026 — Finance Fáze 0: audit a krok 1 (bankovní vrstva) hotové, kroky 2–9 začínají
 
+> **Doplněno 24. 11.:** krok 2 je hotový, viz `stav-2026-11-24-finance-faze0.md`. Věty níž o tom, že
+> kroky 2–9 nezačaly, platily k 23. 11. `krok64` 24. 11. už nepadá.
+
 ## Nejdřív to podstatné
 
 - **Nic jsem nenasazoval ani nesloučil a `db push` neproběhl, ani nasucho.** Na ostrá data jsem sahal jen
