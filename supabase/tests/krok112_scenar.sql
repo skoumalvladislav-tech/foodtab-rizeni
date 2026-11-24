@@ -30,6 +30,10 @@
 --      k faktuře, nejvýš zbytek; storno z banky ruší i ruční úhradu;
 --      storno v téže dávce; návrhy zapisuje jen služba; fronta „bez
 --      faktury“ funkcí; smazání faktury s automatickým návrhem;
+--  6c. opravy po druhé revizi: „Vrátit" i u Částečně uhrazené; storno
+--      v téže dávce jako nárok řádku výpisu; zrušená úhrada vrátí návrh
+--      do fronty; zámek pohybu ve spoušti storna; ruční platbu páruje
+--      a úhradu v jiné měně bez potvrzení banky zapíše jen správce Faktur;
 --   7. granty a přímý zápis (obejití funkcí), RLS ručních úhrad;
 --   8. audit bez čísel účtů;
 --   9. ukázka: výpis × stažení z banky s jiným VS.
@@ -987,7 +991,7 @@ select split_part(pg_temp.sparuj(:'firma', :'t_v2', :'f_v2', 30000), ';', 1) as 
 select pg_temp.check('Vrátit: faktura zaplacená ručně platbou z výpisu celá → odmítnuto, nic se nezměnilo',
   pg_temp.spadne_hlaskou(format($s$select public.vratit_fakturu_mezi_neuhrazene(%L, %L, 'Zkouška')$s$, :'firma', :'f_v2'),
                          '23514', 'zaplacená celá'));
-select pg_temp.check('Vrátit: faktura mimo Uhrazeno se odmítne',
+select pg_temp.check('Vrátit: faktura mimo Uhrazeno a Částečně uhrazeno se odmítne',
   pg_temp.spadne_hlaskou(format($s$select public.vratit_fakturu_mezi_neuhrazene(%L, %L, 'Zkouška')$s$, :'firma', :'f_u1'),
                          '23514', 'není ve stavu Uhrazeno'));
 select set_config('test.user_id', :'fin', false);
@@ -1326,6 +1330,211 @@ select pg_temp.check('stažení: platba i její storno v téže dávce — storn
 
 
 \echo ''
+\echo '== 6c. Opravy po druhé revizi ============================================'
+
+-- (a) „Vrátit mezi neuhrazené" i u Částečně uhrazené (tlačítko je u obou).
+select pg_temp.faktura(:'firma', 'K112-VC1', '11701', 100000, 'CZK', null, 'Neuhrazeno') as f_vc1 \gset
+select pg_temp.faktura(:'firma', 'K112-VC2', '11702', 100000) as f_vc2 \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 40000, '') as t_vc2 \gset
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 40000, 'Záloha hotově')$s$, :'firma', :'f_vc1')) as v1 \gset
+select pg_temp.hodnota(format($s$select public.vratit_fakturu_mezi_neuhrazene(%L, %L, 'Záloha se vrátila')$s$, :'firma', :'f_vc1')) as v2 \gset
+select split_part(pg_temp.sparuj(:'firma', :'t_vc2', :'f_vc2', 40000), ';', 1) as v3 \gset
+select pg_temp.hodnota(format($s$select public.vratit_fakturu_mezi_neuhrazene(%L, %L, 'Zkouška')$s$, :'firma', :'f_vc2')) as v4 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('Vrátit: Částečně uhrazená ruční úhradou → stav před úhradou (Neuhrazeno), úhrada zrušená — naměřeno: '
+    || :'v1' || ' / ' || :'v2',
+  :'v1' = 'Částečně uhrazeno' and :'v2' = 'Neuhrazeno' and pg_temp.stav(:'f_vc1') = 'Neuhrazeno'
+  and exists (select 1 from public.faktury_rucni_uhrady where faktura = :'f_vc1' and zruseno_kdy is not null
+                and duvod_zruseni = 'Záloha se vrátila')
+  and not exists (select 1 from public.faktury_rucni_uhrady where faktura = :'f_vc1' and zruseno_kdy is null));
+select pg_temp.check('Vrátit: zčásti zaplacená jen ručně potvrzenou platbou → odmítnuto, párování i stav zůstaly — naměřeno: '
+    || :'v3' || ' / ' || :'v4',
+  :'v3' = 'Částečně uhrazeno' and :'v4' like 'chyba 23514:%zčásti zaplacená ručně potvrzenou platbou%'
+  and pg_temp.stav(:'f_vc2') = 'Částečně uhrazeno'
+  and exists (select 1 from public.platby_faktury where transakce_id = :'t_vc2' and faktura = :'f_vc2' and stav = 'potvrzeno'));
+
+-- (b) Platba ze stažení, která jen potvrdí řádek výpisu, a její storno
+-- v TÉŽE dávce: potvrzení banky se zapíše až po vložení nových řádků,
+-- storno proto dostane řádek výpisu z nároku dávky.
+select pg_temp.faktura(:'firma', 'K112-SN', '11703', 44100) as f_sn \gset
+select pg_temp.nahrat(:'firma', :'ucet', 'csv_banka', 'k112-sn-vypis',
+                      jsonb_build_array(pg_temp.radek('vydaj', 44100, '11703'))) is not null as v \gset
+select coalesce((select id::text from public.transakce
+                  where ucet_id = :'ucet' and zdroj = 'csv_banka' and vs = '11703'), 'žádný') as t_sn \gset
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select split_part(pg_temp.sparuj(:'firma', nullif(:'t_sn', 'žádný')::uuid, :'f_sn', 44100), ';', 1) as v2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.nahrat(:'firma', :'ucet', 'banka_api', 'k112-sn-stazeni',
+                      jsonb_build_array(pg_temp.radek('vydaj', 44100, '11703', '19-2000145399/0800', 'k112-sn'),
+                                        pg_temp.radek('prijem', 44100, '11703', '19-2000145399/0800', 'k112-sn-storno', 'k112-sn'))) is not null as v3 \gset
+select pg_temp.check('stažení: platba, která potvrdí řádek výpisu, i její storno v téže dávce — storno_of = řádek výpisu, párování zrušené — naměřeno: '
+    || coalesce((select storno_of::text from public.transakce where ucet_id = :'ucet' and externi_id = 'k112-sn-storno'), 'nic')
+    || ' / ' || pg_temp.stav(:'f_sn'),
+  :'v' and :'v2' = 'Uhrazeno' and :'v3'
+  and (select storno_of::text from public.transakce where ucet_id = :'ucet' and externi_id = 'k112-sn-storno') = :'t_sn'
+  and exists (select 1 from public.transakce_potvrzeni_banky where transakce_id::text = :'t_sn' and externi_id = 'k112-sn')
+  and not exists (select 1 from public.transakce where ucet_id = :'ucet' and externi_id = 'k112-sn')
+  and pg_temp.stav(:'f_sn') = 'Ke kontrole úhrady'
+  and not exists (select 1 from public.platby_faktury where transakce_id::text = :'t_sn' and stav = 'potvrzeno'));
+
+-- (c) Zrušená ruční úhrada z návrhu 'jina_mena' vrátí návrh do fronty.
+select pg_temp.faktura(:'firma', 'K112-NO', '11708', 1500, 'EUR') as f_no \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 40000, '11708') as t_no \gset
+select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+  jsonb_build_array(jsonb_build_object('transakce', :'t_no', 'faktura', :'f_no', 'castka_haleru', 40000,
+                                       'duvod', 'jina_mena', 'jistota', 0.5)))) as v \gset
+select coalesce((select id::text from public.platby_faktury where transakce_id = :'t_no' and faktura = :'f_no'), 'žádný') as n_no \gset
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 1500, 'Kurz banky ke dni', %L)$s$, :'firma', :'f_no', :'t_no')) as v1 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select coalesce((select id::text from public.faktury_rucni_uhrady where faktura = :'f_no' and zruseno_kdy is null), 'žádná') as u_no \gset
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select pg_temp.hodnota(format($s$select public.zrusit_rucni_uhradu(%L, %L, 'Špatný kurz, zapsat znovu')$s$, :'firma', :'u_no')) as v2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('zrušení ruční úhrady z návrhu jina_mena vrátí návrh do fronty (navrzeno) — naměřeno: '
+    || :'v' || ' / ' || :'v1' || ' / ' || :'v2' || ' / '
+    || coalesce((select stav from public.platby_faktury where id::text = :'n_no'), 'nic'),
+  :'v' = '1' and :'v1' = 'Uhrazeno' and :'v2' = 'Ke kontrole úhrady'
+  and (select navrh_id::text from public.faktury_rucni_uhrady where id::text = :'u_no') = :'n_no'
+  and (select stav from public.platby_faktury where id::text = :'n_no') = 'navrzeno'
+  and pg_temp.stav(:'f_no') = 'Ke kontrole úhrady');
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 1400, 'Kurz banky opravený', %L)$s$, :'firma', :'f_no', :'t_no')) as v1 \gset
+select set_config('test.user_id', :'maj', false);
+select pg_temp.hodnota(format($s$select public.vratit_fakturu_mezi_neuhrazene(%L, %L, 'Platba patří k jiné faktuře')$s$, :'firma', :'f_no')) as v2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('návrat do fronty: kdo páruje, úhradu zapíše znovu; „Vrátit mezi neuhrazené" návrh vrátí do fronty taky — naměřeno: '
+    || :'v1' || ' / ' || :'v2' || ' / ' || coalesce((select stav from public.platby_faktury where id::text = :'n_no'), 'nic'),
+  :'v1' = 'Částečně uhrazeno' and :'v2' = 'Ke kontrole úhrady'
+  and (select stav from public.platby_faktury where id::text = :'n_no') = 'navrzeno'
+  and not exists (select 1 from public.faktury_rucni_uhrady where faktura = :'f_no' and zruseno_kdy is null)
+  and (select count(*) from public.faktury_rucni_uhrady where faktura = :'f_no' and navrh_id::text = :'n_no') = 2);
+
+-- Návrh, který člověk odmítl, se nevrací ani po zrušení úhrady, kterou
+-- k té platbě zapsal správce Faktur bez návrhu.
+select pg_temp.faktura(:'firma', 'K112-NZ', '11709', 1600, 'EUR') as f_nz \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 41000, '11709') as t_nz \gset
+select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+  jsonb_build_array(jsonb_build_object('transakce', :'t_nz', 'faktura', :'f_nz', 'castka_haleru', 41000,
+                                       'duvod', 'jina_mena', 'jistota', 0.5)))) as v \gset
+select coalesce((select id::text from public.platby_faktury where transakce_id = :'t_nz' and faktura = :'f_nz'), 'žádný') as n_nz \gset
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select pg_temp.projde(format('select public.odmitnout_navrh_parovani(%L, %L)', :'firma', :'n_nz')) as v1 \gset
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 1600, 'Správce zapsal kurzem banky', %L)$s$, :'firma', :'f_nz', :'t_nz')) as v2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select coalesce((select id::text from public.faktury_rucni_uhrady where faktura = :'f_nz' and zruseno_kdy is null), 'žádná') as u_nz \gset
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select pg_temp.hodnota(format($s$select public.zrusit_rucni_uhradu(%L, %L, 'Omyl správce')$s$, :'firma', :'u_nz')) as v3 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('návrh, který člověk odmítl, zrušení úhrady zapsané správcem bez návrhu do fronty nevrátí — naměřeno: '
+    || :'v' || ' / ' || :'v1' || ' / ' || :'v2' || ' / ' || :'v3' || ' / '
+    || coalesce((select stav from public.platby_faktury where id::text = :'n_nz'), 'nic'),
+  :'v' = '1' and :'v1' and :'v2' = 'Uhrazeno' and :'v3' = 'Ke kontrole úhrady'
+  and (select navrh_id from public.faktury_rucni_uhrady where id::text = :'u_nz') is null
+  and (select stav from public.platby_faktury where id::text = :'n_nz') = 'zamitnuto');
+
+-- (d) Spoušť storna z banky bere zámek pohybu dřív, než ruší párování
+-- a úhrady (stejný klíč jako párování a ruční úhrada). Souběh dvou
+-- spojení PGlite ani scénář nepředvede — kontrola čte tělo funkce.
+select pg_temp.check('storno z banky bere zámek stornovaného pohybu dřív, než ruší párování a úhrady (kontrola nad tělem funkce)',
+  coalesce((select position('pg_advisory_xact_lock(hashtextextended(new.storno_of::text, 0))' in p.prosrc)
+                     between 1 and position('for v_p in' in p.prosrc)
+              from pg_proc p where p.oid = 'app.transakce_storno_parovani()'::regprocedure), false));
+
+-- (e) Ruční platba (zapsaná rukou, ne z výpisu) a úhrada v jiné měně bez
+-- potvrzení banky: kdo jen páruje (Hana), fakturu nezaplatí; správce
+-- Faktur (Marie) ano. Hana si platby zapíše sama (finance.manage).
+select pg_temp.faktura(:'firma', 'K112-RP1', '11705', 250000) as f_rp1 \gset
+select pg_temp.faktura(:'firma', 'K112-RP2', '11706', 3456700) as f_rp2 \gset
+select pg_temp.faktura(:'firma', 'K112-RP3', '11707', 1700, 'EUR') as f_rp3 \gset
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select coalesce(pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 250000, '11705', '', 'rucni')::text, 'žádný') as t_rp1 \gset
+select coalesce(pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 50, '11706', '', 'rucni', 'EUR')::text, 'žádný') as t_rp2 \gset
+select pg_temp.sparuj(:'firma', nullif(:'t_rp1', 'žádný')::uuid, :'f_rp1', 250000) as v1 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('párování ruční platby (ne z výpisu): kdo jen páruje (bez správy Faktur), nesmí — naměřeno: ' || :'t_rp1' || ' / ' || :'v1',
+  :'t_rp1' <> 'žádný' and :'v1' like 'chyba 42501:%spravuje přijaté faktury%'
+  and pg_temp.stav(:'f_rp1') = 'Ke kontrole úhrady'
+  and not exists (select 1 from public.platby_faktury where transakce_id::text = :'t_rp1'));
+-- Návrhy k ručním platbám appka zapíše (potvrdit je smí správce Faktur).
+select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+  jsonb_build_array(jsonb_build_object('transakce', :'t_rp1', 'faktura', :'f_rp1', 'castka_haleru', 250000,
+                                       'duvod', 'vs+castka', 'jistota', 0.9),
+                    jsonb_build_object('transakce', :'t_rp2', 'faktura', :'f_rp2', 'castka_haleru', 50,
+                                       'duvod', 'jina_mena', 'jistota', 0.5)))) as v \gset
+select coalesce((select id::text from public.platby_faktury where transakce_id::text = :'t_rp1' and stav = 'navrzeno'), 'žádný') as n_rp1 \gset
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select pg_temp.hodnota(format('select stav_faktury from public.potvrdit_navrh_parovani(%L, %L)', :'firma', :'n_rp1')) as v1 \gset
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 3456700, 'Kurz banky ke dni', %L)$s$, :'firma', :'f_rp2', :'t_rp2')) as v2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('ruční platba: návrh k ní kdo jen páruje nepotvrdí — naměřeno: ' || :'v' || ' / ' || :'v1',
+  :'v' = '2' and :'v1' like 'chyba 42501:%spravuje přijaté faktury%'
+  and pg_temp.stav(:'f_rp1') = 'Ke kontrole úhrady'
+  and (select stav from public.platby_faktury where id::text = :'n_rp1') = 'navrzeno');
+select pg_temp.check('úhrada v jiné měně k návrhu s ruční platbou (0,50 EUR): kdo jen páruje, nezapíše — naměřeno: ' || :'v2',
+  :'v2' like 'chyba 42501:%nepotvrdila banka%'
+  and pg_temp.stav(:'f_rp2') = 'Ke kontrole úhrady'
+  and not exists (select 1 from public.faktury_rucni_uhrady where faktura = :'f_rp2'));
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select pg_temp.hodnota(format('select stav_faktury from public.potvrdit_navrh_parovani(%L, %L)', :'firma', :'n_rp1')) as v1 \gset
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 3456700, 'Kurz banky ke dni', %L)$s$, :'firma', :'f_rp2', :'t_rp2')) as v2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('ruční platba: správce Faktur návrh potvrdí i úhradu v jiné měně zapíše — naměřeno: ' || :'v1' || ' / ' || :'v2',
+  :'v1' = 'Uhrazeno' and :'v2' = 'Uhrazeno'
+  and pg_temp.stav(:'f_rp1') = 'Uhrazeno' and pg_temp.stav(:'f_rp2') = 'Uhrazeno');
+
+-- Řádek výpisu bez potvrzení banky (úhrada v jiné měně), pak potvrzený.
+select pg_temp.nahrat(:'firma', :'ucet', 'csv_banka', 'k112-rp3-vypis',
+                      jsonb_build_array(pg_temp.radek('vydaj', 41700, '11707'))) is not null as v \gset
+select coalesce((select id::text from public.transakce
+                  where ucet_id = :'ucet' and zdroj = 'csv_banka' and vs = '11707'), 'žádný') as t_rp3 \gset
+select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+  jsonb_build_array(jsonb_build_object('transakce', :'t_rp3', 'faktura', :'f_rp3', 'castka_haleru', 41700,
+                                       'duvod', 'jina_mena', 'jistota', 0.5)))) as v1 \gset
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 1700, 'Kurz banky ke dni', %L)$s$, :'firma', :'f_rp3', :'t_rp3')) as v2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('úhrada v jiné měně k návrhu s řádkem výpisu, který banka nepotvrdila: kdo jen páruje, nezapíše — naměřeno: '
+    || :'v1' || ' / ' || :'v2',
+  :'v' and :'v1' = '1' and :'v2' like 'chyba 42501:%nepotvrdila banka%'
+  and pg_temp.stav(:'f_rp3') = 'Ke kontrole úhrady');
+select pg_temp.nahrat(:'firma', :'ucet', 'banka_api', 'k112-rp3-stazeni',
+                      jsonb_build_array(pg_temp.radek('vydaj', 41700, '11707', '19-2000145399/0800', 'k112-rp3'))) is not null as v \gset
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 1700, 'Kurz banky ke dni', %L)$s$, :'firma', :'f_rp3', :'t_rp3')) as v2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('… a když řádek výpisu banka potvrdí stažením, kdo páruje, úhradu zapíše — naměřeno: ' || :'v2',
+  :'v' and :'v2' = 'Uhrazeno'
+  and exists (select 1 from public.transakce_potvrzeni_banky where transakce_id::text = :'t_rp3' and externi_id = 'k112-rp3')
+  and pg_temp.stav(:'f_rp3') = 'Uhrazeno');
+
+
+\echo ''
 \echo '== 7. Granty, přímý zápis, RLS ručních úhrad ============================'
 
 select pg_temp.check('granty: ruční úhrady přihlášený jen čte, služba taky, anon nic',
@@ -1350,7 +1559,9 @@ select pg_temp.check('granty: vnitřní funkce (přepočet, zrušení, jistá sh
   and not has_function_privilege('authenticated', 'app.posoudit_jistou_shodu(uuid, uuid, uuid, uuid)', 'execute')
   and not has_function_privilege('authenticated', 'app.uhrazeno_faktury(uuid, uuid)', 'execute')
   and not has_function_privilege('authenticated', 'app.faktura_stav_podle_plateb(uuid, uuid)', 'execute')
-  and not has_function_privilege('authenticated', 'app.storno_z_importu(uuid, uuid, jsonb, text, integer, text)', 'execute')
+  and not has_function_privilege('authenticated', 'app.storno_z_importu(uuid, uuid, jsonb, text, integer, text, uuid)', 'execute')
+  and not has_function_privilege('authenticated', 'app.pohyb_potvrzeny_bankou(uuid, uuid)', 'execute')
+  and not has_function_privilege('authenticated', 'app.znovu_otevrit_navrh_uhrady(uuid, uuid)', 'execute')
   and not has_function_privilege('authenticated', 'app.faktura_k_rucni_uhrade(uuid, uuid)', 'execute')
   and not has_function_privilege('authenticated', 'app.stejny_dodavatel(uuid, text, text, text, text)', 'execute')
   and not has_function_privilege('authenticated', 'public.automaticky_sparovat_fakturu(uuid, uuid, uuid, integer)', 'execute')

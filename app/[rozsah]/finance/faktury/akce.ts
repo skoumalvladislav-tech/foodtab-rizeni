@@ -210,9 +210,12 @@ export async function oznacitUhrazenou(formData: FormData): Promise<void> {
  * Zpět mezi neuhrazené. Člověk tím říká, že faktura zaplacená NENÍ.
  * Celé v JEDNÉ databázové transakci (`vratit_fakturu_mezi_neuhrazene`,
  * Finance Fáze 0 krok 2): zruší ruční úhrady a automatická párování
- * faktury a stav přepočítá z toho, co zbyde. Ručně potvrzená párování
- * zůstanou — když kryjí celou fakturu, nezmění se nic (ruší je ten, kdo
- * má právo na Platby). Dřív to appka skládala ze tří kroků službou
+ * faktury a stav přepočítá z toho, co zbyde. Jde z „Uhrazeno" i ze
+ * „Částečně uhrazeno" (tlačítko je u obou). Ručně potvrzená párování
+ * zůstanou — když kryjí celou fakturu, nebo ji zčásti platí jen ona,
+ * nezmění se nic a člověk jde do Plateb (ruší je ten, kdo má právo na
+ * Platby). Návrh platby v jiné měně, ze kterého zrušená úhrada vznikla,
+ * se vrátí do Návrhů párování. Dřív to appka skládala ze tří kroků službou
  * a po chybě uprostřed zůstala párování zrušená a stav nezměněný.
  */
 export async function vratitNeuhrazenou(formData: FormData): Promise<void> {
@@ -227,8 +230,9 @@ export async function vratitNeuhrazenou(formData: FormData): Promise<void> {
   revalidatePath(`/${rozsah}/finance/faktury`)
   if (error) {
     const zprava = hlaskaProLidi(error, 'Fakturu se nepodařilo vrátit mezi neuhrazené — zkuste to znovu.')
-    // Zaplacená celá ručně potvrzenou platbou → do Plateb (kdo je vidí).
-    const vidiPlatby = /zaplacená celá/.test(zprava) && (await zkusPristup(p.tenantId, 'finance.read', TENANT_SCOPE_SEGMENT)).stav === 'ok'
+    // Zaplacená celá nebo zčásti jen ručně potvrzenou platbou → do Plateb
+    // (kdo je vidí). Obě hlášky píše vratit_fakturu_mezi_neuhrazene.
+    const vidiPlatby = /zaplacená celá|zčásti zaplacená/.test(zprava) &&(await zkusPristup(p.tenantId, 'finance.read', TENANT_SCOPE_SEGMENT)).stav === 'ok'
     redirect(vidiPlatby
       ? `/${rozsah}/finance/platby?faktura=${encodeURIComponent(id)}&chyba=${encodeURIComponent(zprava)}`
       : `/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent(zprava)}`)

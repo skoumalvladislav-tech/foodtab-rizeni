@@ -506,6 +506,22 @@ console.log('\n== Stav faktury, jisté shody a návrhy jdou přes databázi ==')
   }
   ok('Faktury: „Vrátit mezi neuhrazené" = rpc vratit_fakturu_mezi_neuhrazene, bez služby',
     /rpc\('vratit_fakturu_mezi_neuhrazene'/.test(fakturyAkce) && !/klientUlohy/.test(fakturyAkce))
+  zkus('Faktury: „Vrátit" odmítnuté kvůli ručně potvrzenému párování (celá i zčásti) pošle do Plateb, jiné chyby ne', () => {
+    // Regulárka z akce proti hláškám, které databáze opravdu píše (tělo
+    // app.vratit_fakturu_mezi_neuhrazene v migraci kroku 2).
+    const vzor = /const vidiPlatby = \/([^/]+)\/\.test\(zprava\)/.exec(fakturyAkce)?.[1]
+    const migraceVratit = cist('supabase/migrations/20261120100000_parovani_pravidla.sql')
+    const zacatek = migraceVratit.indexOf('create function app.vratit_fakturu_mezi_neuhrazene(')
+    const telo = zacatek < 0 ? '' : migraceVratit.slice(zacatek, migraceVratit.indexOf('end $$;', zacatek))
+    const hlasky = [...telo.matchAll(/raise exception '([^']+)'/g)].map((m) => m[1])
+    const doPlateb = hlasky.filter((h) => /Finance → Platby/.test(h))
+    const ostatni = hlasky.filter((h) => !/Finance → Platby/.test(h))
+    if (!vzor) throw new Error('v akci chybí regulárka vidiPlatby')
+    const re = new RegExp(vzor)
+    console.log(`        (hlášky do Plateb: ${doPlateb.length}, ostatní: ${ostatni.length})`)
+    return doPlateb.length === 2 && doPlateb.every((h) => re.test(h))
+      && ostatni.length >= 3 && ostatni.every((h) => !re.test(h))
+  })
   ok('Faktury: nikde přímý zápis stavu „Uhrazeno"', !/update\(\{\s*stav:\s*STAV_UHRAZENO/.test(fakturyAkce) && !/update\(\{\s*stav:\s*'Uhrazeno'/.test(fakturyAkce))
   ok('Faktury: vyřazení souvisejících faktur nesahá na zaplacené',
     /\.not\('stav', 'in', `\("\$\{STAV_UHRAZENO\}","\$\{STAV_CASTECNE\}"\)`\)/.test(fakturyAkce))
