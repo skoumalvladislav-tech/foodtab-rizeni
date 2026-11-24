@@ -342,31 +342,6 @@ select pg_temp.check('funkce běží s právy volajícího, anonym ji nespustí,
 \echo ''
 \echo '== 2. Úprava účtu jen se Správou financí za celou firmu =================='
 
-select pg_temp.check('politiky účtů: čtení, čtení správce, založení, úprava — žádná pro všechno',
-  coalesce((select array_agg(policyname || ':' || cmd order by policyname)
-              from pg_policies where schemaname = 'public' and tablename = 'platebni_ucty')
-           = array['platebni_ucty_insert:INSERT', 'platebni_ucty_read:SELECT',
-                   'platebni_ucty_spravce_cte:SELECT', 'platebni_ucty_update:UPDATE'], false));
-select pg_temp.check('politika úpravy: Správa financí za celou firmu, pobočka NULL — před i po změně',
-  (select qual ~ 'finance\.manage''::text, NULL' and with_check ~ 'finance\.manage''::text, NULL'
-     from pg_policies where schemaname = 'public' and tablename = 'platebni_ucty'
-      and policyname = 'platebni_ucty_update'));
-select pg_temp.check('sloupcový grant: přihlášený mění jen název, pobočku, číslo a aktivní',
-  has_column_privilege('authenticated', 'public.platebni_ucty', 'nazev', 'UPDATE')
-  and has_column_privilege('authenticated', 'public.platebni_ucty', 'branch_id', 'UPDATE')
-  and has_column_privilege('authenticated', 'public.platebni_ucty', 'cislo_uctu', 'UPDATE')
-  and has_column_privilege('authenticated', 'public.platebni_ucty', 'aktivni', 'UPDATE')
-  and not has_table_privilege('authenticated', 'public.platebni_ucty', 'UPDATE')
-  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'tenant_id', 'UPDATE')
-  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'typ', 'UPDATE')
-  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'mena', 'UPDATE')
-  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'pocatecni_zustatek_haleru', 'UPDATE')
-  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'id', 'UPDATE')
-  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'created_at', 'UPDATE')
-  and has_table_privilege('authenticated', 'public.platebni_ucty', 'INSERT')
-  and not has_table_privilege('authenticated', 'public.platebni_ucty', 'DELETE')
-  and not has_table_privilege('anon', 'public.platebni_ucty', 'UPDATE'));
-
 set role authenticated;
 
 -- Petr: správa i čtení jen na Betě.
@@ -440,6 +415,33 @@ select pg_temp.check('po zkouškách: účet Fany je na Betě, nový účet Bety
                where tenant_id = :'firma' and branch_id = :'pb' and nazev = 'Krok113 nový účet Bety')
   and not exists (select 1 from public.platebni_ucty
                    where tenant_id = :'firma' and nazev = 'Krok113 firemní od pobočky'));
+
+-- Katalog až za chováním: rozbitá politika nebo grant má shodit kontrolu
+-- chování (přes RLS), ne jen tuhle o textu politiky.
+select pg_temp.check('politiky účtů: čtení, čtení správce, založení, úprava — žádná pro všechno',
+  coalesce((select array_agg(policyname || ':' || cmd order by policyname)
+              from pg_policies where schemaname = 'public' and tablename = 'platebni_ucty')
+           = array['platebni_ucty_insert:INSERT', 'platebni_ucty_read:SELECT',
+                   'platebni_ucty_spravce_cte:SELECT', 'platebni_ucty_update:UPDATE'], false));
+select pg_temp.check('politika úpravy: Správa financí za celou firmu, pobočka NULL — před i po změně',
+  (select qual ~ 'finance\.manage''::text, NULL' and with_check ~ 'finance\.manage''::text, NULL'
+     from pg_policies where schemaname = 'public' and tablename = 'platebni_ucty'
+      and policyname = 'platebni_ucty_update'));
+select pg_temp.check('sloupcový grant: přihlášený mění jen název, pobočku, číslo a aktivní',
+  has_column_privilege('authenticated', 'public.platebni_ucty', 'nazev', 'UPDATE')
+  and has_column_privilege('authenticated', 'public.platebni_ucty', 'branch_id', 'UPDATE')
+  and has_column_privilege('authenticated', 'public.platebni_ucty', 'cislo_uctu', 'UPDATE')
+  and has_column_privilege('authenticated', 'public.platebni_ucty', 'aktivni', 'UPDATE')
+  and not has_table_privilege('authenticated', 'public.platebni_ucty', 'UPDATE')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'tenant_id', 'UPDATE')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'typ', 'UPDATE')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'mena', 'UPDATE')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'pocatecni_zustatek_haleru', 'UPDATE')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'id', 'UPDATE')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'created_at', 'UPDATE')
+  and has_table_privilege('authenticated', 'public.platebni_ucty', 'INSERT')
+  and not has_table_privilege('authenticated', 'public.platebni_ucty', 'DELETE')
+  and not has_table_privilege('anon', 'public.platebni_ucty', 'UPDATE'));
 
 
 \echo ''
