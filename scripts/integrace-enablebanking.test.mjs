@@ -103,6 +103,33 @@ ok(
   !overovacCizi.verify(cizíKlic, Buffer.from(casti[2], 'base64url')),
 )
 
+console.log('\n== Pohyby: VS z textu platby (Finance Fáze 0, krok 2, bod 10) — fetch podstrčený, žádná síť ==')
+
+{
+  const puvodniFetch = globalThis.fetch
+  const adresy = []
+  globalThis.fetch = async (url) => {
+    adresy.push(String(url))
+    return new Response(JSON.stringify({
+      transactions: [
+        { entry_reference: 'e1', booking_date: '2026-11-02', transaction_amount: { amount: '-1210.00', currency: 'CZK' }, credit_debit_indicator: 'DBDT', status: 'BOOK', remittance_information: ['/VS/2026001/SS//KS/0308', 'Pekárna'], creditor: { name: 'Pekárna' } },
+        { entry_reference: 'e2', booking_date: '2026-11-02', transaction_amount: { amount: '-50.00', currency: 'CZK' }, credit_debit_indicator: 'DBDT', status: 'BOOK', remittance_information: ['VS 1', 'VS 2'] },
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    const v = await enableBankingProvider.nactiTransakce('ucet-1', 'token', '2026-11-01', '2026-11-30')
+    const vs = v.stav === 'ok' ? v.radky.map((r) => r.vs).join('|') : `chyba: ${v.duvod}`
+    ok(`VS z textu platby: jednoznačný se převezme, dva různé ne — naměřeno: ${vs}`, vs === '2026001|')
+    ok('text platby zůstává celý v poznámce', v.stav === 'ok' && v.radky[0].poznamka === '/VS/2026001/SS//KS/0308 Pekárna')
+    ok('volalo se jen podstrčené fetch (žádná síť)', adresy.length === 1 && adresy[0].startsWith('https://api.enablebanking.com/accounts/ucet-1/transactions'))
+  } catch (e) {
+    ok(`VS z textu platby — výjimka: ${e instanceof Error ? e.message : e}`, false)
+  } finally {
+    globalThis.fetch = puvodniFetch
+  }
+}
+
 delete process.env.ENABLEBANKING_APPLICATION_ID
 delete process.env.ENABLEBANKING_PRIVATE_KEY
 

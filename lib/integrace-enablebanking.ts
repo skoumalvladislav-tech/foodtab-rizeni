@@ -42,9 +42,16 @@
  *
  * Czech VS/KS/SS appka NEOČEKÁVÁ jako samostatná pole na příchozí
  * transakci — PSD2 feed je typicky jen volný text
- * (`remittance_information`). Appka ho uloží do poznámky, NEZKOUŠÍ
- * ho regexem rozpadnout na VS/KS/SS (nejistý rozpad by byl horší než
- * žádný — zadání: „appka nesmí domýšlet").
+ * (`remittance_information`). Appka ho uloží do poznámky a vytáhne
+ * z něj jen jednoznačný VS (`vsZTextu`, lib/banka/vs-z-textu.ts —
+ * Finance Fáze 0, krok 2, bod 10): číslo hned za značkou „VS", dva různé
+ * symboly = žádný. KS/SS nerozpadá (párování je nepotřebuje).
+ *
+ * VS vstupuje do otisku pohybu (app.otisk_pohybu) — pohyb stažený
+ * před touhle změnou a znovu po ní by dostal jiný otisk. Dnes to nevadí:
+ * Enable Banking zatím připojené není a pohyb od něj v databázi není
+ * žádný (audit Fáze 0); a pohyb s id od banky (entry_reference) se proti
+ * dvojímu zápisu hlídá podle id, ne podle otisku.
  */
 
 import 'server-only'
@@ -52,6 +59,7 @@ import 'server-only'
 import { createPrivateKey, createSign } from 'node:crypto'
 
 import type { BankDataProvider, VysledekOvereni, VysledekZustatku, VysledekTransakci } from './bank-provider-contract.ts'
+import { vsZTextu } from './banka/vs-z-textu.ts'
 
 const ZAKLAD = 'https://api.enablebanking.com'
 
@@ -173,7 +181,8 @@ async function nactiTransakce(ucetId: string, token: string, od: string, doData:
         protistrana: t.creditor?.name || t.debtor?.name || '',
         // Účet protistrany appka z téhle odpovědi zatím nečte — nedomýšlí se.
         protiucet: '',
-        vs: '', // PSD2 feed nedává VS jako vlastní pole — appka ho nezkouší regexem vytáhnout.
+        // PSD2 feed nedává VS jako vlastní pole — jen jednoznačný VS z textu platby.
+        vs: vsZTextu((t.remittance_information ?? []).join(' ')),
         poznamka: (t.remittance_information ?? []).join(' '),
         externiId: t.entry_reference,
       }
@@ -333,7 +342,7 @@ export const enableBankingProvider: BankDataProvider = {
     soukromeUcty: true,
     dostupneZustatky: ['knihovni', 'disponibilni'],
     historieDnu: null, // závisí na bance (`maximum_consent_validity` z GET /aspsps), appka si nevymýšlí číslo
-    vsReference: false, // PSD2 feed = volný text, appka ho nerozpadává
+    vsReference: false, // PSD2 feed = volný text; VS jen jednoznačný z textu (vsZTextu), KS/SS ne
     pendingTransakce: true,
     inkrementalniSync: false,
   },
