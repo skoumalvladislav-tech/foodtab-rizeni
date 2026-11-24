@@ -264,7 +264,9 @@ console.log('\n== Výčty sloupců s protistranou nesou i protiúčet ==')
     const sloupce = String(vycet).split(',').map((s) => s.trim())
     ok(`${jmeno}: čte protistranu i protiúčet`, sloupce.includes('protistrana') && sloupce.includes('protiucet'))
   }
-  ok('sloupceSeznamuPlateb: na pobočce jen platby účtů pobočky (!inner), za firmu bez', /platebni_ucty!inner\(branch_id\)/.test(sloupceSeznamuPlateb(true)) && !/platebni_ucty/.test(sloupceSeznamuPlateb(false)))
+  ok('sloupceSeznamuPlateb: na pobočce jen platby účtů pobočky (!inner), za firmu účet bez !inner (sloupec Účet / pobočka)',
+    /platebni_ucty!inner\(branch_id\)/.test(sloupceSeznamuPlateb(true))
+      && /platebni_ucty\(nazev, branch_id\)/.test(sloupceSeznamuPlateb(false)) && !/!inner/.test(sloupceSeznamuPlateb(false)))
   ok('sloupceTransakciExportu: na pobočce !inner, za firmu jen účet', /platebni_ucty!inner\(branch_id\)/.test(sloupceTransakciExportu(true)) && /platebni_ucty\(branch_id\)/.test(sloupceTransakciExportu(false)))
 
   // Nikde v appce dotaz, který si protistranu vypisuje sám a protiúčet

@@ -113,10 +113,14 @@ export const SLOUPCE_PRIJMU_PRO_VRACENI = 'vs, castka_haleru, datum, protistrana
 /** Finance → Přehled, „Co vyžaduje pozornost": návrhy párování. */
 export const SLOUPCE_NAVRHU_POZORNOSTI = 'id, castka_haleru, datum, protistrana, protiucet, vs, platebni_ucty(branch_id, nazev)'
 
-/** Platby → seznam plateb; na pobočce jen platby účtů pobočky (`!inner`). */
+/**
+ * Platby → seznam plateb; na pobočce jen platby účtů pobočky (`!inner`).
+ * Za celou firmu účet platby (název a pobočka) bez `!inner` — sloupec
+ * „Účet / pobočka“ (krok 3): platba firemního účtu je tak označená.
+ */
 export function sloupceSeznamuPlateb(naPobocce: boolean): string {
   const zaklad = 'id, smer, castka_haleru, datum, protistrana, protiucet, vs, zdroj'
-  return naPobocce ? `${zaklad}, platebni_ucty!inner(branch_id)` : zaklad
+  return naPobocce ? `${zaklad}, platebni_ucty!inner(branch_id)` : `${zaklad}, platebni_ucty(nazev, branch_id)`
 }
 
 /** Řádek `transakce` tak, jak ho čte automatické párování. */

@@ -112,10 +112,6 @@ export const POZNAMKA_OBJEDNAVKY_FIRMY =
 export const POZNAMKA_ZAKAZKY_FIRMY =
   'Zakázky celé firmy bez pobočky tu nejsou — jsou vidět v pohledu Celá firma.'
 
-/**
- * Pobočka bez platebního účtu — skutečnost (tržby, výdaje) se z čeho
- * spočítat nemá. Dnes je každý účet založený v appce firemní, takže je
- * to zatím běžný stav; „0 Kč" by tvrdilo, že pobočka nic neutržila.
- */
-export const BEZ_UCTU_POBOCKY =
-  'Pobočka zatím nemá přiřazený žádný platební účet, takže skutečné příjmy a výdaje se pro ni nedají spočítat. Účet pobočce přiřadíte v pohledu Celá firma → Platby.'
+// Věta pro pobočku bez platebního účtu (dřív BEZ_UCTU_POBOCKY) je od kroku 3
+// v lib/finance-ucty-pobocek.ts (`hlaskaBezUctuPobocky`): kde se účet
+// přiřazuje, říká jen tomu, kdo to smí (Správa financí za celou firmu).

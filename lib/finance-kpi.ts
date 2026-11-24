@@ -6,6 +6,7 @@ import { nactiCashflowPrehled, nactiVysledovkuCelofirmy } from '@/lib/finance-pr
 import { nactiPrehledTrzeb } from '@/lib/pokladna-trzby-nacteni'
 import { sestavitFinanceKpi, type FinanceKpi, type RadekFoodcostBeverage } from '@/lib/finance-kpi-vypocet'
 import type { Rozsah, SrovnaniMesice } from '@/lib/finance-obdobi'
+import { maPobockaAktivniUcet, nactiPobockyBezUctu } from '@/lib/finance-ucty-pobocek'
 
 export type { DvojiceTrendu, FinanceKpi, RadekNakladu } from '@/lib/finance-kpi-vypocet'
 
@@ -84,16 +85,24 @@ async function nactiFoodcostBeverage(tenantId: string, pobocka: string | null, o
   return (data ?? []) as RadekFoodcostBeverage[]
 }
 
-/** Má pobočka aspoň jeden platební účet se svou `branch_id` (i vypnutý — jeho transakce v měsíci pořád platí)? */
+/**
+ * Má pobočka AKTIVNÍ platební účet? Jedna definice pro všechny Finance
+ * (databázová pobocky_bez_aktivniho_uctu, krok 3): vypnutý účet je totéž
+ * co žádný. Do kroku 3 se tu počítal i vypnutý účet — pobočka s jediným
+ * vypnutým účtem tak „měla účet" na Přehledu, ale ne na Cashflow.
+ *
+ * ROZHODNOUT: (otázka 153) pobočka, jejíž jediný účet je vypnutý, teď
+ * dostane „–" místo cashflow z pohybů toho účtu v měsíci. Kdyby se měly
+ * počítat i vypnuté účty, změní se to v té jedné funkci — pro všechny
+ * stránky najednou.
+ */
 async function pobockaMaUcet(tenantId: string, pobocka: string): Promise<boolean> {
   const supabase = await getServerSupabase()
-  const { count, error } = await supabase
-    .from('platebni_ucty')
-    .select('id', { count: 'exact', head: true })
-    .eq('tenant_id', tenantId)
-    .eq('branch_id', pobocka)
-  if (error) throw error
-  return (count ?? 0) > 0
+  const vysledek = await nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId, pobocka)
+  const ma = maPobockaAktivniUcet(vysledek, pobocka)
+  // Nevíme ≠ nemá: chyba shodí KPI (stránka řekne „nepodařilo se načíst").
+  if (ma === null) throw new Error(vysledek.stav === 'chyba' ? vysledek.text : 'Pobočky bez platebního účtu se nepodařilo načíst.')
+  return ma
 }
 
 export async function nactiFinanceKpi(

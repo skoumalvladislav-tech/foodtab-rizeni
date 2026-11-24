@@ -985,8 +985,8 @@ select pg_temp.check('pobočka P1: zůstatek firemního účtu nezapíše (42501
 select pg_temp.check('pobočka P1: uhrazeno na zakázku své pobočky jen z účtu P1 (3000), záloha na firemní účet ne',
   public.zakazka_uhrazeno(:'firma_a', :'zakazka') = 3000);
 
--- Pavla: jen čtení na P2. Účet P1 Petr vidí i přes politiku zápisu
--- (platebni_ucty_write je `for all`), proto čtecí politiku pobočky
+-- Pavla: jen čtení na P2. Účet P1 Petr vidí i přes politiku správce
+-- (platebni_ucty_spravce_cte, dřív `for all` platebni_ucty_write), proto čtecí politiku pobočky
 -- hlídá až Pavla bez finance.manage.
 select set_config('test.user_id', :'pob2', false);
 select pg_temp.check('jen čtení na P2: vidí svůj účet P2 (ne firemní, ne P1, ne cizí)',

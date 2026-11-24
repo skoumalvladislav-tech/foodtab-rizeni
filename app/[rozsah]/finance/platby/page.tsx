@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId } from '@/lib/firma'
-import { zkusPristupFinanci } from '@/lib/finance-pristup'
+import { smiSpravovatUctyFirmy, zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
@@ -21,13 +21,25 @@ import {
 } from '@/lib/finance-parovani'
 import { protistranaNeboUcet } from '@/lib/banka/ucet'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
-import { CELA_FIRMA, nazevPobockyUctu, volbyPobockyUctu, type PobockaFirmy } from '@/lib/finance-platby-pobocka'
+import { hodnotaPobockyUctu, nazevPobockyUctu, volbyPobockyUctu, type PobockaFirmy } from '@/lib/finance-platby-pobocka'
+import {
+  FIREMNI_UCET,
+  FIREMNI_VOLBA,
+  hlaskaBezUctuPobocky,
+  KOTVA_UCTU,
+  maPobockaAktivniUcet,
+  nactiPobockyBezUctu,
+  popisUctuPlatby,
+  uctyMimoAktivnichPobocek,
+  vetaUctuMimoPobocky,
+} from '@/lib/finance-ucty-pobocek'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
+import PobockyBezUctu from '../pobocky-bez-uctu'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
-import { zalozitPlatebniUcet, zapsatTransakci, potvrditParovani, zrusitAlokaci, zmenitPobockuUctu } from './akce'
+import { zalozitPlatebniUcet, zapsatTransakci, potvrditParovani, zrusitAlokaci, upravitPlatebniUcet } from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,12 +63,22 @@ export const dynamic = 'force-dynamic'
  * výpisu jsou jen za celou firmu: faktury pobočku nemají a potvrzené
  * párování mění stav faktury celé firmy. Dnes je každý účet založený
  * v appce firemní — stránka pobočky bez účtu to řekne větou, ne „0 Kč“.
- * Pobočku účtu jde nastavit v pohledu Celá firma (sekce Platební účty).
+ *
+ * ---------------------------------------------------------------------
+ * POBOČKY A ÚČTY (Finance Fáze 0, krok 3)
+ *
+ * Za celou firmu: nahoře které aktivní pobočky nemají aktivní účet
+ * (jedna definice — lib/finance-ucty-pobocek.ts), u každé platby sloupec
+ * „Účet / pobočka" (platba firemního účtu je tak označená) a sekce
+ * Platební účty se VŠEMI účty firmy, i vypnutými a těmi na vypnuté,
+ * smazané nebo cizí pobočce — s úpravou (pobočka, číslo účtu, název,
+ * aktivní) jen pro Správu financí za celou firmu. Nový účet chce
+ * výslovnou volbu: pobočka, nebo „Firemní účet (bez pobočky)".
  */
 
 const TYPY_UCTU: Record<string, string> = { banka: 'Banka', pokladna: 'Pokladna', karta: 'Karta' }
 
-type PlatebniUcet = { id: string; nazev: string; typ: string; branch_id: string | null; cislo_uctu: string }
+type PlatebniUcet = { id: string; nazev: string; typ: string; branch_id: string | null; cislo_uctu: string; aktivni: boolean }
 type Transakce = {
   id: string
   smer: 'prijem' | 'vydaj' | 'prevod_dovnitr' | 'prevod_ven'
@@ -66,6 +88,8 @@ type Transakce = {
   protiucet: string
   vs: string
   zdroj: string
+  /** Jen za celou firmu (sloupceSeznamuPlateb) — sloupec „Účet / pobočka". */
+  platebni_ucty?: { nazev: string | null; branch_id: string | null } | { nazev: string | null; branch_id: string | null }[] | null
 }
 
 const karta = {
@@ -264,10 +288,10 @@ export default async function FinancePlatby({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; importovano?: string; prebytek?: string; sparovano?: string; faktura?: string; pobocka_uctu?: string }>
+  searchParams: Promise<{ chyba?: string; importovano?: string; prebytek?: string; sparovano?: string; faktura?: string; ucet_upraven?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, importovano, prebytek, sparovano, faktura: fakturaFiltr, pobocka_uctu: pobockaUctuZmenena } = await searchParams
+  const { chyba, importovano, prebytek, sparovano, faktura: fakturaFiltr, ucet_upraven: ucetUpraven } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -286,13 +310,17 @@ export default async function FinancePlatby({
   const pobocka = pobockaFinanci(pristup.scope)
   const nazevPobocky = pristup.scope.branchName ?? 'pobočka'
 
-  let dotazUctu = supabase.from('platebni_ucty').select('id, nazev, typ, branch_id, cislo_uctu').eq('tenant_id', tenantId).eq('aktivni', true)
+  // I vypnuté účty: za celou firmu je ukazuje sekce Platební účty (i s opravou
+  // účtu na vypnuté nebo smazané pobočce). Zápis platby a výpis na pobočce
+  // berou jen aktivní (`platebniUcty` níž).
+  let dotazUctu = supabase.from('platebni_ucty').select('id, nazev, typ, branch_id, cislo_uctu, aktivni').eq('tenant_id', tenantId)
   if (pobocka) dotazUctu = dotazUctu.eq('branch_id', pobocka)
 
   // Na pobočce `!inner` + filtr na pobočku účtu (stejně jako export pro
   // účetního): platby firemních účtů a účtů jiných poboček tu nejsou.
   // I platby z vypnutých účtů pobočky — historie nezmizí tím, že účet
-  // přestal být aktivní. Za celou firmu dotaz beze změny.
+  // přestal být aktivní. Za celou firmu navíc název a pobočka účtu
+  // (sloupec „Účet / pobočka“, krok 3) — bez !inner, nic se nevyřadí.
   // `string`, ne sjednocení dvou literálů — typový parser supabase-js
   // takové sjednocení v `select` neumí přečíst; řádky se proto níž
   // přetypují přes `unknown` (tvar hlídá výčet sloupců v sloupceSeznamuPlateb).
@@ -300,7 +328,7 @@ export default async function FinancePlatby({
   let dotazTransakci = supabase.from('transakce').select(sloupceTransakci).eq('tenant_id', tenantId)
   if (pobocka) dotazTransakci = dotazTransakci.eq('platebni_ucty.branch_id', pobocka)
 
-  const [ucty, transakceRes, alokaceRes, pobockyRes] = await Promise.all([
+  const [ucty, transakceRes, alokaceRes, pobockyRes, bezUctu] = await Promise.all([
     dotazUctu.order('nazev'),
     dotazTransakci
       .order('datum', { ascending: false })
@@ -318,6 +346,9 @@ export default async function FinancePlatby({
     pobocka
       ? Promise.resolve({ data: [], error: null })
       : supabase.from('branches').select('id, name, active').eq('tenant_id', tenantId).is('deleted_at', null).order('name'),
+    // Kdo nemá aktivní účet — jedna definice pro všechny stránky Financí
+    // (pobocky_bez_aktivniho_uctu, krok 3). Na pobočce se ptá jen na ni.
+    nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId, pobocka),
   ])
 
   // Na pobočce věta „pobočka nemá účet" nesmí být spadlý dotaz
@@ -326,13 +357,26 @@ export default async function FinancePlatby({
   if (pobocka && transakceRes.error) throw new DotazSelhal('platby pobočky', transakceRes.error)
   if (pobockyRes.error) throw new DotazSelhal('pobočky firmy', pobockyRes.error)
 
-  const platebniUcty = (ucty.data ?? []) as PlatebniUcet[]
+  const vsechnyUcty = (ucty.data ?? []) as PlatebniUcet[]
+  // Zápis platby a výpis na pobočce: jen AKTIVNÍ účty (jako dřív).
+  const platebniUcty = vsechnyUcty.filter((u) => u.aktivni)
+  // Za celou firmu chyba dotazu nesmí vypadat jako „firma nemá účty".
+  const chybaUctu = !pobocka && ucty.error ? 'Platební účty se nepodařilo načíst — zkuste stránku obnovit.' : null
   // Protistrana = jméno, jinak číslo účtu (do kroku 1 stálo číslo účtu
   // přímo v protistraně — seznam i návrhy párování ho tak ukazují dál).
   const transakce = ((transakceRes.data ?? []) as unknown as Transakce[])
     .map((t) => ({ ...t, protistrana: protistranaNeboUcet(t.protistrana, t.protiucet) }))
   const pobockyFirmy = (pobockyRes.data ?? []) as PobockaFirmy[]
   const aktivniPobocky = pobockyFirmy.filter((b) => b.active)
+  // Účty, jejichž pobočka není aktivní (vypnutá, smazaná, cizí) — platby
+  // z nich nejsou v součtech žádné aktivní pobočky. Jen ukázat a nabídnout
+  // opravu, nic nepřesouvat (krok 3, bod 4).
+  const mimoPobocky = new Map((pobocka ? [] : uctyMimoAktivnichPobocek(vsechnyUcty, pobockyFirmy)).map((u) => [u.id, u]))
+  // Odkaz „kde se účet přiřazuje" a úprava účtů jen pro Správu financí za celou firmu.
+  const smiSpravovatUcty = await smiSpravovatUctyFirmy(tenantId, pristup.ctx)
+  // Na pobočce: nemá aktivní účet? Rozhoduje táž funkce jako za celou firmu;
+  // když se nepodařilo zjistit, rozhodne výpis aktivních účtů pobočky.
+  const pobockaBezUctu = pobocka !== null && (maPobockaAktivniUcet(bezUctu, pobocka) ?? platebniUcty.length > 0) === false
 
   // Součet potvrzených alokací PER TRANSAKCE — appka podle toho pozná,
   // kolik z platby ještě zbývá nepárováno (zadání oddíl 7: hromadná
@@ -389,11 +433,14 @@ export default async function FinancePlatby({
             fakturu nepřevede, rozhodněte, co se s přebytkem stane (jiná faktura, dobropis, vrácení).
           </p>
         ) : null}
-        {pobockaUctuZmenena ? (
+        {ucetUpraven ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>
-            Pobočka účtu uložena — jeho dosavadní i nové platby se teď počítají tam.
+            Účet uložen. Když se změnila jeho pobočka, dosavadní i nové platby účtu se teď počítají tam.
           </p>
         ) : null}
+
+        {/* Celá firma: aktivní pobočky bez aktivního účtu (krok 3, bod 1). */}
+        {!pobocka ? <PobockyBezUctu vysledek={bezUctu} smiPrirazovat={smiSpravovatUcty} naPlatbach /> : null}
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           {/* Import výpisu je jen za celou firmu (import/layout.tsx) — na pobočce odkaz nestojí. */}
@@ -404,14 +451,18 @@ export default async function FinancePlatby({
           </a>
         </div>
 
-        {pobocka && platebniUcty.length === 0 ? (
+        {pobockaBezUctu ? (
           <div role="status" style={{ ...karta, display: 'grid', gap: '6px' }}>
             <h2 style={{ margin: 0, fontSize: '15px' }}>Pobočka zatím nemá aktivní platební účet</h2>
             <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
               Platby patří pobočce přes platební účet a {nazevPobocky} zatím žádný aktivní nemá. Účty založené
               dosud jsou firemní (bez pobočky) — jejich platby jsou v pohledu Celá firma, ne tady, takže prázdný
-              seznam neznamená, že pobočce nic nepřišlo. Existující účet přiřadíte pobočce v pohledu Celá firma
-              (Platby → Platební účty){smiPsat ? ', nebo tu níž založte nový účet pobočky' : ''}.
+              seznam neznamená, že pobočce nic nepřišlo.
+            </p>
+            {/* Kde se účet přiřazuje — jen tomu, kdo to smí (krok 3, bod 5). */}
+            <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
+              {hlaskaBezUctuPobocky(smiSpravovatUcty)}
+              {smiPsat ? ' Nový účet pobočky můžete založit i tady níž.' : ''}
             </p>
           </div>
         ) : null}
@@ -554,6 +605,8 @@ export default async function FinancePlatby({
                     <th style={{ padding: '6px 8px' }}>Směr</th>
                     <th style={{ padding: '6px 8px' }}>Částka</th>
                     <th style={{ padding: '6px 8px' }}>Protistrana</th>
+                    {/* Za celou firmu: kam se platba počítá — firemní účet je výslovně označený (krok 3, bod 2). */}
+                    {!pobocka ? <th style={{ padding: '6px 8px' }}>Účet / pobočka</th> : null}
                     <th style={{ padding: '6px 8px' }}>Zdroj</th>
                   </tr>
                 </thead>
@@ -564,6 +617,15 @@ export default async function FinancePlatby({
                       <td style={{ padding: '6px 8px' }}>{t.smer === 'prijem' ? 'Příjem' : t.smer === 'vydaj' ? 'Výdaj' : t.smer}</td>
                       <td style={{ padding: '6px 8px', fontFamily: 'ui-monospace, monospace' }}>{koruny(t.castka_haleru)}</td>
                       <td style={{ padding: '6px 8px' }}>{t.protistrana || '—'}</td>
+                      {!pobocka ? (() => {
+                        const popis = popisUctuPlatby(Array.isArray(t.platebni_ucty) ? t.platebni_ucty[0] : t.platebni_ucty, pobockyFirmy)
+                        return (
+                          <td style={{ padding: '6px 8px' }}>
+                            <div>{popis.ucet}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{popis.kam}</div>
+                          </td>
+                        )
+                      })() : null}
                       <td style={{ padding: '6px 8px', color: 'var(--muted)' }}>{t.zdroj}</td>
                     </tr>
                   ))}
@@ -581,7 +643,7 @@ export default async function FinancePlatby({
             {platebniUcty.length === 0 ? (
               <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
                 {pobocka
-                  ? 'Na pobočce jde platbu zapsat jen na účet této pobočky — nejdřív ho níže založte, nebo v pohledu Celá firma přiřaďte pobočce existující účet.'
+                  ? `Na pobočce jde platbu zapsat jen na účet této pobočky — nejdřív ho níže založte${smiSpravovatUcty ? ', nebo v pohledu Celá firma přiřaďte pobočce existující účet' : ''}.`
                   : 'Nejdřív založte platební účet níže.'}
               </p>
             ) : (
@@ -631,54 +693,92 @@ export default async function FinancePlatby({
           </form>
         ) : null}
 
-        {platebniUcty.length > 0 ? (
-          <section style={{ display: 'grid', gap: '10px' }}>
+        {/* Na pobočce jen její aktivní účty; za celou firmu VŽDY (i prázdná nebo s chybou) — sem míří odkaz „Přiřadit účet pobočce". */}
+        {(pobocka ? platebniUcty.length > 0 : true) ? (
+          <section id={pobocka ? undefined : KOTVA_UCTU} style={{ display: 'grid', gap: '10px', scrollMarginTop: '16px' }}>
             <div>
               <h2 style={{ margin: 0, fontSize: '15px' }}>Platební účty</h2>
               <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--muted)' }}>
                 {pobocka
-                  ? 'Aktivní účty této pobočky. Pobočku účtu jde změnit v pohledu Celá firma.'
-                  : 'Pobočka účtu určuje, kam se počítají jeho platby. Když ji změníte, přesunou se k nové pobočce i všechny dosavadní platby účtu — v Platbách, Cashflow, Tržbách i v exportu pro účetního.'}
+                  ? `Aktivní účty této pobočky. ${smiSpravovatUcty ? 'Pobočku účtu, číslo účtu a další údaje upravíte v pohledu Celá firma.' : 'Účty upravuje ten, kdo má právo „Správa financí“ za celou firmu.'}`
+                  : 'Pobočka účtu určuje, kam se počítají jeho platby. Když ji změníte, přesunou se k nové pobočce i všechny dosavadní platby účtu — v Platbách, Cashflow, Tržbách i v exportu pro účetního. Vypnutý účet se nenabízí k zápisu plateb a nepočítá se jako účet pobočky.'}
               </p>
             </div>
-            <div style={{ ...karta, display: 'grid', gap: '10px' }}>
-              {platebniUcty.map((u, i) => (
-                <div
-                  key={u.id}
-                  style={{
-                    display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap',
-                    ...(i > 0 ? { borderTop: '1px solid var(--line-2)', paddingTop: '10px' } : {}),
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: '13.5px' }}>{u.nazev}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                      {TYPY_UCTU[u.typ] ?? u.typ}
-                      {u.cislo_uctu ? ` · ${u.cislo_uctu}` : ''}
-                      {pobocka ? '' : ` · ${nazevPobockyUctu(u.branch_id, pobockyFirmy)}`}
+            {chybaUctu ? (
+              <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chybaUctu}</p>
+            ) : (pobocka ? platebniUcty : vsechnyUcty).length === 0 ? (
+              <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>Firma zatím nemá žádný platební účet.</p>
+            ) : (
+              <div style={{ ...karta, display: 'grid', gap: '10px' }}>
+                {(pobocka ? platebniUcty : vsechnyUcty).map((u, i) => {
+                  const mimo = mimoPobocky.get(u.id)
+                  return (
+                    <div
+                      key={u.id}
+                      style={{
+                        display: 'grid', gap: '8px',
+                        ...(i > 0 ? { borderTop: '1px solid var(--line-2)', paddingTop: '10px' } : {}),
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: '13.5px' }}>
+                          {u.nazev}
+                          {!u.aktivni ? <span style={{ marginLeft: '8px', fontSize: '12px', color: 'var(--muted)' }}>(vypnutý)</span> : null}
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                          {TYPY_UCTU[u.typ] ?? u.typ}
+                          {u.cislo_uctu ? ` · ${u.cislo_uctu}` : ' · bez čísla účtu'}
+                          {pobocka ? '' : ` · ${nazevPobockyUctu(u.branch_id, pobockyFirmy)}`}
+                        </div>
+                        {mimo ? (
+                          <p role="status" style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--pozor)' }}>{vetaUctuMimoPobocky(mimo)}</p>
+                        ) : null}
+                      </div>
+                      {/* Úprava účtu jen za celou firmu a jen se Správou financí za celou firmu (upravitPlatebniUcet + politika platebni_ucty_update). */}
+                      {!pobocka && smiSpravovatUcty ? (
+                        <form
+                          action={upravitPlatebniUcet}
+                          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '8px', alignItems: 'end' }}
+                        >
+                          <input type="hidden" name="rozsah" value={rozsah} />
+                          <input type="hidden" name="ucet_id" value={u.id} />
+                          <label>
+                            <span style={popisek}>Název</span>
+                            <input type="text" name="nazev" required defaultValue={u.nazev} aria-label={`Název účtu ${u.nazev}`} style={pole} />
+                          </label>
+                          <label>
+                            <span style={popisek}>Číslo účtu nebo IBAN</span>
+                            <input
+                              type="text" name="cislo_uctu" inputMode="text" autoComplete="off" defaultValue={u.cislo_uctu}
+                              aria-label={`Číslo účtu ${u.nazev}`} style={pole}
+                            />
+                          </label>
+                          <label>
+                            <span style={popisek}>Pobočka</span>
+                            <select
+                              name="branch_id"
+                              aria-label={`Pobočka účtu ${u.nazev}`}
+                              defaultValue={hodnotaPobockyUctu(u.branch_id)}
+                              style={pole}
+                            >
+                              {volbyPobockyUctu(pobockyFirmy, u.branch_id).map((v) => (
+                                <option key={v.value} value={v.value}>{v.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '13px', minHeight: '44px' }}>
+                            <input type="checkbox" name="aktivni" defaultChecked={u.aktivni} /> Aktivní
+                          </label>
+                          <div>
+                            <button type="submit" className="ft-tl">Uložit účet</button>
+                          </div>
+                        </form>
+                      ) : null}
                     </div>
-                  </div>
-                  {/* Pobočku účtu mění jen celá firma (zmenitPobockuUctu chce právo za celou firmu). */}
-                  {!pobocka && smiPsat ? (
-                    <form action={zmenitPobockuUctu} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                      <input type="hidden" name="rozsah" value={rozsah} />
-                      <input type="hidden" name="ucet_id" value={u.id} />
-                      <select
-                        name="branch_id"
-                        aria-label={`Pobočka účtu ${u.nazev}`}
-                        defaultValue={u.branch_id ?? ''}
-                        style={{ ...pole, width: 'auto', minWidth: '180px' }}
-                      >
-                        {volbyPobockyUctu(pobockyFirmy, u.branch_id).map((v) => (
-                          <option key={v.value || 'firma'} value={v.value}>{v.label}</option>
-                        ))}
-                      </select>
-                      <button type="submit" className="ft-tl">Uložit pobočku</button>
-                    </form>
-                  ) : null}
-                </div>
-              ))}
-            </div>
+                  )
+                })}
+              </div>
+            )}
           </section>
         ) : null}
 
@@ -711,11 +811,15 @@ export default async function FinancePlatby({
                 <input type="text" name="cislo_uctu" inputMode="text" autoComplete="off" placeholder="např. 19-2000145399/0800" style={pole} />
               </label>
               {!pobocka ? (
+                // Bez výchozí volby (krok 3, bod 3): pobočka, nebo výslovně
+                // firemní účet. Prázdné pole odmítne prohlížeč (required)
+                // i akce (pobockaUctu).
                 <label>
-                  <span style={popisek}>Pobočka</span>
-                  <select name="branch_id" style={pole} defaultValue="">
-                    <option value="">{CELA_FIRMA}</option>
+                  <span style={popisek}>Pobočka *</span>
+                  <select name="branch_id" required style={pole} defaultValue="">
+                    <option value="" disabled>Vyberte pobočku…</option>
                     {aktivniPobocky.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    <option value={FIREMNI_VOLBA}>{FIREMNI_UCET}</option>
                   </select>
                 </label>
               ) : null}

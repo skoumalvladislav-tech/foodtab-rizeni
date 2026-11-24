@@ -24,6 +24,8 @@ export type PohybKPosouzeni = {
   protiucet: string
   vs: string
   ucet: string
+  /** Platba z firemního účtu (bez pobočky) — stránka celé firmy ji tak označí (krok 3, bod 2). */
+  firemniUcet?: boolean
   stornovano: boolean
 }
 

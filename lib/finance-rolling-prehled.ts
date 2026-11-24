@@ -2,6 +2,7 @@ import 'server-only'
 
 import { getServerSupabase } from '@/lib/supabase/server'
 import type { RadekPredpisu } from '@/lib/finance-plan.ts'
+import { FIREMNI_UCTY } from '@/lib/finance-ucty-pobocek.ts'
 import {
   agregovatPoTydnech,
   historieZustatku,
@@ -32,7 +33,10 @@ export type VyhledPobocky = {
   /**
    * Má rozsah aspoň jeden AKTIVNÍ platební účet (`aktualni_zustatky_uctu`
    * pro něj vrátil řádek)? Bez něj výhled startuje z nuly, kterou appka
-   * nezná — stránka pobočky to řekne slovy, ne „0 Kč".
+   * nezná — stránka pobočky to řekne slovy, ne „0 Kč". Stejná definice
+   * jako pobocky_bez_aktivniho_uctu (krok 3): účet s `aktivni` a s touto
+   * `branch_id`. Tady se bere ze zůstatků, protože počítá i vypnuté
+   * pobočky, které ta funkce za celou firmu nevrací.
    */
   maUcet: boolean
   vyhled: RollingVyhled
@@ -142,7 +146,7 @@ export async function nactiRollingVyhledy(
   if (pobocka === null) {
     const skutecnostFirma = agregovatPoTydnech(transakcePoPobocce.get(null) ?? [])
     const vyhledFirma = sestavRollingVyhled(predpisy, skutecnostFirma, zustatky.get(null) ?? 0, dnes, scenar, null)
-    vysledky.push({ branchId: null, pobocka: 'Celá firma (účty bez pobočky)', maUcet: zustatky.has(null), vyhled: vyhledFirma })
+    vysledky.push({ branchId: null, pobocka: FIREMNI_UCTY, maUcet: zustatky.has(null), vyhled: vyhledFirma })
   }
 
   return vysledky

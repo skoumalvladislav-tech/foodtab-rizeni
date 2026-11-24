@@ -10,7 +10,8 @@ import { pristupKFakturam } from '@/lib/faktury-pristup'
 import { hlaskaBrany } from '@/lib/faktury-brana'
 import { naHalere } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
-import { hlaskaZmenyPobockyUctu, pobockaUctu, ucetPatriRozsahu } from '@/lib/finance-platby-pobocka'
+import { hlaskaUpravyUctu, NEPODARILO_ULOZIT_UCET, pobockaUctu, ucetPatriRozsahu, upravaUctu } from '@/lib/finance-platby-pobocka'
+import { FIREMNI_VOLBA, KOTVA_UCTU } from '@/lib/finance-ucty-pobocek'
 import { overitCisloUctu } from '@/lib/banka/ucet'
 import { najitNavrhyParovani } from '@/lib/finance-navrhy-parovani'
 
@@ -72,12 +73,13 @@ function nepovinnePole(formData: FormData, nazev: string): string | null {
 /**
  * Aktivní pobočka TÉHLE firmy s daným id, jako seznam pro `pobockaUctu`
  * (prázdný = id k firmě nepatří, pobočka je vypnutá, nebo nejde
- * přečíst — vždy „nepustit"). Databáze sama nehlídá, že `branch_id`
- * účtu patří stejné firmě, a firemní správce má `has_access` na
- * jakékoli id pobočky.
+ * přečíst — vždy „nepustit"). Firemní správce má `has_access` na
+ * jakékoli id pobočky; cizí pobočku odmítne i spoušť z kroku 1, vypnutou
+ * a smazanou jen tahle kontrola. „Firemní účet" (`FIREMNI_VOLBA`) ani
+ * nic jiného než uuid se do databáze neposílá.
  */
 async function aktivniPobockaFirmy(supabase: Supabase, tenantId: string, branchId: string | null): Promise<string[]> {
-  if (!branchId) return []
+  if (!branchId || branchId === FIREMNI_VOLBA || !VZOR_UUID.test(branchId)) return []
   const { data } = await supabase
     .from('branches')
     .select('id')
@@ -99,7 +101,9 @@ export async function zalozitPlatebniUcet(formData: FormData): Promise<void> {
   }
 
   // Na pobočce VŽDY pobočka rozsahu (skryté pole formuláře se nečte),
-  // za celou firmu výběr z formuláře — prázdný = účet celé firmy.
+  // za celou firmu výběr z formuláře: pobočka, nebo výslovně „Firemní
+  // účet (bez pobočky)". Prázdný výběr je chyba (krok 3, bod 3) — dřív
+  // tiše založil firemní účet.
   const vybrana = nepovinnePole(formData, 'branch_id')
   const volba = pobockaUctu(pobocka, vybrana, pobocka ? [] : await aktivniPobockaFirmy(supabase, tenantId, vybrana))
   if (volba.stav === 'chyba') redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(volba.text)}`)
@@ -171,56 +175,74 @@ export async function zapsatTransakci(formData: FormData): Promise<void> {
   redirect(`/${rozsah}/finance/platby`)
 }
 
+/** Zpět na Platební účty s chybou. Explicitní `never` — za voláním TS ví, že se nepokračuje. */
+function zpetNaUcty(rozsah: string, text: string): never {
+  redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(text)}#${KOTVA_UCTU}`)
+}
+
 /**
- * Pobočka EXISTUJÍCÍHO platebního účtu (Finance po pobočkách, 13. 10.
- * 2026). Dnes je každý účet založený v appce firemní, takže banka
- * a platby pobočky by bez téhle akce zůstaly prázdné — a nový účet by
- * přišel o historii.
+ * Úprava EXISTUJÍCÍHO platebního účtu (Finance Fáze 0, krok 3, bod 4):
+ * pobočka, číslo účtu / IBAN, název a aktivní.
  *
- * Jen v pohledu Celá firma a jen se „Správa financí" ZA CELOU FIRMU:
- * spolu s účtem se přesunou VŠECHNY jeho dosavadní platby (transakce
- * pobočku nemá, patří jí přes účet) — v Platbách, Cashflow, Tržbách
- * i v exportu pro účetního. Stránka to říká u výběru.
+ * Jen v pohledu Celá firma a jen se „Správa financí" ZA CELOU FIRMU —
+ * spolu s pobočkou účtu se přesunou VŠECHNY jeho dosavadní platby
+ * (transakce pobočku nemá, patří jí přes účet) v Platbách, Cashflow,
+ * Tržbách i v exportu pro účetního, a číslo účtu je to, podle čeho
+ * párování pozná platby firmy. Správce jedné pobočky účet nepřeřadí:
+ * odmítne ho `pripravitFiremni` i databáze (politika platebni_ucty_update,
+ * 20261121100000).
+ *
+ * Nic se nemění samo: účet na smazané, vypnuté nebo cizí pobočce stránka
+ * jen ukáže, přeřadí ho až člověk tady.
  */
-export async function zmenitPobockuUctu(formData: FormData): Promise<void> {
+export async function upravitPlatebniUcet(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const { supabase, tenantId } = await pripravitFiremni(
     rozsah,
     'finance.manage',
-    'Pobočku účtu mění jen ten, kdo má právo „Správa financí“ za celou firmu.',
+    'Platební účet upravuje jen ten, kdo má právo „Správa financí“ za celou firmu.',
   )
 
   const ucetId = String(formData.get('ucet_id') ?? '')
-  const { data: ucet } = ucetId
-    ? await supabase.from('platebni_ucty').select('id, branch_id').eq('id', ucetId).eq('tenant_id', tenantId).maybeSingle()
-    : { data: null }
-  if (!ucet) redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Účet se nenašel.')}`)
+  const { data: ucet, error: chybaUctu } = VZOR_UUID.test(ucetId)
+    ? await supabase.from('platebni_ucty').select('id, nazev, branch_id, cislo_uctu, aktivni').eq('id', ucetId).eq('tenant_id', tenantId).maybeSingle()
+    : { data: null, error: null }
+  if (chybaUctu) zpetNaUcty(rozsah, NEPODARILO_ULOZIT_UCET)
+  if (!ucet) zpetNaUcty(rozsah, 'Účet se nenašel.')
 
-  // Beze změny se nic nezapisuje (ani do auditu). Výběr nabízí i vypnutou
-  // pobočku, ve které účet už je (volbyPobockyUctu) — její „Uložit" není
-  // nová volba, jen potvrzení stávající.
+  // Pobočka jen ze seznamu AKTIVNÍCH poboček téhle firmy (z databáze),
+  // současná pobočka (i vypnutá či smazaná) = beze změny — upravaUctu.
   const vybrana = nepovinnePole(formData, 'branch_id')
-  if (vybrana === ucet.branch_id) redirect(`/${rozsah}/finance/platby`)
-
-  const volba = pobockaUctu(null, vybrana, await aktivniPobockaFirmy(supabase, tenantId, vybrana))
-  if (volba.stav === 'chyba') redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(volba.text)}`)
+  const uprava = upravaUctu(
+    ucet,
+    {
+      nazev: String(formData.get('nazev') ?? ''),
+      cislo: String(formData.get('cislo_uctu') ?? ''),
+      aktivni: formData.get('aktivni') === 'on',
+      pobocka: vybrana,
+    },
+    await aktivniPobockaFirmy(supabase, tenantId, vybrana),
+  )
+  if (uprava.stav === 'chyba') zpetNaUcty(rozsah, uprava.text)
+  // Beze změny se nic nezapisuje (ani do auditu).
+  if (uprava.stav === 'beze_zmeny') redirect(`/${rozsah}/finance/platby#${KOTVA_UCTU}`)
 
   // `.select()` vrací změněné řádky: RLS umí UPDATE odmítnout tiše
   // (0 řádků, žádná chyba) — bez vráceného řádku se nic nezměnilo.
   const { data: zmenene, error } = await supabase
     .from('platebni_ucty')
-    .update({ branch_id: volba.branchId })
+    .update(uprava.zmeny)
     .eq('id', ucet.id)
     .eq('tenant_id', tenantId)
     .select('id')
   if (error || (zmenene ?? []).length !== 1) {
-    // Účet, na který míří připojení banky jiné pobočky, databáze
-    // nepřestěhuje — řekne se proč, ne jen „nepodařilo".
-    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(hlaskaZmenyPobockyUctu(error))}`)
+    // Připojení jiné pobočky, živé připojení u vypnutí, chybějící právo —
+    // řekne se proč, ne jen „nepodařilo".
+    zpetNaUcty(rozsah, hlaskaUpravyUctu(error))
   }
 
   revalidatePath(`/${rozsah}/finance/platby`)
-  redirect(`/${rozsah}/finance/platby?pobocka_uctu=1`)
+  redirect(`/${rozsah}/finance/platby?ucet_upraven=1#${KOTVA_UCTU}`)
 }
 
 const VZOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

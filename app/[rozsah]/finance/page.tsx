@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId } from '@/lib/firma'
-import { zkusPristupFinanci } from '@/lib/finance-pristup'
+import { smiSpravovatUctyFirmy, zkusPristupFinanci } from '@/lib/finance-pristup'
 import { canSee, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -12,6 +12,7 @@ import { nactiKombinovanyCashflowGraf } from '@/lib/finance-rolling-prehled'
 import { nactiPolozkyKPozornosti, type PolozkaPozornosti } from '@/lib/finance-pozornost'
 import { prazdnoPozornosti } from '@/lib/faktury-brana'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
+import { hlaskaBezUctuPobocky, nactiPobockyBezUctu, type PobockyBezUctu as VysledekBezUctu } from '@/lib/finance-ucty-pobocek'
 import { hraniceMesice, popisRozsahu, predchoziMesic, srovnaniMesice } from '@/lib/finance-obdobi'
 import { ZONA_VYCHOZI } from '@/lib/cas'
 import { provozniDen } from '@/lib/pokladna-cas'
@@ -19,6 +20,7 @@ import { pokladnaPatriPobocce } from '@/lib/pokladna-trzby'
 import { koruny } from '@/lib/mzdy'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from './pobocka-bez-firmy'
+import PobockyBezUctu from './pobocky-bez-uctu'
 import DataTable from '@/components/ui/DataTable'
 import StatusIndicator from '@/components/ui/StatusIndicator'
 import Badge from '@/components/ui/Badge'
@@ -168,12 +170,19 @@ export default async function FinancePrehled({
     .is('deleted_at', null)
   const branches = (branchesData ?? []) as { id: string; name: string }[]
 
-  const [kpi, bodyGrafu, pozornost, integraceRes] = await Promise.all([
+  const [kpi, bodyGrafu, pozornost, integraceRes, bezUctu, smiSpravovatUcty] = await Promise.all([
     nactiFinanceKpi(tenantId, pristup.ctx, branches, hraniceMesice(mesic), hraniceMesice(mesicPredchozi), srovnani, pobocka).catch((): FinanceKpi | null => null),
     nactiKombinovanyCashflowGraf(tenantId, 'zakladni', pobocka).catch(() => []),
     nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read'), pobocka)
       .catch(() => ({ polozky: [] as PolozkaPozornosti[], hlaska: prazdnoPozornosti({ stav: 'chyba_dotazu' }) })),
     supabase.from('integrace_pripojeni').select('id, oblast, poskytovatel, nazev, stav, branch_id, externi_ucet').eq('tenant_id', tenantId).is('odpojeno_kdy', null).order('oblast'),
+    // Celá firma: aktivní pobočky bez aktivního účtu — jedna definice pro
+    // všechny Finance (pobocky_bez_aktivniho_uctu, krok 3). Na pobočce to
+    // řeší KPI (`pobockaBezUctu`) touž funkcí.
+    naPobocce
+      ? Promise.resolve<VysledekBezUctu | null>(null)
+      : nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId),
+    smiSpravovatUctyFirmy(tenantId, pristup.ctx),
   ])
 
   type Pripojeni = { id: string; oblast: string; poskytovatel: string; nazev: string; stav: string; branch_id: string | null; externi_ucet: unknown }
@@ -209,6 +218,13 @@ export default async function FinancePrehled({
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px', containerType: 'inline-size' }}>
         {naPobocce ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{POZNAMKA_FIREMNI}</p> : null}
 
+        {/* Celá firma: které aktivní pobočky nemají aktivní účet a že jejich platby v součtech po pobočkách nejsou (krok 3, bod 1). */}
+        {bezUctu ? <PobockyBezUctu vysledek={bezUctu} smiPrirazovat={smiSpravovatUcty} /> : null}
+        {/* Pobočka bez účtu: kde se účet přiřazuje, jen tomu, kdo to smí (krok 3, bod 5). */}
+        {naPobocce && kpi?.pobockaBezUctu ? (
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{hlaskaBezUctuPobocky(smiSpravovatUcty)}</p>
+        ) : null}
+
         {kpi ? (
           <div className="ds-kpi-mrizka">
             {/* Trendy všech karet ze stejných oken (lib/finance-kpi-vypocet.ts) — `null` (první den měsíce, budoucí měsíc…) = bez šipky i popisku „vs.". */}
@@ -222,7 +238,7 @@ export default async function FinancePrehled({
             {/* Pobočka bez vlastního účtu cashflow NEMÁ — „0 Kč" by tvrdilo, že se nic nepohnulo. */}
             <FinanceKpiKarta
               ikona="blesk" titulek="Cashflow" hodnota={kpi.pobockaBezUctu ? '–' : koruny(kpi.cashflowHaleru)}
-              zdroj={kpi.pobockaBezUctu ? 'pobočka nemá vlastní platební účet' : naPobocce ? 'příjmy − výdaje z účtů pobočky' : 'příjmy − výdaje z plateb'}
+              zdroj={kpi.pobockaBezUctu ? 'pobočka nemá aktivní platební účet' : naPobocce ? 'příjmy − výdaje z účtů pobočky' : 'příjmy − výdaje z plateb'}
               trend={trend(kpi.trendCashflow, '%', true)}
               srovnaniS={srovnaniS}
             />
@@ -285,7 +301,7 @@ export default async function FinancePrehled({
               }))}
               prazdno={
                 kpi?.pobockaBezUctu
-                  ? 'Pobočka zatím nemá vlastní platební účet — náklady z plateb za ni appka nemá.'
+                  ? 'Pobočka zatím nemá aktivní platební účet — náklady z plateb za ni appka nemá.'
                   : 'Zatím žádné kategorizované náklady za tohle období.'
               }
             />

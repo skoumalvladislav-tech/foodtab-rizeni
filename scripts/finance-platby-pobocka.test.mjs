@@ -13,8 +13,10 @@
  *      nebo celé firmě.
  *   2. Na pobočce se nedá zapsat platba na firemní účet ani účet jiné
  *      pobočky (`branch_id` null není „patří všem").
- *   3. Pouhé „Uložit" u účtu ve vypnuté pobočce ho nepřesune na celou
- *      firmu (výběr musí současnou pobočku nabízet).
+ *   3. Pouhé „Uložit" u účtu ve vypnuté pobočce ho nepřesune mezi
+ *      firemní (výběr musí současnou pobočku nabízet).
+ *   3b. Krok 3: nový účet bez výběru pobočky NENÍ firemní — firemní je
+ *      jen výslovná volba „Firemní účet (bez pobočky)".
  *   4. Párování s fakturami, pobočka účtu a import výpisu chtějí právo
  *      ZA CELOU FIRMU, ne za rozsah z formuláře (zdrojové kontroly dole —
  *      bez nich by čisté funkce prošly i nad akcí, která je nevolá).
@@ -22,8 +24,9 @@
 
 import { readFileSync } from 'node:fs'
 
-const { pobockaUctu, ucetPatriRozsahu, nazevPobockyUctu, volbyPobockyUctu, hlaskaZmenyPobockyUctu, CELA_FIRMA } =
+const { pobockaUctu, ucetPatriRozsahu, nazevPobockyUctu, volbyPobockyUctu, hlaskaUpravyUctu, hodnotaPobockyUctu, VYBERTE_POBOCKU_UCTU, NEPODARILO_ULOZIT_UCET } =
   await import('../lib/finance-platby-pobocka.ts')
+const { FIREMNI_UCET, FIREMNI_VOLBA } = await import('../lib/finance-ucty-pobocek.ts')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -41,19 +44,28 @@ const zFormulareJina = pobockaUctu(BERNARD, KAVARNA, [KAVARNA])
 ok('na Bernard Baru s podvrženou Kavárnou ve formuláři → Bernard Bar',
   zFormulareJina.stav === 'ok' && zFormulareJina.branchId === BERNARD)
 const zFormularePrazdna = pobockaUctu(BERNARD, '', [])
-ok('na Bernard Baru s prázdným polem („celá firma") → pořád Bernard Bar, ne null',
+ok('na Bernard Baru s prázdným polem → pořád Bernard Bar, ne null ani chyba',
   zFormularePrazdna.stav === 'ok' && zFormularePrazdna.branchId === BERNARD)
+const zFormulareFiremni = pobockaUctu(BERNARD, FIREMNI_VOLBA, [])
+ok('na Bernard Baru s podvrženou volbou „Firemní účet" → pořád Bernard Bar',
+  zFormulareFiremni.stav === 'ok' && zFormulareFiremni.branchId === BERNARD)
 const bezPole = pobockaUctu(BERNARD, null, [])
 ok('na Bernard Baru bez pole → Bernard Bar', bezPole.stav === 'ok' && bezPole.branchId === BERNARD)
 
 console.log('\n== Pobočka nového účtu: za celou firmu jen pobočka firmy ==')
 
-const firma = pobockaUctu(null, '', [BERNARD])
-ok('prázdný výběr → účet celé firmy (null)', firma.stav === 'ok' && firma.branchId === null)
+// Krok 3, bod 3: žádná výchozí „Celá firma" — prázdno je chyba.
+const prazdny = pobockaUctu(null, '', [BERNARD])
+ok('prázdný výběr → chyba „vyberte pobočku", ne firemní účet',
+  prazdny.stav === 'chyba' && prazdny.text === VYBERTE_POBOCKU_UCTU)
 const mezery = pobockaUctu(null, '   ', [BERNARD])
-ok('jen mezery → účet celé firmy (null)', mezery.stav === 'ok' && mezery.branchId === null)
+ok('jen mezery → chyba, ne firemní účet', mezery.stav === 'chyba')
 const nic = pobockaUctu(null, undefined, [])
-ok('chybějící pole → účet celé firmy (null)', nic.stav === 'ok' && nic.branchId === null)
+ok('chybějící pole → chyba, ne firemní účet', nic.stav === 'chyba' && pobockaUctu(null, null, []).stav === 'chyba')
+const firma = pobockaUctu(null, FIREMNI_VOLBA, [BERNARD])
+ok('výslovná volba „Firemní účet" → účet bez pobočky (null)', firma.stav === 'ok' && firma.branchId === null)
+const firmaSMezerou = pobockaUctu(null, ` ${FIREMNI_VOLBA} `, [])
+ok('volba „Firemní účet" s mezerami → null', firmaSMezerou.stav === 'ok' && firmaSMezerou.branchId === null)
 const platna = pobockaUctu(null, KAVARNA, [BERNARD, KAVARNA])
 ok('aktivní pobočka firmy → ta pobočka', platna.stav === 'ok' && platna.branchId === KAVARNA)
 const sMezerou = pobockaUctu(null, ` ${KAVARNA} `, new Set([KAVARNA]))
@@ -81,29 +93,30 @@ const POBOCKY = [
   { id: KAVARNA, name: 'Kavárna', active: true },
   { id: VYPNUTA, name: 'Stará výdejna', active: false },
 ]
-ok('bez pobočky → Celá firma', nazevPobockyUctu(null, POBOCKY) === CELA_FIRMA && CELA_FIRMA === 'Celá firma')
+ok('bez pobočky → Firemní účet (bez pobočky)', nazevPobockyUctu(null, POBOCKY) === FIREMNI_UCET && FIREMNI_UCET === 'Firemní účet (bez pobočky)')
 ok('aktivní pobočka → její jméno', nazevPobockyUctu(BERNARD, POBOCKY) === 'Bernard Bar')
 ok('vypnutá pobočka → jméno s „(vypnutá)"', nazevPobockyUctu(VYPNUTA, POBOCKY) === 'Stará výdejna (vypnutá)')
-ok('neznámé id → řekne to, nepředstírá Celou firmu', nazevPobockyUctu('b-smazana', POBOCKY) === 'Pobočka mimo seznam')
+ok('neznámé id → řekne to, nepředstírá firemní účet', nazevPobockyUctu('b-smazana', POBOCKY) === 'Pobočka mimo seznam')
 
 console.log('\n== Volby u existujícího účtu: „Uložit" beze změny účet nepřesune ==')
 
 const hodnoty = (volby) => volby.map((v) => v.value)
 const firemniVolby = volbyPobockyUctu(POBOCKY, null)
-ok('první volba je Celá firma ("")', firemniVolby[0]?.value === '' && firemniVolby[0]?.label === CELA_FIRMA)
-ok('firemní účet: Celá firma + jen aktivní pobočky',
-  JSON.stringify(hodnoty(firemniVolby)) === JSON.stringify(['', BERNARD, KAVARNA]))
+ok('první volba je Firemní účet (výslovná hodnota, ne "")', firemniVolby[0]?.value === FIREMNI_VOLBA && firemniVolby[0]?.label === FIREMNI_UCET)
+ok('firemní účet: Firemní účet + jen aktivní pobočky',
+  JSON.stringify(hodnoty(firemniVolby)) === JSON.stringify([FIREMNI_VOLBA, BERNARD, KAVARNA]))
+ok('žádná volba s prázdnou hodnotou (prázdno = chyba akce)', !hodnoty(firemniVolby).includes(''))
 const veVypnute = volbyPobockyUctu(POBOCKY, VYPNUTA)
-ok('účet ve vypnuté pobočce: ta pobočka je mezi volbami (jinak by prohlížeč předvybral Celou firmu)',
+ok('účet ve vypnuté pobočce: ta pobočka je mezi volbami (jinak by prohlížeč předvybral Firemní účet)',
   hodnoty(veVypnute).includes(VYPNUTA))
 ok('…a je popsaná jako vypnutá', veVypnute.find((v) => v.value === VYPNUTA)?.label === 'Stará výdejna (vypnutá)')
 const veSmazane = volbyPobockyUctu(POBOCKY, 'b-smazana')
 ok('účet v pobočce mimo seznam (smazaná): pořád mezi volbami', hodnoty(veSmazane).includes('b-smazana'))
 ok('žádná volba dvakrát', [firemniVolby, veVypnute, veSmazane, volbyPobockyUctu(POBOCKY, BERNARD)]
   .every((v) => new Set(hodnoty(v)).size === v.length))
-// Pro KAŽDÝ účet: jeho současná hodnota (defaultValue = branch_id ?? '') je mezi volbami.
+// Pro KAŽDÝ účet: jeho současná hodnota (defaultValue = hodnotaPobockyUctu) je mezi volbami.
 ok('pro každou současnou pobočku je defaultValue mezi volbami',
-  [null, BERNARD, KAVARNA, VYPNUTA, 'b-smazana'].every((soucasna) => hodnoty(volbyPobockyUctu(POBOCKY, soucasna)).includes(soucasna ?? '')))
+  [null, BERNARD, KAVARNA, VYPNUTA, 'b-smazana'].every((soucasna) => hodnoty(volbyPobockyUctu(POBOCKY, soucasna)).includes(hodnotaPobockyUctu(soucasna))))
 
 console.log('\n== Zdroj: akce a stránka to doopravdy používají ==')
 
@@ -120,7 +133,7 @@ const akce = zdroj('app/[rozsah]/finance/platby/akce.ts')
 const firemni = telo(akce, 'pripravitFiremni')
 ok('pripravitFiremni ověřuje právo za celou firmu (TENANT_SCOPE_SEGMENT), ne za rozsah',
   /zkusPristup\(tenantId, pravo, TENANT_SCOPE_SEGMENT\)/.test(firemni) && !/zkusPristup\(tenantId, pravo, rozsah\)/.test(firemni))
-for (const nazev of ['potvrditParovani', 'zrusitAlokaci', 'zmenitPobockuUctu']) {
+for (const nazev of ['potvrditParovani', 'zrusitAlokaci', 'upravitPlatebniUcet']) {
   const t = telo(akce, nazev)
   ok(`${nazev}: jde přes pripravitFiremni, ne přes pripravit s rozsahem`,
     t.length > 0 && /await pripravitFiremni\(/.test(t) && !/await pripravit\(/.test(t))
@@ -135,23 +148,35 @@ ok('zalozitPlatebniUcet: pobočka přes pobockaUctu(pobocka, …) a do insertu j
   /pobockaUctu\(pobocka,/.test(zalozit) && /branch_id: volba\.branchId/.test(zalozit) && !/branch_id: branchId/.test(zalozit))
 ok('zapsatTransakci: na pobočce ověřuje účet přes ucetPatriRozsahu',
   /if \(pobocka\)/.test(telo(akce, 'zapsatTransakci')) && /ucetPatriRozsahu\(pobocka, ucet\)/.test(telo(akce, 'zapsatTransakci')))
-const zmenit = telo(akce, 'zmenitPobockuUctu')
-ok('zmenitPobockuUctu: ověří pobočku firmy a kontroluje vrácený řádek (.select)',
-  /pobockaUctu\(null,/.test(zmenit) && /aktivniPobockaFirmy\(/.test(zmenit) && /\.select\('id'\)/.test(zmenit) && /\.length !== 1/.test(zmenit))
-ok('zmenitPobockuUctu: odmítnutí databáze (připojení jiné pobočky) řekne přes hlaskaZmenyPobockyUctu(error)',
-  /chyba=\$\{encodeURIComponent\(hlaskaZmenyPobockyUctu\(error\)\)\}/.test(zmenit))
+const upravit = telo(akce, 'upravitPlatebniUcet')
+ok('upravitPlatebniUcet: pobočka přes upravaUctu s aktivními pobočkami firmy a kontroluje vrácený řádek (.select)',
+  /upravaUctu\(/.test(upravit) && /aktivniPobockaFirmy\(/.test(upravit) && /\.select\('id'\)/.test(upravit) && /\.length !== 1/.test(upravit))
+ok('upravitPlatebniUcet: do UPDATE jdou jen změny z upravaUctu, nic z formuláře napřímo',
+  /\.update\(uprava\.zmeny\)/.test(upravit) && !/\.update\(\{/.test(upravit))
+ok('upravitPlatebniUcet: odmítnutí databáze řekne přes hlaskaUpravyUctu(error)',
+  /zpetNaUcty\(rozsah, hlaskaUpravyUctu\(error\)\)/.test(upravit))
+ok('aktivniPobockaFirmy: „Firemní účet" ani ne-uuid do databáze neposílá',
+  /branchId === FIREMNI_VOLBA \|\| !VZOR_UUID\.test\(branchId\)\) return \[\]/.test(telo(akce, 'aktivniPobockaFirmy')))
 
-console.log('\n== Přesun účtu, na který míří připojení pobočky ==')
-const hlaskaPripojeni = hlaskaZmenyPobockyUctu({ code: '23514', message: 'Na účet míří připojení jiné pobočky — nejdřív ho odpojte, pak účet přesuňte.' })
-ok('spoušť odmítla kvůli připojení → věta o odpojení připojení', /odpojte/.test(hlaskaPripojeni) && /připojení/.test(hlaskaPripojeni))
-ok('jiná chyba (i 23514 bez připojení, i žádná) → obecná věta',
-  hlaskaZmenyPobockyUctu({ code: '23514', message: 'Pobočka nepatří této firmě.' }) === 'Pobočku účtu se nepodařilo změnit.'
-    && hlaskaZmenyPobockyUctu(null) === 'Pobočku účtu se nepodařilo změnit.'
-    && hlaskaZmenyPobockyUctu({ code: '42501', message: 'připojení' }) === 'Pobočku účtu se nepodařilo změnit.')
-// Text hlášky spouště v migraci a vzor v lib se musí potkat — jinak by
-// appka hlásila jen obecnou větu.
-ok('migrace 20261119100000: hláška spouště obsahuje „připojení" (vzor hlaskaZmenyPobockyUctu)',
-  /raise exception 'Na účet míří připojení jiné pobočky/.test(zdroj('supabase/migrations/20261119100000_banka_neutralni_vrstva.sql')))
+console.log('\n== Úprava účtu, kterou databáze odmítla ==')
+// Texty hlášek spouští ČTE z migrací — kdyby se rozešly se vzory v lib,
+// appka by hlásila jen obecnou větu.
+const hlaskaSpoustePresunu = zdroj('supabase/migrations/20261119100000_banka_neutralni_vrstva.sql').match(/raise exception '(Na účet míří připojení jiné pobočky[^']*)'/)?.[1] ?? ''
+const hlaskaSpousteVypnuti = zdroj('supabase/migrations/20261121100000_pobocky_ucty.sql').match(/raise exception '(Na účet míří živé připojení[^']*)'/)?.[1] ?? ''
+ok('hlášky obou spouští se v migracích našly', hlaskaSpoustePresunu.length > 0 && hlaskaSpousteVypnuti.length > 0)
+const hlaskaPripojeni = hlaskaUpravyUctu({ code: '23514', message: hlaskaSpoustePresunu })
+ok('spoušť odmítla přesun kvůli připojení → věta o odpojení a přesunu',
+  /odpojte/.test(hlaskaPripojeni) && /přesuňte/.test(hlaskaPripojeni))
+const hlaskaVypnuti = hlaskaUpravyUctu({ code: '23514', message: hlaskaSpousteVypnuti })
+ok('spoušť odmítla vypnutí kvůli živému připojení → věta o odpojení a vypnutí (ne o přesunu)',
+  /odpojte/.test(hlaskaVypnuti) && /vypněte/.test(hlaskaVypnuti) && !/přesuňte/.test(hlaskaVypnuti))
+ok('cizí pobočka (spoušť kroku 1) → věta o pobočce jiné firmy',
+  hlaskaUpravyUctu({ code: '23514', message: 'Pobočka nepatří této firmě.' }) === 'Vybraná pobočka nepatří této firmě.')
+ok('bez práva (42501, politika nebo sloupcový grant) → kdo účet upravuje',
+  /Správa financí/.test(hlaskaUpravyUctu({ code: '42501', message: 'permission denied for table platebni_ucty' })))
+ok('jiná chyba i žádná → obecná věta',
+  hlaskaUpravyUctu(null) === NEPODARILO_ULOZIT_UCET
+    && hlaskaUpravyUctu({ code: '23505', message: 'připojení' }) === NEPODARILO_ULOZIT_UCET)
 
 for (const soubor of ['app/[rozsah]/finance/platby/import/akce.ts', 'app/[rozsah]/finance/platby/import/akce-nahled.ts']) {
   const t = zdroj(soubor)

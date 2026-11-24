@@ -2,6 +2,7 @@ import 'server-only'
 
 import { getServerSupabase } from '@/lib/supabase/server'
 import { secistPlan, type RadekPredpisu } from '@/lib/finance-plan'
+import { FIREMNI_UCTY } from '@/lib/finance-ucty-pobocek'
 
 /**
  * Cashflow přehled: skutečnost (z `transakce`, přes `app.cashflow_prehled`)
@@ -124,7 +125,7 @@ export async function nactiVysledovkuCelofirmy(
     ? branches.filter((b) => b.id === pobocka).map((b) => ({ id: b.id as string | null, nazev: b.name }))
     : [
         ...branches.map((b) => ({ id: b.id as string | null, nazev: b.name })),
-        { id: null, nazev: 'Celá firma (účty bez pobočky)' },
+        { id: null, nazev: FIREMNI_UCTY },
       ]
 
   const vysledky = await Promise.all(

@@ -427,9 +427,12 @@ ok('rozpočty: pohled přes pohledRozpoctu(pobocka, …) a ten jde do rozpocet_p
 ok('rozpočty: výběr pobočky jen za celou firmu a v něm volba firemních rozpočtů',
   /\{pobocka \? null : \(\s*<select name="pobocka"/.test(stranaRozpoctu) &&
   /<option value=\{ROZPOCTY_FIRMY\}>/.test(stranaRozpoctu))
-ok('rozpočty: pobočka bez účtu → věta místo „0 Kč" skutečnosti',
-  /const skrytSkutecnost = pobocka !== null && bezUctu/.test(stranaRozpoctu) &&
-  /\{skrytSkutecnost \? \(/.test(stranaRozpoctu) && /BEZ_UCTU_POBOCKY/.test(stranaRozpoctu))
+// Krok 3: i ve výběru pobočky za celou firmu, věta s místem přiřazení jen
+// pro toho, kdo smí, a „bez účtu" z jedné funkce pro všechny Finance.
+ok('rozpočty: pobočka bez účtu → věta místo „0 Kč" skutečnosti (na pobočce i ve výběru za celou firmu)',
+  /const skrytSkutecnost = bezUctu\n/.test(stranaRozpoctu) &&
+  /\{skrytSkutecnost \? \(/.test(stranaRozpoctu) && /hlaskaBezUctuPobocky\(smiSpravovatUcty\)/.test(stranaRozpoctu) &&
+  /nactiPobockyBezUctu\(/.test(stranaRozpoctu) && !/from\('platebni_ucty'\)/.test(stranaRozpoctu))
 
 console.log(chyb === 0 ? '\nVše v pořádku.' : `\n${chyb} kontrol selhalo.`)
 process.exit(chyb === 0 ? 0 : 1)

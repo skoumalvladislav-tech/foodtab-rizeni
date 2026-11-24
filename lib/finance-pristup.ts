@@ -62,3 +62,15 @@ export async function pobockaBezPrehleduFirmy(tenantId: string, pristup: { ctx: 
   if (!isModuleActive(pristup.ctx, 'finance') || !canSee(pristup.ctx, 'finance.read')) return false
   return !(await hasAccess(tenantId, 'finance.read', null))
 }
+
+/**
+ * Smí přihlášený přiřazovat a upravovat platební účty — „Správa financí"
+ * ZA CELOU FIRMU (krok 3, bod 4)? Jen pro to, CO SE KRESLÍ: odkaz „kde
+ * se účet přiřazuje" a formulář úpravy účtu dostane jen ten, kdo to smí.
+ * Zámek je jinde — `pripravitFiremni` v app/[rozsah]/finance/platby/akce.ts
+ * a politika platebni_ucty_update (migrace 20261121100000).
+ */
+export async function smiSpravovatUctyFirmy(tenantId: string, ctx: Context): Promise<boolean> {
+  if (!canSee(ctx, 'finance.manage')) return false
+  return hasAccess(tenantId, 'finance.manage', null)
+}

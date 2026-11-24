@@ -57,7 +57,7 @@ export async function nactiPlatbyBezFaktury(
 ): Promise<VysledekBezFaktury> {
   if (ucty && ucty.length === 0) return { stav: 'ok', platby: [] }
   let dotaz = supabase.from('transakce')
-    .select('id, datum, smer, castka_haleru, mena, protistrana, protiucet, vs, storno_of, platebni_ucty(nazev)')
+    .select('id, datum, smer, castka_haleru, mena, protistrana, protiucet, vs, storno_of, platebni_ucty(nazev, branch_id)')
     .eq('tenant_id', tenantId).eq('smer', 'vydaj')
     .gte('datum', od).lte('datum', doData)
   if (ucty) dotaz = dotaz.in('ucet_id', [...ucty])
@@ -68,7 +68,7 @@ export async function nactiPlatbyBezFaktury(
   type Radek = {
     id: string; datum: string; smer: string; castka_haleru: number; mena: string | null
     protistrana: string | null; protiucet: string | null; vs: string | null; storno_of: string | null
-    platebni_ucty: { nazev: string } | { nazev: string }[] | null
+    platebni_ucty: { nazev: string; branch_id: string | null } | { nazev: string; branch_id: string | null }[] | null
   }
   const radky = (data ?? []) as unknown as Radek[]
   if (radky.length > NEJVIC_POHYBU) {
@@ -113,7 +113,8 @@ export async function nactiPlatbyBezFaktury(
     return {
       id: r.id, datum: r.datum, smer: r.smer, castkaHaleru: r.castka_haleru, mena: r.mena,
       protistrana: protistranaNeboUcet(r.protistrana, r.protiucet), protiucet: r.protiucet ?? '', vs: r.vs ?? '',
-      ucet: ucet?.nazev ?? '', stornovano: r.storno_of !== null || stornovane.has(r.id),
+      ucet: ucet?.nazev ?? '', firemniUcet: ucet ? ucet.branch_id === null : undefined,
+      stornovano: r.storno_of !== null || stornovane.has(r.id),
     }
   })
   return {

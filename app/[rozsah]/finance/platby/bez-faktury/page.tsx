@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId } from '@/lib/firma'
-import { zkusPristupFinanci } from '@/lib/finance-pristup'
+import { smiSpravovatUctyFirmy, zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { koruny } from '@/lib/mzdy'
@@ -10,8 +10,10 @@ import { jeVKorunach } from '@/lib/finance-parovani'
 import { nactiPlatbyBezFaktury, nactiUctyFronty } from '@/lib/finance-bez-faktury-nacteni'
 import { filtrUctuFronty } from '@/lib/finance-bez-faktury'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
+import { FIREMNI_UCET, maPobockaAktivniUcet, nactiPobockyBezUctu } from '@/lib/finance-ucty-pobocek'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../../pobocka-bez-firmy'
+import PobockyBezUctu from '../../pobocky-bez-uctu'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
 
@@ -29,6 +31,11 @@ export const dynamic = 'force-dynamic'
  * pohyb vyřídila ruční úhrada nebo na něj čeká návrh, řekne databáze
  * funkcí platby_bez_faktury_vyrizeni). Za celou firmu všechny účty, na
  * pobočce jen účty pobočky (stejně jako Platby), a jde vybrat jeden účet.
+ *
+ * Kdo nemá aktivní účet, rozhoduje táž funkce jako na ostatních stránkách
+ * Financí (pobocky_bez_aktivniho_uctu, krok 3) — ne nabídka účtů fronty,
+ * ve které jsou i vypnuté účty (jejich platby z fronty nezmizí). Za celou
+ * firmu je platba firemního účtu (bez pobočky) tak označená.
  */
 
 const karta = {
@@ -80,7 +87,11 @@ export default async function PlatbyBezFaktury({
   const doData = hledani.do && DATUM.test(hledani.do) ? hledani.do : dnes
 
   const supabase = await getServerSupabase()
-  const uctyRes = await nactiUctyFronty(supabase, tenantId)
+  const [uctyRes, bezUctu, smiSpravovatUcty] = await Promise.all([
+    nactiUctyFronty(supabase, tenantId),
+    nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId, pobocka),
+    smiSpravovatUctyFirmy(tenantId, pristup.ctx),
+  ])
   const { nabidka, vybrany, filtr } = filtrUctuFronty(uctyRes.stav === 'ok' ? uctyRes.ucty : [], pobocka, hledani.ucet)
   const vysledek = uctyRes.stav === 'ok'
     ? await nactiPlatbyBezFaktury(supabase, tenantId, od, doData, filtr)
@@ -125,9 +136,11 @@ export default async function PlatbyBezFaktury({
 
         {pobocka ? (
           <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
-            {nabidka.length === 0 ? 'Pobočka nemá vlastní platební účet. ' : ''}{POZNAMKA_FIREMNI}
+            {maPobockaAktivniUcet(bezUctu, pobocka) === false ? 'Pobočka nemá aktivní platební účet. ' : ''}{POZNAMKA_FIREMNI}
           </p>
-        ) : null}
+        ) : (
+          <PobockyBezUctu vysledek={bezUctu} smiPrirazovat={smiSpravovatUcty} />
+        )}
 
         {vysledek.stav !== 'ok' ? (
           <p role="status" style={{ margin: 0, fontSize: '13px', color: vysledek.stav === 'chyba' ? 'var(--bad)' : 'var(--pozor)' }}>{vysledek.text}</p>
@@ -162,7 +175,10 @@ export default async function PlatbyBezFaktury({
                       </td>
                       <td style={{ padding: '6px 8px' }}>{p.protistrana || '—'}</td>
                       <td style={{ padding: '6px 8px' }}>{p.vs || '—'}</td>
-                      <td style={{ padding: '6px 8px', color: 'var(--muted)' }}>{p.ucet || '—'}</td>
+                      <td style={{ padding: '6px 8px', color: 'var(--muted)' }}>
+                        {p.ucet || '—'}
+                        {!pobocka && p.firemniUcet ? <div style={{ fontSize: '12px' }}>{FIREMNI_UCET}</div> : null}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

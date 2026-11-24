@@ -2,16 +2,18 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId } from '@/lib/firma'
-import { zkusPristupFinanci } from '@/lib/finance-pristup'
+import { smiSpravovatUctyFirmy, zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
-import { BEZ_UCTU_POBOCKY, hodnotaPohleduRozpoctu, pohledRozpoctu, ROZPOCTY_FIRMY } from '@/lib/finance-evidence-pobocka'
+import { hodnotaPohleduRozpoctu, pohledRozpoctu, ROZPOCTY_FIRMY } from '@/lib/finance-evidence-pobocka'
+import { hlaskaBezUctuPobocky, maPobockaAktivniUcet, nactiPobockyBezUctu } from '@/lib/finance-ucty-pobocek'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
+import PobockyBezUctu from '../pobocky-bez-uctu'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
 import { zalozitRozpocet } from './akce'
@@ -40,7 +42,12 @@ export const dynamic = 'force-dynamic'
  *
  * Skutečnost pobočky se počítá z plateb jejích platebních účtů. Dnes je
  * každý účet založený v appce firemní, takže pobočka bez účtu dostane
- * větu (`BEZ_UCTU_POBOCKY`), ne „0 Kč" tržeb.
+ * větu (`hlaskaBezUctuPobocky`), ne „0 Kč" tržeb — na pobočce i ve výběru
+ * pobočky za celou firmu. Kdo účet nemá, rozhoduje jedna funkce pro
+ * všechny Finance (pobocky_bez_aktivniho_uctu, krok 3): jen AKTIVNÍ účet.
+ *
+ * Chyba dotazu NENÍ nula (krok 3, bod 6): supabase.rpc nehází, chybu
+ * vrací v `.error` — dřív se tu tiše proměnila v „0 Kč" a prime cost.
  */
 
 type Branch = { id: string; name: string }
@@ -120,48 +127,58 @@ export default async function FinanceRozpocty({
       ? (pristup.scope.branchName ?? 'pobočka')
       : (branches.find((b) => b.id === branchId)?.name ?? 'pobočka')
 
-  // Má zobrazená pobočka aspoň jeden platební účet (i vypnutý — jeho
-  // platby do skutečnosti počítá app.vysledovka taky)? Bez něj je
-  // skutečnost z čeho spočítat nemá.
-  let bezUctu = false
-  if (branchId) {
-    const uctyRes = await supabase
-      .from('platebni_ucty')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('branch_id', branchId)
-    // Na pobočce věta „pobočka nemá účet" nesmí být spadlý dotaz
-    // (lib/supabase/dotaz.ts). Za celou firmu se při chybě jen neukáže
-    // poznámka — čísla zůstávají jako dosud.
-    if (uctyRes.error) {
-      if (pobocka) throw new DotazSelhal('platební účty pobočky', uctyRes.error)
-    } else {
-      bezUctu = (uctyRes.count ?? 0) === 0
-    }
+  // Kdo nemá AKTIVNÍ platební účet — jedna definice pro všechny Finance
+  // (pobocky_bez_aktivniho_uctu, krok 3; dřív se tu počítal i vypnutý účet).
+  // Za celou firmu všechny aktivní pobočky (věta nahoře), jinak zobrazená.
+  const bezUctuVysledek = await nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId, pobocka)
+  // Zobrazená pobočka bez aktivního účtu: skutečnost z čeho spočítat nemá.
+  // Na pobočce chyba zjištění nesmí vypadat jako „má účet" ani „nemá"
+  // (lib/supabase/dotaz.ts); za celou firmu ji řekne věta nahoře.
+  const maUcet = branchId ? maPobockaAktivniUcet(bezUctuVysledek, branchId) : true
+  if (pobocka && bezUctuVysledek.stav === 'chyba') {
+    throw new DotazSelhal('pobočky bez platebního účtu', { message: bezUctuVysledek.text, code: bezUctuVysledek.kod })
   }
-  // Na pobočce bez účtu se skutečnost neukazuje vůbec (věta místo
-  // „0 Kč"); za celou firmu se čísla ukazují jako dosud a věta je navíc.
-  const skrytSkutecnost = pobocka !== null && bezUctu
+  const bezUctu = branchId !== null && maUcet === false
+  // Bez účtu se skutečnost neukazuje vůbec (věta místo „0 Kč") — na pobočce
+  // i ve výběru pobočky za celou firmu (krok 3).
+  const skrytSkutecnost = bezUctu
+  const smiSpravovatUcty = await smiSpravovatUctyFirmy(tenantId, pristup.ctx)
+  // Mzdy (a s nimi prime cost) jen s payroll.read — bez práva vrací
+  // vydelky_prehled prázdno a prime cost by tiše vyšel bez mezd.
+  const smiVidetMzdy = canSee(pristup.ctx, 'payroll.read')
 
+  // supabase.rpc NEHÁZÍ — chyba přijde v `.error`. Dřív se tu ignorovala
+  // a stránka ukázala „0 Kč" a „chybí tržby" místo „nepodařilo se načíst".
   let prehled: RadekPrehledu[] = []
-  let mzdyHaleru = 0
+  let chybaPrehledu = false
+  let mzdyHaleru: number | null = null
   try {
     const [prehledRes, mzdyRes] = await Promise.all([
       supabase.rpc('rozpocet_prehled', { p_tenant: tenantId, p_branch: branchId, p_rok: rok, p_mesic: mesic }),
-      branchId
+      branchId && smiVidetMzdy
         ? supabase.rpc('vydelky_prehled', { p_tenant: tenantId, p_branch: branchId, p_mesic: `${rok}-${String(mesic).padStart(2, '0')}-01` })
-        : Promise.resolve({ data: [] as { vydelano_haleru: number }[] }),
+        : Promise.resolve({ data: [] as { vydelano_haleru: number }[], error: null }),
     ])
-    prehled = (prehledRes.data ?? []) as RadekPrehledu[]
-    mzdyHaleru = ((mzdyRes.data ?? []) as { vydelano_haleru: number }[]).reduce((s, r) => s + (r.vydelano_haleru ?? 0), 0)
+    if (prehledRes.error) chybaPrehledu = true
+    else prehled = (prehledRes.data ?? []) as RadekPrehledu[]
+    if (!mzdyRes.error) {
+      mzdyHaleru = ((mzdyRes.data ?? []) as { vydelano_haleru: number }[]).reduce((s, r) => s + (r.vydelano_haleru ?? 0), 0)
+    }
   } catch {
-    prehled = []
+    chybaPrehledu = true
   }
+  const chybaMezd = branchId !== null && smiVidetMzdy && mzdyHaleru === null
 
+  // ROZHODNOUT: (otázka 151) tržby Rozpočtů = jen platby zařazené do kategorie
+  // Tržby (app.vysledovka nad `transakce.kategorie`), ne tržby z pokladny
+  // (Dotykačka), které ukazuje Přehled. Zdroj se tu záměrně NEPŘEPÍNÁ — jen
+  // se to u prime costu říká nahlas.
   const trzby = prehled.find((p) => p.kategorie === 'trzby' && p.smer === 'prijem')?.skutecnost_haleru ?? 0
   const suroviny = prehled.find((p) => p.kategorie === 'suroviny' && p.smer === 'vydaj')?.skutecnost_haleru ?? 0
-  const primeCostHaleru = suroviny + mzdyHaleru
-  const primeCostProcento = trzby > 0 ? Math.round((primeCostHaleru / trzby) * 1000) / 10 : null
+  const primeCostHaleru = suroviny + (mzdyHaleru ?? 0)
+  const primeCostProcento = !chybaPrehledu && mzdyHaleru !== null && trzby > 0
+    ? Math.round((primeCostHaleru / trzby) * 1000) / 10
+    : null
 
   const zaklad = `/${rozsah}/finance/rozpocty`
   const qs = `rok=${rok}&mesic=${mesic}${pobocka ? '' : `&pobocka=${hodnotaPohleduRozpoctu(branchId)}`}`
@@ -197,9 +214,18 @@ export default async function FinanceRozpocty({
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '20px', maxWidth: '960px' }}>
         {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
 
+        {/* Celá firma: aktivní pobočky bez aktivního účtu (krok 3, bod 1). */}
+        {!pobocka ? <PobockyBezUctu vysledek={bezUctuVysledek} smiPrirazovat={smiSpravovatUcty} /> : null}
+
         {bezUctu ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-            {pobocka ? BEZ_UCTU_POBOCKY : `${nazevPohledu}: ${BEZ_UCTU_POBOCKY}`}
+            {pobocka ? hlaskaBezUctuPobocky(smiSpravovatUcty) : `${nazevPohledu}: ${hlaskaBezUctuPobocky(smiSpravovatUcty)}`}
+          </p>
+        ) : null}
+
+        {chybaPrehledu ? (
+          <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>
+            Plán a skutečnost se nepodařilo načíst — čísla níž nejsou nula, ale neznámá. Zkuste stránku obnovit.
           </p>
         ) : null}
 
@@ -208,6 +234,8 @@ export default async function FinanceRozpocty({
             <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>Tržby (skutečnost)</div>
             {skrytSkutecnost ? (
               <div style={vetaVKarte}>bez platebního účtu pobočky</div>
+            ) : chybaPrehledu ? (
+              <strong style={{ fontSize: '18px' }}>–</strong>
             ) : (
               <strong style={{ fontFamily: 'ui-monospace, monospace', fontSize: '18px' }}>{koruny(trzby)}</strong>
             )}
@@ -216,6 +244,8 @@ export default async function FinanceRozpocty({
             <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>Suroviny (odhad spotřeby z plateb)</div>
             {skrytSkutecnost ? (
               <div style={vetaVKarte}>bez platebního účtu pobočky</div>
+            ) : chybaPrehledu ? (
+              <strong style={{ fontSize: '18px' }}>–</strong>
             ) : (
               <strong style={{ fontFamily: 'ui-monospace, monospace', fontSize: '18px' }}>{koruny(suroviny)}</strong>
             )}
@@ -226,6 +256,10 @@ export default async function FinanceRozpocty({
               // Mzdy se počítají po pobočkách (domovská pobočka zaměstnance);
               // firemní rozpočty nemají čí docházku sečíst — „0 Kč" by lhalo.
               <div style={vetaVKarte}>počítají se po pobočkách</div>
+            ) : !smiVidetMzdy ? (
+              <div style={vetaVKarte}>vidí jen ten, kdo má právo vidět mzdy</div>
+            ) : chybaMezd || mzdyHaleru === null ? (
+              <div style={vetaVKarte}>mzdy se nepodařilo načíst</div>
             ) : (
               <strong style={{ fontFamily: 'ui-monospace, monospace', fontSize: '18px' }}>{koruny(mzdyHaleru)}</strong>
             )}
@@ -236,6 +270,10 @@ export default async function FinanceRozpocty({
               <div style={vetaVKarte}>počítá se po pobočkách</div>
             ) : skrytSkutecnost ? (
               <div style={vetaVKarte}>bez tržeb pobočky ho nejde spočítat</div>
+            ) : !smiVidetMzdy ? (
+              <div style={vetaVKarte}>bez práva vidět mzdy ho nejde spočítat</div>
+            ) : chybaPrehledu || chybaMezd ? (
+              <div style={vetaVKarte}>čísla se nepodařilo načíst</div>
             ) : (
               <strong style={{ fontFamily: 'ui-monospace, monospace', fontSize: '18px' }}>
                 {primeCostProcento !== null ? `${primeCostProcento} %` : 'chybí tržby'}
@@ -244,9 +282,19 @@ export default async function FinanceRozpocty({
           </div>
         </section>
 
+        {/* „chybí tržby" musí říct, ODKUD se tržby berou (krok 3, bod 6) — viz ROZHODNOUT u `trzby`. */}
+        {!firemni && !skrytSkutecnost && smiVidetMzdy && !chybaPrehledu && !chybaMezd && primeCostProcento === null ? (
+          <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
+            Tržby se v Rozpočtech berou jen z plateb zařazených do kategorie Tržby. Tržby z pokladny (ty, které ukazuje
+            Přehled) Rozpočty zatím nepoužívají — dokud žádná platba v kategorii Tržby není, prime cost nejde spočítat.
+          </p>
+        ) : null}
+
         <section style={{ display: 'grid', gap: '10px' }}>
           <h2 style={{ margin: 0, fontSize: '15px' }}>Plán vs. skutečnost{pobocka ? '' : ` — ${nazevPohledu}`}</h2>
-          {prehled.length === 0 ? (
+          {chybaPrehledu ? (
+            <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Plán a skutečnost se nepodařilo načíst.</p>
+          ) : prehled.length === 0 ? (
             <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Žádná data za zvolené období.</p>
           ) : (
             <div style={{ ...karta, overflowX: 'auto' }}>
