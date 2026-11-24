@@ -9,13 +9,16 @@ import { hlaskaBrany } from '@/lib/faktury-brana'
 import { naFaktury, odkazNaPrilohu, SLOUPCE_FAKTURY, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
-import { STAV_ODMITNUTO, STAV_UHRAZENO } from '@/lib/faktury-types'
-import { smiOznacitUhrazenou } from '@/lib/finance-parovani'
+import { STAV_CASTECNE, STAV_ODMITNUTO, STAV_UHRAZENO } from '@/lib/faktury-types'
+import { menaNeboCzk, smiOznacitUhrazenou, STAVY_PRO_RUCNI_UHRAZENI, zbyvaZaplatit } from '@/lib/finance-parovani'
 import { pouzitFiltry, type FakturyFiltry } from '@/lib/faktury-filtry'
 import Sdeleni from '@/app/sdeleni'
 import Ikona from '../../../ikona'
 import Nadpis from '../../../nadpis'
-import { archivovatFakturu, obnovitFakturu, odmitnoutAZapamatovat, oznacitUhrazenou, smazatFakturu, vratitNeuhrazenou } from '../akce'
+import {
+  archivovatFakturu, obnovitFakturu, odmitnoutAZapamatovat, oznacitUhrazenou, smazatFakturu, vratitNeuhrazenou,
+  zapocitatDobropis, zrusitRucniUhradu,
+} from '../akce'
 import StavZnacka from '../stav-znacka'
 
 export const dynamic = 'force-dynamic'
@@ -48,6 +51,26 @@ const pole = {
   fontSize: '13.5px',
   minHeight: '44px',
 } as const
+
+type RucniUhrada = { id: string; faktura: string; castka_haleru: number; duvod: string; zapocet_id: string | null; transakce_id: string | null }
+type FakturaKZapocteni = { id: string; dodavatel: string | null; cislo_faktury: string | null; castka_haleru: number; mena: string | null }
+
+const polickoNabidky = {
+  padding: '6px 8px',
+  border: '1px solid var(--line-2)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--paper)',
+  color: 'inherit',
+  font: 'inherit',
+  minHeight: '36px',
+} as const
+
+const tlacitkoNabidky = { border: 0, background: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' } as const
+
+/** Haléře do políčka formuláře: „1234,50". */
+function doPole(haleru: number): string {
+  return (haleru / 100).toFixed(2).replace('.', ',')
+}
 
 function pluralFaktur(n: number): string {
   if (n === 1) return 'faktura'
@@ -120,6 +143,51 @@ export default async function FakturySeznam({
   const celkem = count ?? 0
   const celkemStran = Math.max(1, Math.ceil(celkem / NA_STRANU))
   const aktualniStrana = Math.min(pozadovanaStrana, celkemStran)
+
+  // Ruční úhrady, zbytek k zaplacení a faktury k započtení dobropisu —
+  // jen pro řádky téhle stránky a jen pro správce (formuláře v nabídce
+  // řádku). Párování čte jen ten, kdo vidí platbu (pravidla Plateb):
+  // bez práva na Finance může zbytek vyjít vyšší — databáze víc než
+  // zbytek stejně nepustí a řekne, kolik zbývá (rucne_uhradit_fakturu).
+  const uhrazeno = new Map<string, number>()
+  const aktivniUhrady = new Map<string, RucniUhrada[]>()
+  const kZapocteni = new Map<string, FakturaKZapocteni[]>()
+  if (smiSpravovat && radky.length > 0) {
+    const idRadku = radky.map((f) => f.id)
+    const [parovaniRes, uhradyRes] = await Promise.all([
+      pristupFaktury.supabase.from('platby_faktury').select('faktura, castka_haleru')
+        .eq('tenant_id', tenantId).eq('stav', 'potvrzeno').in('faktura', idRadku),
+      pristupFaktury.supabase.from('faktury_rucni_uhrady').select('id, faktura, castka_haleru, duvod, zapocet_id, transakce_id')
+        .eq('tenant_id', tenantId).is('zruseno_kdy', null).in('faktura', idRadku).order('zapsano_kdy', { ascending: true }),
+    ])
+    for (const a of (parovaniRes.data ?? []) as { faktura: string; castka_haleru: number }[]) {
+      uhrazeno.set(a.faktura, (uhrazeno.get(a.faktura) ?? 0) + a.castka_haleru)
+    }
+    for (const u of (uhradyRes.data ?? []) as RucniUhrada[]) {
+      uhrazeno.set(u.faktura, (uhrazeno.get(u.faktura) ?? 0) + u.castka_haleru)
+      aktivniUhrady.set(u.faktura, [...(aktivniUhrady.get(u.faktura) ?? []), u])
+    }
+
+    // Dobropis → otevřené kladné faktury téhož dodavatele (stejné IČO nebo
+    // stejné jméno) ve stejné měně. Jen nabídka: dodavatele, měnu i zbytky
+    // ověří databáze znovu (zapocitat_dobropis).
+    for (const d of radky.filter((f) => f.castka_haleru < 0 && smiOznacitUhrazenou(f.status) && !f.is_archived && !f.is_duplicate)) {
+      const ico = (d.supplier_ico ?? '').trim()
+      const jmeno = (d.supplier ?? '').trim()
+      const zaklad = () => fakturyFirmy(pristupFaktury, 'id, dodavatel, cislo_faktury, castka_haleru, mena')
+        .gt('castka_haleru', 0).in('stav', [...STAVY_PRO_RUCNI_UHRAZENI]).eq('archivovano', false).eq('duplicita', false)
+        .neq('id', d.id).order('splatnost', { ascending: true, nullsFirst: false }).limit(30)
+      const [podleIco, podleJmena] = await Promise.all([
+        ico ? zaklad().eq('dodavatel_ico', ico) : Promise.resolve({ data: [] }),
+        jmeno ? zaklad().ilike('dodavatel', jmeno.replace(/[%_\\]/g, (z) => `\\${z}`)) : Promise.resolve({ data: [] }),
+      ])
+      const nalezene = new Map<string, FakturaKZapocteni>()
+      for (const k of [...(podleIco.data ?? []), ...(podleJmena.data ?? [])] as unknown as FakturaKZapocteni[]) {
+        if (menaNeboCzk(k.mena) === menaNeboCzk(d.currency)) nalezene.set(k.id, k)
+      }
+      if (nalezene.size > 0) kZapocteni.set(d.id, [...nalezene.values()])
+    }
+  }
 
   // Měsíce DUZP pro chipy — nezávisle na ostatních filtrech, čte se jen sloupec duzp.
   const mesicniDotaz = fakturyFirmy(pristupFaktury, 'duzp').eq('archivovano', filtry.archiv)
@@ -275,16 +343,18 @@ export default async function FakturySeznam({
                             <Ikona klic="tecky" />
                           </summary>
                           <div className="ft-kebab-panel">
-                            {f.status === STAV_UHRAZENO ? (
+                            {f.status === STAV_UHRAZENO || f.status === STAV_CASTECNE ? (
                               <form action={vratitNeuhrazenou}>
                                 <input type="hidden" name="rozsah" value={rozsah} />
                                 <input type="hidden" name="id" value={f.id} />
-                                <button type="submit" className="ft-kebab-polozka" style={{ border: 0, background: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+                                <button type="submit" className="ft-kebab-polozka" style={tlacitkoNabidky}>
                                   Vrátit mezi neuhrazené
                                 </button>
                               </form>
-                            ) : smiOznacitUhrazenou(f.status) ? (
-                              // Ruční úhrada: částka v měně faktury a důvod (zůstane i s autorem).
+                            ) : null}
+                            {smiOznacitUhrazenou(f.status) && zbyvaZaplatit(f.castka_haleru, uhrazeno.get(f.id) ?? 0) > 0 ? (
+                              // Ruční úhrada: částka v měně faktury (předvyplněný zbytek,
+                              // u dobropisu kladně) a důvod (zůstane i s autorem).
                               <form action={oznacitUhrazenou} style={{ display: 'grid', gap: '6px', padding: '6px 10px' }}>
                                 <input type="hidden" name="rozsah" value={rozsah} />
                                 <input type="hidden" name="id" value={f.id} />
@@ -293,9 +363,9 @@ export default async function FakturySeznam({
                                   name="castka"
                                   required
                                   inputMode="decimal"
-                                  defaultValue={(f.castka_haleru / 100).toFixed(2).replace('.', ',')}
+                                  defaultValue={doPole(zbyvaZaplatit(f.castka_haleru, uhrazeno.get(f.id) ?? 0))}
                                   aria-label={`Uhrazená částka (${f.currency || 'CZK'})`}
-                                  style={{ padding: '6px 8px', border: '1px solid var(--line-2)', borderRadius: 'var(--radius-sm)', background: 'var(--paper)', color: 'inherit', font: 'inherit', minHeight: '36px' }}
+                                  style={polickoNabidky}
                                 />
                                 <input
                                   type="text"
@@ -305,13 +375,72 @@ export default async function FakturySeznam({
                                   maxLength={300}
                                   placeholder="Proč zaplaceno mimo výpis"
                                   aria-label="Důvod ruční úhrady"
-                                  style={{ padding: '6px 8px', border: '1px solid var(--line-2)', borderRadius: 'var(--radius-sm)', background: 'var(--paper)', color: 'inherit', font: 'inherit', minHeight: '36px' }}
+                                  style={polickoNabidky}
                                 />
-                                <button type="submit" className="ft-kebab-polozka" style={{ border: 0, background: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
-                                  Označit jako uhrazenou
+                                <button type="submit" className="ft-kebab-polozka" style={tlacitkoNabidky}>
+                                  {f.castka_haleru < 0 ? 'Označit dobropis jako vyrovnaný' : 'Označit jako uhrazenou'}
                                 </button>
                               </form>
                             ) : null}
+                            {(kZapocteni.get(f.id) ?? []).length > 0 ? (
+                              // Dobropis proti otevřené faktuře téhož dodavatele.
+                              <form action={zapocitatDobropis} style={{ display: 'grid', gap: '6px', padding: '6px 10px' }}>
+                                <input type="hidden" name="rozsah" value={rozsah} />
+                                <input type="hidden" name="id" value={f.id} />
+                                <select name="faktura" required aria-label="Faktura, proti které se dobropis započte" style={polickoNabidky}>
+                                  {(kZapocteni.get(f.id) ?? []).map((k) => (
+                                    <option key={k.id} value={k.id}>
+                                      {`${k.cislo_faktury || 'bez čísla'} · ${formatCastku(k.castka_haleru / 100, k.mena || 'CZK')}`}
+                                    </option>
+                                  ))}
+                                </select>
+                                <input
+                                  type="text"
+                                  name="castka"
+                                  required
+                                  inputMode="decimal"
+                                  defaultValue={doPole(zbyvaZaplatit(f.castka_haleru, uhrazeno.get(f.id) ?? 0))}
+                                  aria-label={`Započítaná částka (${f.currency || 'CZK'})`}
+                                  style={polickoNabidky}
+                                />
+                                <input
+                                  type="text"
+                                  name="duvod"
+                                  required
+                                  minLength={5}
+                                  maxLength={300}
+                                  placeholder="Důvod započtení"
+                                  aria-label="Důvod započtení dobropisu"
+                                  style={polickoNabidky}
+                                />
+                                <button type="submit" className="ft-kebab-polozka" style={tlacitkoNabidky}>
+                                  Započíst proti faktuře
+                                </button>
+                              </form>
+                            ) : null}
+                            {(aktivniUhrady.get(f.id) ?? []).map((u) => (
+                              // Zrušení jedné ruční úhrady (započtení zruší databáze celé, oba doklady).
+                              <form key={u.id} action={zrusitRucniUhradu} style={{ display: 'grid', gap: '6px', padding: '6px 10px', borderTop: '1px solid var(--line)' }}>
+                                <input type="hidden" name="rozsah" value={rozsah} />
+                                <input type="hidden" name="uhrada_id" value={u.id} />
+                                <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+                                  {u.zapocet_id ? 'Započtení dobropisu' : 'Ruční úhrada'} {formatCastku(u.castka_haleru / 100, f.currency)} — {u.duvod}
+                                </span>
+                                <input
+                                  type="text"
+                                  name="duvod"
+                                  required
+                                  minLength={5}
+                                  maxLength={300}
+                                  placeholder="Proč rušíte"
+                                  aria-label="Důvod zrušení ruční úhrady"
+                                  style={polickoNabidky}
+                                />
+                                <button type="submit" className="ft-kebab-polozka" style={tlacitkoNabidky}>
+                                  {u.zapocet_id ? 'Zrušit započtení' : 'Zrušit ruční úhradu'}
+                                </button>
+                              </form>
+                            ))}
                             <form action={f.is_archived ? obnovitFakturu : archivovatFakturu}>
                               <input type="hidden" name="rozsah" value={rozsah} />
                               <input type="hidden" name="id" value={f.id} />

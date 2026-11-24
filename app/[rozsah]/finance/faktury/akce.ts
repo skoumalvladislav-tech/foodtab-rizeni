@@ -58,8 +58,15 @@ function nepovinnePole(formData: FormData, nazev: string): string | null {
   return hodnota ? hodnota : null
 }
 
-/** Faktura má párování plateb (i zrušené) — databáze ji smazat nedovolí (cizí klíč). */
-const MA_PAROVANI = 'Faktura má v Platbách párování s platbou (i zrušené), proto ji nejde smazat — historie plateb musí zůstat dohledatelná. Archivujte ji.'
+/**
+ * Faktura má párování s platbou nebo ruční úhradu (i zrušené) — databáze
+ * ji smazat nedovolí (cizí klíč). Automatický návrh, který nikdo
+ * nepotvrdil, smazání nebrání: smaže ho spolu s fakturou databáze
+ * (spoušť trg_faktury_smazat_navrhy, Finance Fáze 0, krok 2).
+ */
+const MA_PAROVANI = 'Faktura má v Platbách párování s platbou nebo ruční úhradu (i zrušené), proto ji nejde smazat — historie plateb musí zůstat dohledatelná. Archivujte ji.'
+
+const VZOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Ruční zadání faktury (papírový doklad, platba na místě) — viz `faktury/nova`. */
 export async function zalozitFakturu(formData: FormData): Promise<void> {
@@ -226,6 +233,60 @@ export async function vratitNeuhrazenou(formData: FormData): Promise<void> {
       ? `/${rozsah}/finance/platby?faktura=${encodeURIComponent(id)}&chyba=${encodeURIComponent(zprava)}`
       : `/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent(zprava)}`)
   }
+  redirect(`/${rozsah}/finance/faktury/seznam`)
+}
+
+/**
+ * Zrušit jednu ruční úhradu (i započtení dobropisu — databáze zruší oba
+ * jeho řádky) s důvodem. Stav faktury přepočítá databáze ze všeho, co
+ * zbyde (`zrusit_rucni_uhradu`: správce Faktur za celou firmu, důvod
+ * aspoň 5 znaků, úhrada jen téhle firmy). Z formuláře jen id úhrady
+ * a důvod.
+ */
+export async function zrusitRucniUhradu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const uhradaId = String(formData.get('uhrada_id') ?? '')
+  const p = await pripravit(TENANT_SCOPE_SEGMENT, 'faktury.manage')
+  const chyba = (text: string): never => redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent(text)}`)
+
+  const duvod = String(formData.get('duvod') ?? '').trim().slice(0, 300)
+  if (!VZOR_UUID.test(uhradaId)) chyba('Ruční úhrada se nenašla.')
+  if (duvod.length < 5) chyba('Napište, proč ruční úhradu rušíte (aspoň 5 znaků).')
+
+  const { error } = await p.supabase.rpc('zrusit_rucni_uhradu', {
+    p_tenant: p.tenantId, p_uhrada: uhradaId, p_duvod: duvod,
+  })
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  if (error) chyba(hlaskaProLidi(error, 'Ruční úhradu se nepodařilo zrušit — zkuste to znovu.'))
+  redirect(`/${rozsah}/finance/faktury/seznam`)
+}
+
+/**
+ * Započíst dobropis proti otevřené faktuře téhož dodavatele (stejné IČO,
+ * nebo stejné jméno, když IČO chybí). Databáze (`zapocitat_dobropis`)
+ * ověří znovu všechno: že jde o dobropis a kladnou fakturu, stejnou měnu,
+ * stejného dodavatele (IČO vlastní firmy ani sporné IČO nepustí), že
+ * částka nepřesáhne zbytek dobropisu ani faktury — a zapíše dvě ruční
+ * úhrady s jedním označením započtení (zrušit jde jen obě najednou).
+ */
+export async function zapocitatDobropis(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const dobropisId = String(formData.get('id') ?? '')
+  const fakturaId = String(formData.get('faktura') ?? '')
+  const p = await pripravit(TENANT_SCOPE_SEGMENT, 'faktury.manage')
+  const chyba = (text: string): never => redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent(text)}`)
+
+  const castkaHaleru = halereZFormulare(String(formData.get('castka') ?? ''))
+  const duvod = String(formData.get('duvod') ?? '').trim().slice(0, 300)
+  if (!VZOR_UUID.test(dobropisId) || !VZOR_UUID.test(fakturaId)) chyba('Vyberte fakturu, proti které se dobropis započte.')
+  if (castkaHaleru === null || castkaHaleru <= 0) chyba('Vyplňte částku započtení (kladnou, nejvýš dvě desetinná místa).')
+  if (duvod.length < 5) chyba('Napište důvod započtení (aspoň 5 znaků) — např. „dobropis za vrácené zboží".')
+
+  const { error } = await p.supabase.rpc('zapocitat_dobropis', {
+    p_tenant: p.tenantId, p_dobropis: dobropisId, p_faktura: fakturaId, p_castka_haleru: castkaHaleru, p_duvod: duvod,
+  })
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  if (error) chyba(hlaskaProLidi(error, 'Dobropis se nepodařilo započíst — zkuste to znovu.'))
   redirect(`/${rozsah}/finance/faktury/seznam`)
 }
 

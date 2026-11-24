@@ -16,7 +16,7 @@ const {
   vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, protistranaSedi, normalizovatVs, jeVracena, jeVKorunach,
   menaNeboCzk, autoTransakceZRadku, platbaZBanky, navrhyParovani, DUVODY_NAVRHU, OKNO_NAVRHU_PRED_VYSTAVENIM,
   OKNO_NAVRHU_PO_SPLATNOSTI, NEJVIC_NAVRHU_NA_POHYB, SLOUPCE_AUTOMATICKEHO_PAROVANI, SLOUPCE_POTVRZENEHO_PAROVANI,
-  SLOUPCE_PRIJMU_PRO_VRACENI, SLOUPCE_NAVRHU_POZORNOSTI, sloupceSeznamuPlateb,
+  SLOUPCE_PRIJMU_PRO_VRACENI, SLOUPCE_NAVRHU_POZORNOSTI, sloupceSeznamuPlateb, zbyvaZaplatit, navrhPlati,
 } = await import('../lib/finance-parovani.ts')
 const { ibanZUctu } = await import('../lib/banka/ucet.ts')
 const { readFileSync } = await import('node:fs')
@@ -300,8 +300,9 @@ console.log('\n== Dorovnání stavu (jen kandidáti — stav zapíše databáze)
     { id: 'upominka', castkaHaleru: 1000, stav: 'Upomínka - zkontrolovat' },
     { id: 'preplacena', castkaHaleru: 1000, stav: 'Částečně uhrazeno' },
     { id: 'eur', castkaHaleru: 1000, stav: 'Ke kontrole úhrady', mena: 'EUR' },
+    { id: 'eur_cast', castkaHaleru: 1000, stav: 'Neuhrazeno', mena: 'eur' },
   ]
-  const alokace = new Map([['cela', 1000], ['cast', 400], ['uz', 1000], ['odmitnuta', 1000], ['neschvalena', 1000], ['upominka', 1000], ['preplacena', 1200], ['eur', 1000]])
+  const alokace = new Map([['cela', 1000], ['cast', 400], ['uz', 1000], ['odmitnuta', 1000], ['neschvalena', 1000], ['upominka', 1000], ['preplacena', 1200], ['eur', 1000], ['eur_cast', 300]])
   const zmeny = dorovnatStavy(faktury, alokace)
   const z = Object.fromEntries(zmeny.map((x) => [x.fakturaId, x.stav]))
   ok('celá částka spárovaná → Uhrazeno', z.cela === 'Uhrazeno')
@@ -309,7 +310,10 @@ console.log('\n== Dorovnání stavu (jen kandidáti — stav zapíše databáze)
   ok('přeplacená → Uhrazeno', z.preplacena === 'Uhrazeno')
   ok('už uhrazená, bez párování, odmítnutá, neschválená → beze změny', !('uz' in z) && !('nic' in z) && !('odmitnuta' in z) && !('neschvalena' in z))
   ok('upomínka se nedorovnává (jako app.faktura_stav_podle_plateb)', !('upominka' in z))
-  ok('faktura v cizí měně se tu nedorovnává (párování je v haléřích)', !('eur' in z))
+  // Párování je vždy v měně faktury (jinou měnu databáze spárovat nepustí) —
+  // dorovnání v EUR počítá ve stejných jednotkách jako prepocitat_stav_faktury.
+  ok(`faktura v EUR se dorovná v měně faktury (celá → Uhrazeno, část → Částečně) — naměřeno: ${z.eur} / ${z.eur_cast}`,
+    z.eur === 'Uhrazeno' && z.eur_cast === 'Částečně uhrazeno')
   ok('změna nese původní stav', zmeny.find((x) => x.fakturaId === 'cela')?.puvodni === 'Ke kontrole úhrady')
 }
 
@@ -318,6 +322,26 @@ console.log('\n== Ruční „Uhrazeno": kdy appka tlačítko nabídne ==')
   for (const stav of ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno']) ok(`ze stavu „${stav}" ručně Uhrazeno smí`, smiOznacitUhrazenou(stav))
   for (const stav of ['Ke schválení', 'Upomínka - zkontrolovat', 'Nutná ruční kontrola (x)', 'Odmítnuto', 'Uhrazeno', null]) ok(`ze stavu „${stav}" ručně Uhrazeno NEsmí`, !smiOznacitUhrazenou(stav))
   ok('menaNeboCzk / jeVKorunach: prázdná = CZK pro součty a návrhy', menaNeboCzk(null) === 'CZK' && menaNeboCzk(' eur ') === 'EUR' && jeVKorunach('') && !jeVKorunach('EUR'))
+
+  // Předvyplněná částka ruční úhrady = zbytek (ne celá částka), u dobropisu kladně.
+  ok(`zbývá zaplatit: částečně uhrazená 1000 − 400 → 600 — naměřeno: ${zbyvaZaplatit(1000, 400)}`, zbyvaZaplatit(1000, 400) === 600)
+  ok(`zbývá zaplatit: dobropis −500 → kladně 500 — naměřeno: ${zbyvaZaplatit(-500, 0)}`, zbyvaZaplatit(-500, 0) === 500)
+  ok(`zbývá zaplatit: přeplacená nikdy záporně — naměřeno: ${zbyvaZaplatit(1000, 1200)}`, zbyvaZaplatit(1000, 1200) === 0)
+}
+
+console.log('\n== Fronta návrhů: návrh, který přestal platit, se neukazuje (navrhPlati) ==')
+{
+  const f = (jine = {}) => ({ stav: 'Ke kontrole úhrady', archivovano: false, duplicita: false, ...jine })
+  const t = (jine = {}) => ({ castkaHaleru: 1000, pouzitoHaleru: 0, rucneUhrazen: false, ...jine })
+  ok('otevřená faktura, volná platba → platí', navrhPlati(f(), t()))
+  ok('faktura zaplacená jinak (Uhrazeno) → neplatí', !navrhPlati(f({ stav: 'Uhrazeno' }), t()))
+  ok('faktura odmítnutá → neplatí', !navrhPlati(f({ stav: 'Odmítnuto' }), t()))
+  ok('faktura archivovaná → neplatí', !navrhPlati(f({ archivovano: true }), t()))
+  ok('faktura označená jako duplicita → neplatí', !navrhPlati(f({ duplicita: true }), t()))
+  ok('platbu celou pokrylo jiné párování → neplatí', !navrhPlati(f(), t({ pouzitoHaleru: 1000 })))
+  ok('platba z části pokrytá → pořád platí', navrhPlati(f({ stav: 'Částečně uhrazeno' }), t({ pouzitoHaleru: 400 })))
+  ok('platba zapsaná u ruční úhrady → neplatí', !navrhPlati(f(), t({ rucneUhrazen: true })))
+  ok('faktura nebo platba se nenačetla → neplatí', !navrhPlati(undefined, t()) && !navrhPlati(f(), undefined))
 }
 
 /* --- Návrhy párování -------------------------------------------------------- */
@@ -409,6 +433,11 @@ console.log('\n== Návrhy párování (navrhyParovani) ==')
   ok('jiná měna, stejný VS, jiný dodavatel → nic', jeden([p('t', 10000, { vs: '31', protistrana: 'Kovošrot' })], [fa('f', 10000, { vs: '31', mena: 'EUR' })]).length === 0)
   ok('prázdná měna = CZK pro návrh (ne „jiná měna")', jeden([p('t', 1000, { vs: '1', mena: '' })], [fa('f', 1000, { vs: '1', mena: null })]).map((x) => x.duvod).join() === 'vs+castka')
   ok('EUR platba na EUR fakturu → normální stupeň', jeden([p('t', 1000, { vs: '1', mena: 'EUR' })], [fa('f', 1000, { vs: '1', mena: 'eur' })]).map((x) => x.duvod).join() === 'vs+castka')
+  // Dobropis v jiné měně se nenavrhuje (potvrdit by šlo jen ruční úhradou
+  // s ODCHOZÍ platbou k faktuře) — stejně jako zapsat_navrhy_parovani, otázka 142.
+  ok('dobropis v EUR, vratka v Kč se stejným VS a dodavatelem → nic (otázka 142)',
+    jeden([p('t', 250000, { vs: '31', smer: 'prijem' })], [fa('d', -10000, { vs: '31', mena: 'EUR' })]).length === 0
+      && jeden([p('t', 250000, { vs: '31' })], [fa('d', -10000, { vs: '31', mena: 'EUR' })]).length === 0)
 
   // Důvody: stejné kódy jako databáze (CHECK platby_faktury_duvod_kod a zapsat_navrhy_parovani)
   const migrace = cist('supabase/migrations/20261120100000_parovani_pravidla.sql')
@@ -446,10 +475,33 @@ console.log('\n== Stav faktury, jisté shody a návrhy jdou přes databázi ==')
   ok('hledání návrhů: vynechá dvojice z platby_faktury, ruční úhrady a Jiné platby',
     /navrhyParovani\(pohyby, faktury, \{ vyloucene \}\)/.test(navrhy) && /from\('faktury_rucni_uhrady'\)/.test(navrhy) && /from\('jine_platby'\)/.test(navrhy))
   ok('hledání návrhů: do Faktur přes bránu úlohy', /pristupKFakturamUlohy\(tenantId\)/.test(navrhy) && /fakturyFirmy\(pristup,/.test(navrhy))
+  ok('hledání návrhů: všechny pohyby (bez okna dní) po stránkách od nejnovějších, ne „přeskočit celý běh"',
+    !/DNI_ZPET|gte\('datum'/.test(navrhy)
+      && /\.or\(`datum\.lt\.\$\{kurzor\.datum\},and\(datum\.eq\.\$\{kurzor\.datum\},id\.lt\.\$\{kurzor\.id\}\)`\)/.test(navrhy)
+      && /\.order\('datum', \{ ascending: false \}\)\.order\('id', \{ ascending: false \}\)/.test(navrhy))
+  ok('hledání návrhů: souvislosti (párování, ruční úhrady, Jiné platby, storna) jen ke stránce pohybů',
+    /from\('platby_faktury'\)[^;]*\.in\('transakce_id', kus\)/.test(navrhy)
+      && /from\('faktury_rucni_uhrady'\)\.select\('transakce_id'\)[^;]*\.in\('transakce_id', kus\)/.test(navrhy)
+      && /from\('jine_platby'\)[^;]*\.in\('uhrada_transakce_id', kus\)/.test(navrhy))
+  ok('hledání návrhů: když dojde čas, vrátí nedokončeno (ne tiché „hotovo")',
+    /if \(Date\.now\(\) >= konecMs\) return \{ stav: 'ok', navrzeno, nedokonceno: true, duvod: null \}/.test(navrhy))
+  ok('hledání návrhů: kurzor do filtru jen ve tvaru data a uuid',
+    /if \(!DATUM\.test\(posledni\.datum\) \|\| !UUID\.test\(posledni\.id\)\) throw/.test(navrhy))
 
   const fakturyAkce = bezKomentaru(cist('app/[rozsah]/finance/faktury/akce.ts'))
   ok('Faktury: ručně „Uhrazeno" = rpc rucne_uhradit_fakturu s částkou a důvodem',
     /rpc\('rucne_uhradit_fakturu', \{[^}]*p_castka_haleru: castkaHaleru, p_duvod: duvod/.test(fakturyAkce))
+  ok('Faktury: zrušení ruční úhrady = rpc zrusit_rucni_uhradu s id úhrady a důvodem, za celou firmu',
+    /export async function zrusitRucniUhradu[\s\S]*?pripravit\(TENANT_SCOPE_SEGMENT, 'faktury\.manage'\)[\s\S]*?if \(duvod\.length < 5\) chyba\([\s\S]*?rpc\('zrusit_rucni_uhradu', \{\s*p_tenant: p\.tenantId, p_uhrada: uhradaId, p_duvod: duvod,/.test(fakturyAkce))
+  ok('Faktury: započtení dobropisu = rpc zapocitat_dobropis s částkou a důvodem, za celou firmu',
+    /export async function zapocitatDobropis[\s\S]*?pripravit\(TENANT_SCOPE_SEGMENT, 'faktury\.manage'\)[\s\S]*?rpc\('zapocitat_dobropis', \{\s*p_tenant: p\.tenantId, p_dobropis: dobropisId, p_faktura: fakturaId, p_castka_haleru: castkaHaleru, p_duvod: duvod,/.test(fakturyAkce))
+  {
+    const seznam = cist('app/[rozsah]/finance/faktury/seznam/page.tsx')
+    ok('Faktury → seznam: ruční úhrada předvyplní zbytek (zbyvaZaplatit), ne celou částku',
+      /defaultValue=\{doPole\(zbyvaZaplatit\(f\.castka_haleru, uhrazeno\.get\(f\.id\) \?\? 0\)\)\}/.test(seznam) && !/f\.castka_haleru \/ 100\)\.toFixed/.test(seznam))
+    ok('Faktury → seznam: zrušení ruční úhrady a započtení dobropisu jsou v nabídce řádku',
+      /<form key=\{u\.id\} action=\{zrusitRucniUhradu\}/.test(seznam) && /<form action=\{zapocitatDobropis\}/.test(seznam))
+  }
   ok('Faktury: „Vrátit mezi neuhrazené" = rpc vratit_fakturu_mezi_neuhrazene, bez služby',
     /rpc\('vratit_fakturu_mezi_neuhrazene'/.test(fakturyAkce) && !/klientUlohy/.test(fakturyAkce))
   ok('Faktury: nikde přímý zápis stavu „Uhrazeno"', !/update\(\{\s*stav:\s*STAV_UHRAZENO/.test(fakturyAkce) && !/update\(\{\s*stav:\s*'Uhrazeno'/.test(fakturyAkce))
@@ -477,6 +529,17 @@ console.log('\n== Stav faktury, jisté shody a návrhy jdou přes databázi ==')
   ok('Platby: potvrzení a odmítnutí návrhu jen podle id návrhu',
     /rpc\('potvrdit_navrh_parovani', \{ p_tenant: tenantId, p_navrh: navrhId \}\)/.test(platbyAkce)
       && /rpc\('odmitnout_navrh_parovani', \{ p_tenant: tenantId, p_navrh: navrhId \}\)/.test(platbyAkce))
+  {
+    // „Najít návrhy" spouští hledání službou — až když databáze pod
+    // přihlášeným řekne, že smí potvrzovat párování.
+    const zacatek = platbyAkce.indexOf('export async function najitNavrhyTed(')
+    const telo = zacatek < 0 ? '' : platbyAkce.slice(zacatek, platbyAkce.indexOf('\nexport ', zacatek + 10) >>> 0)
+    const smi = telo.indexOf("supabase.rpc('smi_potvrdit_parovani', { p_tenant: tenantId })")
+    const odmitnuti = telo.indexOf('if (error || smi !== true) {\n    redirect(')
+    const hledani = telo.indexOf('najitNavrhyParovani(tenantId')
+    ok('Platby: „Najít návrhy" — firemní finance.manage, pak smi_potvrdit_parovani pod přihlášeným, odmítnutí, a teprve pak hledání',
+      /pripravitFiremni\(rozsah, 'finance\.manage', PAROVANI_JEN_FIRMA\)/.test(telo) && smi > 0 && odmitnuti > smi && hledani > odmitnuti)
+  }
   ok('Platby: návrh v jiné měně → ruční úhrada s platbou a fakturou Z NÁVRHU',
     /p_faktura: n\.faktura, p_castka_haleru: castkaHaleru, p_duvod: duvod, p_transakce: n\.transakce_id/.test(platbyAkce))
 
