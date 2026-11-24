@@ -41,7 +41,12 @@ export function platbyBezFaktury(
     jinePlatbyNaPohyb: ReadonlyMap<string, number>
     /** Pohyby s nezrušenou ruční úhradou (platba v jiné měně). */
     rucneUhrazene: ReadonlySet<string>
-    /** Pohyby s otevřeným návrhem párování. */
+    /**
+     * Pohyby s otevřeným návrhem párování k faktuře, kterou jde pořád
+     * zaplatit (počítá databáze: platby_bez_faktury_vyrizeni). Návrh
+     * k faktuře zaplacené jinak, odmítnuté nebo archivované pohyb
+     * z fronty neschová.
+     */
     sNavrhem: ReadonlySet<string>
   },
 ): PlatbaBezFaktury[] {
@@ -54,6 +59,28 @@ export function platbyBezFaktury(
     vysledek.push({ ...p, zbyvaHaleru: zbyva })
   }
   return vysledek.sort((a, b) => (a.datum < b.datum ? 1 : a.datum > b.datum ? -1 : a.id.localeCompare(b.id)))
+}
+
+export type UcetFronty = { id: string; nazev: string; branchId: string | null }
+
+/**
+ * Které účty fronta ukáže (Finance po pobočkách, zadání kroku 2 bod 8).
+ *   * Celá firma: všechny účty, které přihlášený vidí (`filtr` null =
+ *     bez omezení), nebo jeden vybraný.
+ *   * Pobočka: jen účty TÉ pobočky (firemní účty bez pobočky ne — stejně
+ *     jako Platby na pobočce), vybraný jen z nich; pobočka bez účtu =
+ *     prázdný filtr (nic se nenačte).
+ * Účet z adresy, který do nabídky nepatří (cizí, jiné pobočky, překlep),
+ * se nevybere — ukáže se všechno dovolené, nikdy víc.
+ */
+export function filtrUctuFronty(
+  ucty: readonly UcetFronty[],
+  pobocka: string | null,
+  vybrany: string | null | undefined,
+): { nabidka: UcetFronty[]; vybrany: string | null; filtr: string[] | null } {
+  const nabidka = pobocka ? ucty.filter((u) => u.branchId === pobocka) : [...ucty]
+  const v = vybrany && nabidka.some((u) => u.id === vybrany) ? vybrany : null
+  return { nabidka, vybrany: v, filtr: v ? [v] : pobocka ? nabidka.map((u) => u.id) : null }
 }
 
 /** Částka v nejmenší jednotce → „1234,50" (bez měny, ta je ve vlastním sloupci). */

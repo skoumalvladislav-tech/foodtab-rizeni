@@ -7,8 +7,9 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { koruny } from '@/lib/mzdy'
 import { jeVKorunach } from '@/lib/finance-parovani'
-import { nactiPlatbyBezFaktury } from '@/lib/finance-bez-faktury-nacteni'
-import { pobockaFinanci } from '@/lib/finance-rozsah'
+import { nactiPlatbyBezFaktury, nactiUctyFronty } from '@/lib/finance-bez-faktury-nacteni'
+import { filtrUctuFronty } from '@/lib/finance-bez-faktury'
+import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../../pobocka-bez-firmy'
 import Nadpis from '../../../nadpis'
@@ -24,8 +25,10 @@ export const dynamic = 'force-dynamic'
  * párování (lib/finance-bez-faktury.ts). Jen čtení — účetní dohledá
  * doklad u dodavatele; export CSV je na /api/ucetni/platby-bez-faktury.
  *
- * Stačí „Vidět finanční přehled“ (data faktur se tu neukazují), ale jen
- * za celou firmu — párování je firemní.
+ * Stačí „Vidět finanční přehled“ (data faktur se tu neukazují; jestli
+ * pohyb vyřídila ruční úhrada nebo na něj čeká návrh, řekne databáze
+ * funkcí platby_bez_faktury_vyrizeni). Za celou firmu všechny účty, na
+ * pobočce jen účty pobočky (stejně jako Platby), a jde vybrat jeden účet.
  */
 
 const karta = {
@@ -56,7 +59,7 @@ export default async function PlatbyBezFaktury({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ od?: string; do?: string }>
+  searchParams: Promise<{ od?: string; do?: string; ucet?: string }>
 }) {
   const { rozsah } = await params
   const tenantId = await getCurrentTenantId()
@@ -67,13 +70,8 @@ export default async function PlatbyBezFaktury({
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Platby vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
-  if (pobockaFinanci(pristup.scope)) {
-    return (
-      <Sdeleni nadpis="Platby bez faktury jsou jen za celou firmu">
-        Párování plateb s fakturami je firemní — otevřete pohled Celá firma.
-      </Sdeleni>
-    )
-  }
+  // Pobočka z rozsahu adresy (lib/finance-rozsah.ts), `null` = celá firma.
+  const pobocka = pobockaFinanci(pristup.scope)
 
   const hledani = await searchParams
   const dnes = new Date().toISOString().slice(0, 10)
@@ -82,7 +80,12 @@ export default async function PlatbyBezFaktury({
   const doData = hledani.do && DATUM.test(hledani.do) ? hledani.do : dnes
 
   const supabase = await getServerSupabase()
-  const vysledek = await nactiPlatbyBezFaktury(supabase, tenantId, od, doData)
+  const uctyRes = await nactiUctyFronty(supabase, tenantId)
+  const { nabidka, vybrany, filtr } = filtrUctuFronty(uctyRes.stav === 'ok' ? uctyRes.ucty : [], pobocka, hledani.ucet)
+  const vysledek = uctyRes.stav === 'ok'
+    ? await nactiPlatbyBezFaktury(supabase, tenantId, od, doData, filtr)
+    : uctyRes
+  const exportOdkaz = `/api/ucetni/platby-bez-faktury?rozsah=${encodeURIComponent(rozsah)}&od=${od}&do=${doData}${vybrany ? `&ucet=${encodeURIComponent(vybrany)}` : ''}`
   const soucetKc = vysledek.stav === 'ok'
     ? vysledek.platby.filter((p) => jeVKorunach(p.mena)).reduce((s, p) => s + p.zbyvaHaleru, 0)
     : 0
@@ -107,11 +110,24 @@ export default async function PlatbyBezFaktury({
             <span style={{ display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' }}>Do</span>
             <input type="date" name="do" defaultValue={doData} style={pole} />
           </label>
+          <label>
+            <span style={{ display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' }}>Účet</span>
+            <select name="ucet" defaultValue={vybrany ?? ''} style={pole}>
+              <option value="">{pobocka ? 'Všechny účty pobočky' : 'Všechny účty'}</option>
+              {nabidka.map((u) => <option key={u.id} value={u.id}>{u.nazev}</option>)}
+            </select>
+          </label>
           <button type="submit" className="ft-tl">Zobrazit</button>
-          <a href={`/api/ucetni/platby-bez-faktury?rozsah=${encodeURIComponent(rozsah)}&od=${od}&do=${doData}`} className="ft-tl">
+          <a href={exportOdkaz} className="ft-tl">
             Stáhnout pro účetní (CSV)
           </a>
         </form>
+
+        {pobocka ? (
+          <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
+            {nabidka.length === 0 ? 'Pobočka nemá vlastní platební účet. ' : ''}{POZNAMKA_FIREMNI}
+          </p>
+        ) : null}
 
         {vysledek.stav !== 'ok' ? (
           <p role="status" style={{ margin: 0, fontSize: '13px', color: vysledek.stav === 'chyba' ? 'var(--bad)' : 'var(--pozor)' }}>{vysledek.text}</p>

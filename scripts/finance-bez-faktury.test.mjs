@@ -11,7 +11,7 @@
  * by účetní honila doklady, které appka má. A CSV nesmí spustit vzorec.
  */
 
-const { platbyBezFaktury, csvPlatebBezFaktury } = await import('../lib/finance-bez-faktury.ts')
+const { platbyBezFaktury, csvPlatebBezFaktury, filtrUctuFronty } = await import('../lib/finance-bez-faktury.ts')
 const { readFileSync } = await import('node:fs')
 
 let chyb = 0
@@ -76,6 +76,25 @@ console.log('\n== Které platby jsou „bez faktury" ==')
   })
 }
 
+console.log('\n== Účty fronty: celá firma, pobočka, jeden účet (filtrUctuFronty) ==')
+{
+  const UCTY = [
+    { id: 'firemni', nazev: 'Firemní', branchId: null },
+    { id: 'b1', nazev: 'Bernard 1', branchId: 'B' },
+    { id: 'b2', nazev: 'Bernard 2', branchId: 'B' },
+    { id: 'c1', nazev: 'Perla', branchId: 'C' },
+  ]
+  const f = (pobocka, vybrany) => filtrUctuFronty(UCTY, pobocka, vybrany)
+  zkus('celá firma bez výběru → všechny účty, filtr žádný (null)', () => { const r = f(null, null); return r.nabidka.length === 4 && r.filtr === null && r.vybrany === null })
+  zkus('celá firma, vybraný účet pobočky → jen on', () => f(null, 'c1').filtr?.join() === 'c1')
+  zkus('celá firma, neznámý účet z adresy → nic se nevybere, všechny', () => { const r = f(null, 'cizi'); return r.vybrany === null && r.filtr === null })
+  zkus('pobočka → jen účty pobočky (firemní ne)', () => { const r = f('B', null); return r.nabidka.map((u) => u.id).join() === 'b1,b2' && r.filtr?.join() === 'b1,b2' })
+  zkus('pobočka, vybraný účet jiné pobočky nebo firemní → ignorován, jen účty pobočky', () =>
+    f('B', 'c1').filtr?.join() === 'b1,b2' && f('B', 'firemni').filtr?.join() === 'b1,b2' && f('B', 'c1').vybrany === null)
+  zkus('pobočka, vybraný její účet → jen on', () => f('B', 'b2').filtr?.join() === 'b2')
+  zkus('pobočka bez účtu → prázdný filtr (nic), ne „bez omezení"', () => { const r = f('D', null); return Array.isArray(r.filtr) && r.filtr.length === 0 && r.nabidka.length === 0 })
+}
+
 console.log('\n== CSV pro účetní ==')
 {
   const radky = platbyBezFaktury([
@@ -102,21 +121,31 @@ console.log('\n== Stránka a export: přístup a načtení ==')
   const telo = stranka.slice(prvni)
   ok('stránka: první v těle kontrola finance.read (zkusPristupFinanci), před načtením plateb',
     prvni > 0 && /zkusPristupFinanci\([^)]*'finance\.read'/.test(telo) && telo.indexOf('zkusPristupFinanci(') < telo.indexOf('nactiPlatbyBezFaktury('))
-  ok('stránka: na pobočce fronta není (jen za firmu), před načtením plateb',
-    telo.indexOf('if (pobockaFinanci(pristup.scope))') > 0 && telo.indexOf('if (pobockaFinanci(pristup.scope))') < telo.indexOf('nactiPlatbyBezFaktury('))
+  ok('stránka: účty fronty podle pobočky rozsahu (filtrUctuFronty s pobockaFinanci) a načtení jen s tím filtrem',
+    /const pobocka = pobockaFinanci\(pristup\.scope\)/.test(telo)
+      && /filtrUctuFronty\([^)]*, pobocka, hledani\.ucet\)/.test(telo)
+      && /nactiPlatbyBezFaktury\(supabase, tenantId, od, doData, filtr\)/.test(telo)
+      && telo.indexOf('filtrUctuFronty(') < telo.indexOf('nactiPlatbyBezFaktury('))
   const route = cist('app/api/ucetni/platby-bez-faktury/route.ts')
-  const predNactenim = route.slice(0, route.indexOf('nactiPlatbyBezFaktury(await'))
-  ok('export: před načtením kontrola finance.read, odmítnutí pobočky (403) a povinné období',
-    /zkusPristup\(tenantId, 'finance\.read', rozsah\)/.test(predNactenim)
+  const predNactenim = route.slice(0, route.indexOf('nactiPlatbyBezFaktury(supabase'))
+  ok('export: před načtením kontrola finance.read (zkusPristupFinanci), 403 bez práva i pro pobočku bez firemního přehledu, povinné období, účty podle pobočky',
+    /zkusPristupFinanci\(tenantId, 'finance\.read', rozsah\)/.test(predNactenim)
       && /if \(pristup\.stav === 'odepren'\) return new Response\([^)]*status: 403/.test(predNactenim)
-      && /if \(pobockaFinanci\(pristup\.scope\)\) \{\s*return new Response\([^)]*status: 403/.test(predNactenim)
-      && /!\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(od\)/.test(predNactenim))
+      && /if \(pristup\.stav === 'pobocka_bez_firmy'\) \{\s*return new Response\([^)]*status: 403/.test(predNactenim)
+      && /!\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(od\)/.test(predNactenim)
+      && /filtrUctuFronty\(ucty\.ucty, pobockaFinanci\(pristup\.scope\), searchParams\.get\('ucet'\)\)/.test(predNactenim)
+      && /nactiPlatbyBezFaktury\(supabase, tenantId, od, doData, filtr\)/.test(route))
   const nacteni = cist('lib/finance-bez-faktury-nacteni.ts')
   ok('načtení: pod přihlášeným (žádná služba)', /^import 'server-only'/.test(nacteni) && !/klientUlohy|service_role/.test(nacteni))
   ok('načtení: každý dotaz omezený na firmu (tenant_id)',
     (nacteni.match(/\.from\('/g) ?? []).length === (nacteni.match(/\.eq\('tenant_id', tenantId\)/g) ?? []).length)
   ok('načtení: chyba souvislosti → chyba stránky, ne „bez faktury"',
-    /if \(parovani\.error \|\| jinePlatby\.error \|\| uhrady\.error \|\| storna\.error\)/.test(nacteni))
+    /if \(parovani\.error \|\| jinePlatby\.error \|\| vyrizeni\.error \|\| storna\.error\)/.test(nacteni))
+  ok('načtení: ruční úhrady a návrhy (data Faktur) jen přes funkci databáze, ne přímým čtením',
+    /supabase\.rpc\('platby_bez_faktury_vyrizeni', \{ p_tenant: tenantId, p_transakce: kus \}\)/.test(nacteni)
+      && !/from\('faktury_rucni_uhrady'\)/.test(nacteni) && !/'navrzeno'/.test(nacteni))
+  ok('načtení: s filtrem účtů jen ty účty, prázdný filtr = nic (bez dotazu)',
+    /if \(ucty && ucty\.length === 0\) return \{ stav: 'ok', platby: \[\] \}/.test(nacteni) && /if \(ucty\) dotaz = dotaz\.in\('ucet_id', \[\.\.\.ucty\]\)/.test(nacteni))
   ok('načtení: storno i stornovaný pohyb jsou stornované', /stornovano: r\.storno_of !== null \|\| stornovane\.has\(r\.id\)/.test(nacteni))
 }
 
