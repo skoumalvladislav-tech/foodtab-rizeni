@@ -52,6 +52,12 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     po importu (`lib/finance-automaticke-parovani.ts`) odtud zmizelo
  *     taky: jisté shody z nahrané dávky páruje `sparovat_jiste_z_davky`
  *     pod přihlášeným a databáze sama ověří autora dávky a právo.
+ *   * `app/[rozsah]/finance/platby/akce.ts` (`najitNavrhyTed`) →
+ *     `lib/finance-navrhy-parovani.ts` — tlačítko „Najít návrhy" ve
+ *     frontě návrhů, až po `finance.manage` za celou firmu a po
+ *     `smi_potvrdit_parovani` pod přihlášeným (kdo smí návrh potvrdit,
+ *     smí ho i hledat); firma jen z přihlášení, stejné hledání jako po
+ *     importu výpisu.
  *   * `app/api/prevod-faktur` (`lib/faktury-prevod-sync.ts`) — převod
  *     faktur ze staré databáze do hlavní; za CRON_SECRET, krok vždy
  *     výslovně a zapisující s potvrzením, firma VÝHRADNĚ z

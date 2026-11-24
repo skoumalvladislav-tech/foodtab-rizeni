@@ -12,6 +12,7 @@ import { naHalere } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { hlaskaZmenyPobockyUctu, pobockaUctu, ucetPatriRozsahu } from '@/lib/finance-platby-pobocka'
 import { overitCisloUctu } from '@/lib/banka/ucet'
+import { najitNavrhyParovani } from '@/lib/finance-navrhy-parovani'
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>
 
@@ -380,6 +381,34 @@ export async function odmitnoutNavrh(formData: FormData): Promise<void> {
   if (error) redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent(hlaskaProLidi(error, 'Návrh se nepodařilo odmítnout.'))}`)
   revalidatePath(`/${rozsah}/finance/platby`)
   redirect(`${FRONTA(rozsah)}?odmitnuto=1`)
+}
+
+/**
+ * „Najít návrhy" — hledání na žádost (jinak běží po synchronizaci banky
+ * a po importu výpisu). Nejdřív DATABÁZE pod přihlášeným: potvrzovat
+ * párování smí (`smi_potvrdit_parovani` — Správa financí + Vidět přijaté
+ * faktury za celou firmu). Teprve pak hledání službou
+ * (lib/finance-navrhy-parovani.ts): firma jen z přihlášení, do Faktur
+ * přes pristupKFakturamUlohy, zápis jen funkcí `zapsat_navrhy_parovani`
+ * (návrh nic neplatí, potvrzuje ho člověk). Z formuláře se nebere nic
+ * kromě návratové adresy. Výjimka je zapsaná v lib/supabase/uloha.ts.
+ */
+export async function najitNavrhyTed(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const { supabase, tenantId } = await pripravitFiremni(rozsah, 'finance.manage', PAROVANI_JEN_FIRMA)
+  const { data: smi, error } = await supabase.rpc('smi_potvrdit_parovani', { p_tenant: tenantId })
+  if (error || smi !== true) {
+    redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent('Hledat návrhy smí ten, kdo má „Správu financí“ i „Vidět přijaté faktury“ za celou firmu.')}`)
+  }
+  const vysledek = await najitNavrhyParovani(tenantId, { konecMs: Date.now() + 20_000 })
+  revalidatePath(`/${rozsah}/finance/platby`)
+  if (vysledek.stav !== 'ok') {
+    const zprava = vysledek.stav === 'preskoceno'
+      ? 'Návrhy se teď hledat nedají — Faktury nejsou otevřené nebo hledání není nastavené.'
+      : 'Návrhy se nepodařilo najít — zkuste to znovu.'
+    redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent(zprava)}`)
+  }
+  redirect(`${FRONTA(rozsah)}?nalezeno=${vysledek.navrzeno}${vysledek.nedokonceno ? '&nedokonceno=1' : ''}`)
 }
 
 /**

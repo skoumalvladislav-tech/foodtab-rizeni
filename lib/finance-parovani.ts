@@ -369,10 +369,13 @@ const STAVY_K_DOROVNANI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno
  * část → „Částečně uhrazeno". Dorovná i ruční párování, u kterého se
  * přepnutí stavu ve Fakturách dřív nepovedlo (zapisuje se do jiné
  * databáze, „best-effort"). Jen ze stavů, kde to dává smysl — odmítnutou
- * nebo neschválenou fakturu dorovnání nepřepíše — a jen u faktur v Kč
- * (párování se vede v haléřích, cizí měnu by porovnalo s nesmyslem). Jen
- * směrem k zaplacení: „Uhrazeno" bez párování je ruční označení a to se
- * nevrací.
+ * nebo neschválenou fakturu dorovnání nepřepíše. V JAKÉKOLI měně
+ * faktury: potvrzené párování je vždy ve stejné měně jako faktura (jinou
+ * měnu databáze spárovat nepustí, ta jde jen ruční úhradou), takže součet
+ * a částka faktury jsou ve stejných jednotkách. Funkce jen vybírá
+ * kandidáty — stav pak přepočítá databáze (prepocitat_stav_faktury, i s
+ * ručními úhradami a měnou). Jen směrem k zaplacení: „Uhrazeno" bez
+ * párování je ruční označení a to se nevrací.
  */
 export function dorovnatStavy(
   faktury: readonly { id: string; castkaHaleru: number; stav: string | null; mena?: string | null }[],
@@ -382,7 +385,6 @@ export function dorovnatStavy(
   for (const f of faktury) {
     const alokovano = alokovanoPodleFaktury.get(f.id) ?? 0
     if (alokovano <= 0 || f.castkaHaleru <= 0 || f.stav === null || !STAVY_K_DOROVNANI.includes(f.stav)) continue
-    if (mena(f.mena) !== 'CZK') continue
     const cil = cilovyStavPodlePlateb(alokovano, f.castkaHaleru)
     if (cil && f.stav !== cil) zmeny.push({ fakturaId: f.id, stav: cil, puvodni: f.stav })
   }
@@ -508,7 +510,10 @@ function duvodNavrhu(t: NavrhovanyPohyb, f: NavrhovanaFaktura): DuvodNavrhu | nu
 
   if (menaNeboCzk(t.mena) !== menaNeboCzk(f.mena)) {
     // Částky v různých měnách porovnat nejde: VS a dodavatel musí sedět.
-    return stejnyVs && stejnyDodavatel ? 'jina_mena' : null
+    // Jen faktura (výdaj): potvrzení je ruční úhrada s platbou a ta bere
+    // jen odchozí platbu k faktuře — dobropis v jiné měně se nenavrhuje
+    // (stejně jako app.zapsat_navrhy_parovani, otázka 142).
+    return f.castkaHaleru > 0 && stejnyVs && stejnyDodavatel ? 'jina_mena' : null
   }
   if (f.castkaHaleru < 0) {
     return stejnaCastka && (stejnyVs || stejnyDodavatel) ? 'dobropis+vratka' : null
@@ -566,6 +571,32 @@ export function navrhyParovani(
 
 /** Ručně „Uhrazeno" jen ze schválených stavů (jako `app.faktura_k_rucni_uhrade`). */
 export const STAVY_PRO_RUCNI_UHRAZENI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno']
+
+/**
+ * Předvyplněná částka ruční úhrady: kolik na faktuře zbývá zaplatit
+ * (|částka| − potvrzená párování − nezrušené ruční úhrady), nikdy záporně.
+ * Databáze stejně nepustí víc (rucne_uhradit_fakturu, otázka 143).
+ */
+export function zbyvaZaplatit(castkaHaleru: number, uhrazenoHaleru: number): number {
+  return Math.max(0, Math.abs(castkaHaleru) - Math.max(0, uhrazenoHaleru))
+}
+
+/**
+ * Platí návrh ještě? Fronta Návrhy párování neukazuje návrh k faktuře,
+ * kterou mezitím někdo zaplatil jinak, odmítl, archivoval nebo označil
+ * jako duplicitu, ani k platbě, kterou už pokrylo jiné párování nebo
+ * ruční úhrada — potvrdit by ho databáze stejně nedovolila. Návrh sám
+ * zůstává (kdyby se faktura vrátila mezi neuhrazené, platí dál).
+ */
+export function navrhPlati(
+  faktura: { stav: string | null; archivovano: boolean; duplicita: boolean } | undefined,
+  pohyb: { castkaHaleru: number; pouzitoHaleru: number; rucneUhrazen: boolean } | undefined,
+): boolean {
+  if (!faktura || !pohyb) return false
+  if (faktura.archivovano || faktura.duplicita || faktura.stav === null || !STAVY_PRO_NAVRH.includes(faktura.stav)) return false
+  if (pohyb.rucneUhrazen) return false
+  return pohyb.castkaHaleru - pohyb.pouzitoHaleru > 0
+}
 
 export function smiOznacitUhrazenou(stav: string | null): boolean {
   return stav !== null && STAVY_PRO_RUCNI_UHRAZENI.includes(stav)
