@@ -480,9 +480,11 @@ console.log('\n== Stav faktury, jisté shody a návrhy jdou přes databázi ==')
       && /\.or\(`datum\.lt\.\$\{kurzor\.datum\},and\(datum\.eq\.\$\{kurzor\.datum\},id\.lt\.\$\{kurzor\.id\}\)`\)/.test(navrhy)
       && /\.order\('datum', \{ ascending: false \}\)\.order\('id', \{ ascending: false \}\)/.test(navrhy))
   ok('hledání návrhů: souvislosti (párování, ruční úhrady, Jiné platby, storna) jen ke stránce pohybů',
-    /from\('platby_faktury'\)[^;]*\.in\('transakce_id', kus\)/.test(navrhy)
-      && /from\('faktury_rucni_uhrady'\)\.select\('transakce_id'\)[^;]*\.in\('transakce_id', kus\)/.test(navrhy)
-      && /from\('jine_platby'\)[^;]*\.in\('uhrada_transakce_id', kus\)/.test(navrhy))
+    // Každý dotaz zvlášť (bez přeskoku do sousedního dotazu v Promise.all).
+    /from\('platby_faktury'\)\.select\('transakce_id, faktura, faktura_id, castka_haleru, stav'\)\s*\.eq\('tenant_id', tenantId\)\.in\('transakce_id', kus\)/.test(navrhy)
+      && /from\('faktury_rucni_uhrady'\)\.select\('transakce_id'\)\s*\.eq\('tenant_id', tenantId\)\.is\('zruseno_kdy', null\)\.in\('transakce_id', kus\)/.test(navrhy)
+      && /from\('jine_platby'\)\.select\('uhrada_transakce_id, uhrada_castka_haleru'\)\s*\.eq\('tenant_id', tenantId\)\.in\('uhrada_transakce_id', kus\)/.test(navrhy)
+      && /from\('transakce'\)\.select\('storno_of'\)\.eq\('tenant_id', tenantId\)\.in\('storno_of', kus\)/.test(navrhy))
   ok('hledání návrhů: když dojde čas, vrátí nedokončeno (ne tiché „hotovo")',
     /if \(Date\.now\(\) >= konecMs\) return \{ stav: 'ok', navrzeno, nedokonceno: true, duvod: null \}/.test(navrhy))
   ok('hledání návrhů: kurzor do filtru jen ve tvaru data a uuid',
