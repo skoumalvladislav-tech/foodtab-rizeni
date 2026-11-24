@@ -12,7 +12,9 @@
 --      Zdroj: pohyb z banky (banka_api), řádek výpisu potvrzený bankou,
 --      nebo řádek výpisu z dávky, kterou PRÁVĚ nahrál člověk s právem
 --      potvrzovat párování (app.smi_potvrdit_parovani — jediné místo, krok 4
---      ho přepne). Úloha (bez přihlášeného) výpis nikdy nepáruje sama.
+--      ho přepne). Úloha (bez přihlášeného) NEpotvrzený výpis nikdy
+--      nepáruje sama; řádek výpisu, který banka potvrdila stažením
+--      (transakce_potvrzeni_banky), je platba z banky a páruje ho i úloha.
 --      Stornovaný pohyb ani storno nikdy.
 --   2. Párovat jde jen schválenou fakturu (Ke kontrole úhrady, Neuhrazeno,
 --      Částečně uhrazeno), nearchivovanou, ne duplicitu. Ruční párování
@@ -30,7 +32,9 @@
 --      (nikdy číslo účtu — řádek jde do auditu) a jistotou. Zápis,
 --      potvrzení i odmítnutí jen funkcemi níž. Odmítnutý se nevrací.
 --   6. Ruční úhrada (faktury_rucni_uhrady): důvod povinný, autor, částka
---      v měně faktury, odkaz na pohyb (jiná měna), zrušení s důvodem.
+--      v měně faktury (nejvýš to, co zbývá zaplatit), odkaz na pohyb
+--      (jiná měna — jeden pohyb = jedna úhrada, nic jiného ho pak
+--      nespáruje), zrušení s důvodem; zruší ji i storno pohybu z banky.
 --      Dobropis: vratka (párování příjmu) nebo započtení proti faktuře
 --      téhož dodavatele = dvě ruční úhrady se stejným zapocet_id.
 --   7. Storno: storno_of musí mít stejnou částku, měnu a opačný směr.
@@ -294,15 +298,13 @@ comment on table public.faktury_rucni_uhrady is
 
 alter table public.faktury_rucni_uhrady enable row level security;
 
--- Čte, kdo vidí Faktury za firmu — a kdo vidí pohyb, ke kterému úhrada
--- patří (fronta „Platby bez faktury" ji musí vidět, jinak by ukázala
--- vyřízený pohyb jako nevyřízený). Stejně jako platby_faktury_read.
+-- Čte jen ten, kdo vidí Faktury za firmu: řádek nese fakturu, částku
+-- a volný text důvodu. Fronta „Platby bez faktury" (stačí jí právo na
+-- Finance) se ptá jen „je pohyb vyřízený?" funkcí
+-- public.platby_bez_faktury_vyrizeni (oddíl 10) — obsah úhrady nevidí.
 create policy faktury_rucni_uhrady_read on public.faktury_rucni_uhrady
   for select to authenticated
-  using (
-    tenant_id in (select app.firmy_s_pristupem('faktury.read'))
-    or (ucet_id is not null and ucet_id in (select app.platebni_ucty_s_pravem('finance.read')))
-  );
+  using (tenant_id in (select app.firmy_s_pristupem('faktury.read')));
 
 revoke all on public.faktury_rucni_uhrady from anon, authenticated, service_role;
 grant select on public.faktury_rucni_uhrady to authenticated, service_role;
@@ -531,6 +533,57 @@ create trigger trg_faktury_hlida_uhradu
   before insert or update of stav on public.faktury
   for each row execute function app.faktury_hlida_uhradu();
 
+-- Smazání faktury (Faktury → Smazat, Odmítnout): automatické návrhy, které
+-- nikdo nepotvrdil (otevřené i odmítnuté), mazání nebrání — člověk o nich
+-- často ani neví. Potvrzené i zrušené párování a ruční úhrady zůstávají
+-- (historie plateb) a cizí klíč smazání dál odmítne. Řádky mazání se
+-- zapíšou do auditu (trg_audit_platby_faktury). DEFINER: přihlášený na
+-- platby_faktury DELETE nemá. Jméno řadí spoušť ZA trg_faktury_brana
+-- (během převodu se nemaže nic).
+create function app.faktury_smazat_navrhy()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  delete from public.platby_faktury p
+   where p.tenant_id = old.tenant_id and p.faktura = old.id
+     and p.stav in ('navrzeno', 'zamitnuto') and p.potvrzeno_kdy is null and p.zpusob = 'automaticky';
+  return old;
+end $$;
+
+revoke all on function app.faktury_smazat_navrhy() from public, anon, authenticated, service_role;
+
+create trigger trg_faktury_smazat_navrhy
+  before delete on public.faktury
+  for each row execute function app.faktury_smazat_navrhy();
+
+
+-- Pohyb zapsaný jako ruční úhrada faktury (platba v jiné měně) už nic
+-- jiného nezaplatí: potvrzené párování s ním databáze nepustí — žádnou
+-- cestou (ruční párování, potvrzení návrhu, automatika). Opačný směr
+-- hlídá app.rucne_uhradit_fakturu. Jiné platby s ruční úhradou
+-- nesoupeří: úhrada Jiných plateb je vždy příjem, ruční úhrada s pohybem
+-- vždy výdaj.
+create function app.platby_faktury_hlida_rucni_uhradu()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if exists (select 1 from public.faktury_rucni_uhrady r
+              where r.transakce_id = new.transakce_id and r.tenant_id = new.tenant_id and r.zruseno_kdy is null) then
+    raise exception 'Platba je už zapsaná jako ruční úhrada faktury (v jiné měně) — spárovat ji s další fakturou nejde. Nejdřív zrušte tu úhradu.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+revoke all on function app.platby_faktury_hlida_rucni_uhradu() from public, anon, authenticated, service_role;
+
+create trigger trg_platby_faktury_hlida_rucni_uhradu
+  before insert or update of stav, transakce_id on public.platby_faktury
+  for each row when (new.stav = 'potvrzeno')
+  execute function app.platby_faktury_hlida_rucni_uhradu();
+
 
 -- ---------------------------------------------------------------------
 -- 7. Ruční párování (nová pravidla, stejný podpis)
@@ -580,11 +633,10 @@ begin
     raise exception 'Transakce nepatří této firmě.' using errcode = 'check_violation';
   end if;
 
-  if not app.has_access(p_tenant, 'finance.manage', v_t.branch_id) then
-    raise exception 'Nemáte oprávnění párovat platby.' using errcode = 'insufficient_privilege';
-  end if;
+  -- Jediné místo práva párovat (krok 4 ho přepne) — žádná druhá
+  -- podmínka vedle, ať se cesty nerozejdou.
   if not app.smi_potvrdit_parovani(p_tenant, v_t.branch_id, p_castka_haleru) then
-    raise exception 'Párovat s fakturami smí ten, kdo má právo „Vidět přijaté faktury" za celou firmu.'
+    raise exception 'Párovat platby s fakturami smí ten, kdo má „Správu financí" k účtu a právo „Vidět přijaté faktury" za celou firmu.'
       using errcode = 'insufficient_privilege';
   end if;
   -- Stav převodu až po kontrole práv (hláška by ho jinak prozradila).
@@ -743,11 +795,8 @@ begin
     raise exception 'Párování nepatří této firmě.' using errcode = 'check_violation';
   end if;
 
-  if not app.has_access(p_tenant, 'finance.manage', v_branch) then
-    raise exception 'Nemáte oprávnění zrušit párování.' using errcode = 'insufficient_privilege';
-  end if;
   if not app.smi_potvrdit_parovani(p_tenant, v_branch, null) then
-    raise exception 'Rušit párování s fakturami smí ten, kdo má právo „Vidět přijaté faktury" za celou firmu.'
+    raise exception 'Rušit párování s fakturami smí ten, kdo má „Správu financí" k účtu a právo „Vidět přijaté faktury" za celou firmu.'
       using errcode = 'insufficient_privilege';
   end if;
   if app.faktury_stav_prevodu(p_tenant) is distinct from 'dokonceno' then
@@ -815,9 +864,10 @@ begin
     return 'storno';
   end if;
 
-  -- Zdroj: z banky, řádek výpisu potvrzený bankou, nebo dávka, kterou
-  -- právě nahrál člověk s právem potvrzovat párování. Úloha (bez
-  -- přihlášeného) výpis nikdy.
+  -- Zdroj: z banky, řádek výpisu potvrzený bankou (= platba z banky,
+  -- věří se mu stejně jako banka_api i v úloze bez přihlášeného — zadání
+  -- kroku 2 po kroku 1), nebo dávka, kterou právě nahrál člověk s právem
+  -- potvrzovat párování. NEpotvrzený výpis úloha (bez přihlášeného) nikdy.
   if v_t.zdroj = 'banka_api' then
     null;
   elsif v_t.zdroj = 'csv_banka'
@@ -1066,6 +1116,9 @@ grant execute on function public.sparovat_jiste_z_davky(uuid, uuid) to authentic
 -- nespárovanými pohyby; databáze ověří, co se ověřit dá: firma, stav
 -- faktury, směr, měna, částka nejvýš zbytek faktury i platby, dvojice
 -- nebyla zamítnutá, otevřený návrh už není. Vrací počet NOVÝCH návrhů.
+-- Jen služba (hledání návrhů): kód důvodu a jistotu bere od volajícího
+-- a schvalovatel jim věří — přihlášený by si napsal „VS + částka + účet,
+-- 100 %" k čemukoli. Přihlášenému grant chybí a funkce ho odmítne i sama.
 create function app.zapsat_navrhy_parovani(p_tenant uuid, p_navrhy jsonb)
 returns integer
 language plpgsql security definer set search_path = ''
@@ -1081,8 +1134,13 @@ declare
   v_pocet  integer := 0;
   v_cesta  text;
   v_nic    text;
-  v_prihl  constant boolean := (select auth.uid()) is not null;
 begin
+  -- Uvnitř SECURITY DEFINER je current_user vlastník — přihlášeného pozná
+  -- jen auth.uid() (služba ho nemá).
+  if (select auth.uid()) is not null then
+    raise exception 'Návrhy párování zapisuje jen appka (hledání návrhů), ne přihlášený.'
+      using errcode = 'insufficient_privilege';
+  end if;
   if p_navrhy is null or jsonb_typeof(p_navrhy) <> 'array' then
     raise exception 'Návrhy musí být pole.' using errcode = 'check_violation';
   end if;
@@ -1105,7 +1163,6 @@ begin
     continue when not found;
     continue when v_t.storno_of is not null
                or exists (select 1 from public.transakce s where s.storno_of = v_t.id);
-    continue when v_prihl and not app.smi_potvrdit_parovani(p_tenant, v_t.branch_id, null);
 
     select f.id, f.castka_haleru, f.mena, f.stav, f.archivovano, f.duplicita into v_f
       from public.faktury f
@@ -1117,6 +1174,9 @@ begin
     continue when (v_f.castka_haleru > 0 and v_t.smer <> 'vydaj') or (v_f.castka_haleru < 0 and v_t.smer <> 'prijem');
     -- Jiná měna jen jako 'jina_mena' (potvrzení = ruční úhrada), stejná nikdy.
     continue when (v_duvod = 'jina_mena') <> (app.mena_nebo_czk(v_t.mena) <> app.mena_nebo_czk(v_f.mena));
+    -- Ruční úhrada s pohybem jen u faktury (výdaj) — dobropis v jiné měně
+    -- se nenavrhuje (vratku v jiné měně ruční úhrada nebere, otázka 142).
+    continue when v_duvod = 'jina_mena' and v_f.castka_haleru < 0;
 
     -- Dvojice už potvrzená, zamítnutá nebo navržená → nic.
     continue when exists (select 1 from public.platby_faktury p
@@ -1154,7 +1214,7 @@ begin
 end $$;
 
 revoke all on function app.zapsat_navrhy_parovani(uuid, jsonb) from public, anon, authenticated, service_role;
-grant execute on function app.zapsat_navrhy_parovani(uuid, jsonb) to authenticated, service_role;
+grant execute on function app.zapsat_navrhy_parovani(uuid, jsonb) to service_role;
 
 create function public.zapsat_navrhy_parovani(p_tenant uuid, p_navrhy jsonb)
 returns integer
@@ -1164,7 +1224,7 @@ as $$
 $$;
 
 revoke all on function public.zapsat_navrhy_parovani(uuid, jsonb) from public, anon, authenticated, service_role;
-grant execute on function public.zapsat_navrhy_parovani(uuid, jsonb) to authenticated, service_role;
+grant execute on function public.zapsat_navrhy_parovani(uuid, jsonb) to service_role;
 
 -- Potvrzení návrhu = potvrzené párování (stejná pravidla jako ruční).
 create function app.potvrdit_navrh_parovani(p_tenant uuid, p_navrh uuid)
@@ -1268,6 +1328,36 @@ $$;
 revoke all on function public.odmitnout_navrh_parovani(uuid, uuid) from public, anon, authenticated, service_role;
 grant execute on function public.odmitnout_navrh_parovani(uuid, uuid) to authenticated;
 
+-- Fronta „Platby bez faktury" (stačí právo na Finance, Faktury vidět
+-- nemusí): je pohyb vyřízený ruční úhradou, nebo na něj čeká návrh
+-- k faktuře, kterou jde pořád zaplatit? Jen ano/ne — obsah úhrady ani
+-- faktura ven nejdou. Jen pohyby firmy na účtech, jejichž platby
+-- přihlášený vidí (stejné pravidlo jako politika transakce_read).
+-- Návrh k faktuře, která se mezitím zaplatila jinak, odmítla, archivovala
+-- nebo je duplicita, se nepočítá — pohyb se ve frontě zase ukáže (návrh
+-- sám zůstane; kdyby se faktura vrátila mezi neuhrazené, platí dál).
+create function public.platby_bez_faktury_vyrizeni(p_tenant uuid, p_transakce uuid[])
+returns table (transakce_id uuid, rucni_uhrada boolean, otevreny_navrh boolean)
+language sql stable security definer set search_path = ''
+as $$
+  select t.id,
+         exists (select 1 from public.faktury_rucni_uhrady r
+                  where r.transakce_id = t.id and r.tenant_id = t.tenant_id and r.zruseno_kdy is null),
+         exists (select 1 from public.platby_faktury p
+                   join public.faktury f on f.id = p.faktura and f.tenant_id = p.tenant_id
+                  where p.transakce_id = t.id and p.tenant_id = t.tenant_id and p.stav = 'navrzeno'
+                    and not coalesce(f.archivovano, false) and not coalesce(f.duplicita, false)
+                    and f.stav in ('Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno')
+                    and app.uhrazeno_faktury(f.tenant_id, f.id) < abs(coalesce(f.castka_haleru, 0)))
+    from public.transakce t
+   where t.tenant_id = p_tenant
+     and t.id = any (coalesce(p_transakce, '{}'::uuid[]))
+     and t.ucet_id in (select app.platebni_ucty_s_pravem('finance.read'))
+$$;
+
+revoke all on function public.platby_bez_faktury_vyrizeni(uuid, uuid[]) from public, anon, authenticated, service_role;
+grant execute on function public.platby_bez_faktury_vyrizeni(uuid, uuid[]) to authenticated;
+
 
 -- ---------------------------------------------------------------------
 -- 11. Ruční úhrada, započtení dobropisu, zrušení, vrácení
@@ -1302,10 +1392,24 @@ end $$;
 
 revoke all on function app.faktura_k_rucni_uhrade(uuid, uuid) from public, anon, authenticated, service_role;
 
--- Ruční „zaplaceno" s důvodem. p_transakce = pohyb v JINÉ měně, ke
--- kterému úhrada patří (potvrzení návrhu 'jina_mena'): pak rozhoduje právo
--- potvrzovat párování, jinak právo spravovat Faktury.
--- ROZHODNOUT: důvod je volný text (aspoň 5 znaků), ne pevný výběr.
+-- Ruční „zaplaceno" s důvodem.
+--   * Bez pohybu: smí správce Faktur za celou firmu (app.smi_rucne_uhradit).
+--   * p_transakce = ODCHOZÍ platba v JINÉ měně, ke které úhrada patří
+--     (potvrzení návrhu 'jina_mena'): právo potvrzovat párování
+--     (app.smi_potvrdit_parovani) A ZÁROVEŇ otevřený návrh 'jina_mena'
+--     téže dvojice — bez návrhu jen správce Faktur. Jinak by kdokoli
+--     s právem párovat „zaplatil" libovolnou fakturu přiložením libovolné
+--     platby v cizí měně.
+--   * Pohyb jen k faktuře (ne k dobropisu), jen výdaj, ne storno ani
+--     stornovaný, a nikde jinde nepoužitý: ani potvrzené párování, ani
+--     jiná nezrušená ruční úhrada (opačný směr hlídá spoušť
+--     trg_platby_faktury_hlida_rucni_uhradu). Úhrada Jiných plateb je vždy
+--     příjem, se výdajem nesoupeří.
+--   * Částka v měně faktury, nejvýš to, co na faktuře zbývá zaplatit.
+-- ROZHODNOUT: důvod je volný text (aspoň 5 znaků), ne pevný výběr (otázka 129).
+-- ROZHODNOUT: přeplatek ruční úhradou se odmítá — přeplatit jde jen
+-- párováním s platbou (otázka 143); jedna platba v jiné měně uhradí jen
+-- jednu fakturu (otázka 142).
 create function app.rucne_uhradit_fakturu(p_tenant uuid, p_faktura uuid, p_castka_haleru integer, p_duvod text, p_transakce uuid default null)
 returns text
 language plpgsql security definer set search_path = ''
@@ -1318,6 +1422,8 @@ declare
   v_cesta  text;
   v_nic    text;
   v_branch uuid;
+  v_navrh  uuid;
+  v_zbyva  bigint;
 begin
   if char_length(btrim(coalesce(p_duvod, ''))) < 5 then
     raise exception 'Napište důvod ruční úhrady (aspoň 5 znaků).' using errcode = 'check_violation';
@@ -1327,7 +1433,7 @@ begin
   end if;
 
   if p_transakce is not null then
-    select t.id, t.ucet_id, t.mena, t.storno_of, u.branch_id into v_t
+    select t.id, t.ucet_id, t.mena, t.smer, t.storno_of, u.branch_id into v_t
       from public.transakce t join public.platebni_ucty u on u.id = t.ucet_id
      where t.id = p_transakce and t.tenant_id = p_tenant;
     if not found then
@@ -1338,6 +1444,16 @@ begin
     if not app.smi_potvrdit_parovani(p_tenant, v_t.branch_id, p_castka_haleru) then
       raise exception 'Nemáte oprávnění potvrzovat párování plateb s fakturami.' using errcode = 'insufficient_privilege';
     end if;
+    -- Návrh zamknout: dvojí odeslání formuláře počká a uvidí ho vyřízený.
+    select p.id into v_navrh
+      from public.platby_faktury p
+     where p.tenant_id = p_tenant and p.transakce_id = p_transakce and p.faktura = p_faktura
+       and p.stav = 'navrzeno' and p.duvod = 'jina_mena'
+       for update;
+    if v_navrh is null and not app.smi_rucne_uhradit(p_tenant) then
+      raise exception 'Platbu v jiné měně jde jako úhradu zapsat jen k faktuře, kterou k ní appka navrhla. Jinou dvojici zapíše jen ten, kdo spravuje přijaté faktury za celou firmu.'
+        using errcode = 'insufficient_privilege';
+    end if;
   elsif not app.smi_rucne_uhradit(p_tenant) then
     raise exception 'Ručně označit fakturu jako uhrazenou smí jen ten, kdo spravuje přijaté faktury za celou firmu.'
       using errcode = 'insufficient_privilege';
@@ -1346,6 +1462,7 @@ begin
     raise exception 'Faktury pro tuto firmu nejsou otevřené.' using errcode = 'insufficient_privilege';
   end if;
 
+  -- Stejné zámky jako párování a Jiné platby (pohyb, faktura).
   if p_transakce is not null then
     perform pg_advisory_xact_lock(hashtextextended(p_transakce::text, 0));
   end if;
@@ -1361,6 +1478,24 @@ begin
     if app.mena_nebo_czk(v_t.mena) = app.mena_nebo_czk(v_f.mena) then
       raise exception 'Platba je ve stejné měně jako faktura — spárujte ji ve Financích → Platby.' using errcode = 'check_violation';
     end if;
+    if v_f.castka_haleru < 0 or v_t.smer is distinct from 'vydaj' then
+      raise exception 'Úhradu s platbou jde zapsat jen k faktuře a s odchozí platbou (výdajem). Vratku k dobropisu spárujte ve Financích → Platby.'
+        using errcode = 'check_violation';
+    end if;
+    if exists (select 1 from public.platby_faktury p
+                where p.transakce_id = p_transakce and p.tenant_id = p_tenant and p.stav = 'potvrzeno')
+       or exists (select 1 from public.faktury_rucni_uhrady r
+                   where r.transakce_id = p_transakce and r.tenant_id = p_tenant and r.zruseno_kdy is null) then
+      raise exception 'Platba už je použitá (spárovaná s fakturou nebo zapsaná u jiné ruční úhrady) — jedna platba uhradí jen jednu fakturu.'
+        using errcode = 'check_violation';
+    end if;
+  end if;
+
+  v_zbyva := abs(v_f.castka_haleru) - app.uhrazeno_faktury(p_tenant, p_faktura);
+  if p_castka_haleru > v_zbyva then
+    raise exception 'Ruční úhrada je vyšší, než na faktuře zbývá zaplatit (zbývá %).',
+      replace(to_char(greatest(v_zbyva, 0) / 100.0, 'FM999999999990.00'), '.', ',') || ' ' || app.mena_nebo_czk(v_f.mena)
+      using errcode = 'check_violation';
   end if;
 
   insert into public.faktury_rucni_uhrady (tenant_id, faktura, castka_haleru, duvod, ucet_id, transakce_id, zapsal)
@@ -1381,7 +1516,7 @@ begin
   perform app.audit(p_tenant, 'faktury.rucni_uhrada', 'faktura', p_faktura::text, v_branch,
                     null, jsonb_build_object('castka_haleru', p_castka_haleru, 'mena', app.mena_nebo_czk(v_f.mena),
                                              'duvod', left(btrim(p_duvod), 300), 'transakce_id', p_transakce,
-                                             'preplatek', app.uhrazeno_faktury(p_tenant, p_faktura) > abs(v_f.castka_haleru),
+                                             'z_navrhu', v_navrh is not null,
                                              'stav_faktury', v_stav));
   return v_stav;
 end $$;
@@ -1705,8 +1840,9 @@ create trigger trg_transakce_storno_kontrola
   execute function app.transakce_storno_kontrola();
 
 -- Storno Z BANKY zruší párování stornovaného pohybu (stejnou cestou jako
--- člověk, s auditem) a vrátí stav faktury; otevřené návrhy k němu
--- zamítne. Ruční nebo CSV storno nic nemění — jen se ukáže v Platbách.
+-- člověk, s auditem) i ruční úhrady k němu a vrátí stav faktury; otevřené
+-- návrhy k němu zamítne. Ruční nebo CSV storno nic nemění — jen se ukáže
+-- v Platbách.
 create function app.transakce_storno_parovani()
 returns trigger
 language plpgsql security definer set search_path = ''
@@ -1729,6 +1865,19 @@ begin
                                         'Banka pohyb stornovala.', null);
   end loop;
 
+  -- Ruční úhrady se stornovaným pohybem (platba v jiné měně): peníze
+  -- neodešly, úhrada padá taky — se stejným přepočtem stavu a auditem.
+  for v_p in
+    update public.faktury_rucni_uhrady
+       set zruseno_kdy = now(), zrusil = null, duvod_zruseni = 'Banka pohyb stornovala.'
+     where transakce_id = new.storno_of and tenant_id = new.tenant_id and zruseno_kdy is null
+    returning id, faktura
+  loop
+    perform app.audit(new.tenant_id, 'faktury.rucni_uhrada_zrusena_stornem', 'faktura', v_p.faktura::text, null,
+                      jsonb_build_object('uhrada_id', v_p.id, 'transakce_id', new.storno_of),
+                      jsonb_build_object('stav_faktury', app.prepocitat_stav_faktury(new.tenant_id, v_p.faktura)));
+  end loop;
+
   v_cesta := current_setting('foodtab.faktury_cesta', true);
   v_nic := set_config('foodtab.faktury_cesta', 'nova', true);
   update public.platby_faktury set stav = 'zamitnuto'
@@ -1749,10 +1898,14 @@ create trigger trg_transakce_storno_parovani
 -- banka potvrdila). Storno se zapíše, jen když sedí účet, částka, měna
 -- a opačný směr a pohyb ještě stornovaný není — jinak jde řádek dovnitř
 -- jako obyčejný pohyb (peníze se pohnuly; celé stažení kvůli němu
--- nespadne). Dnes storno nepošle žádný konektor (otázka v hlášení).
+-- nespadne). Dnes storno nepošle žádný konektor (otázka 132).
+-- VOLATILE schválně: platba i její storno můžou přijít v TÉŽE dávce —
+-- funkce volaná při vkládání storna musí vidět platbu, kterou týž příkaz
+-- vložil o řádek dřív (STABLE by viděla jen stav před příkazem). Vkládá
+-- se v pořadí řádků (order by poradi_v_poli), storno tedy po platbě.
 create function app.storno_z_importu(p_tenant uuid, p_ucet uuid, p_radek jsonb, p_smer text, p_castka integer, p_mena text)
 returns uuid
-language plpgsql stable security definer set search_path = ''
+language plpgsql volatile security definer set search_path = ''
 as $$
 declare
   v_ext text := nullif(btrim(coalesce(p_radek ->> 'storno_externi_id', '')), '');

@@ -25,6 +25,11 @@
 --      jediná funkce stavu, „Vrátit mezi neuhrazené" celé nebo nic;
 --   5. návrhy: jednou, odmítnutý se nevrací, potvrzení, práva;
 --   6. zkouška 11 — živé tvary faktur projdou beze změny;
+--  6b. opravy po revizi: ruční úhrada s platbou jen k návrhu jina_mena
+--      (nebo správce Faktur), jedna platba = jedna úhrada, jen výdaj
+--      k faktuře, nejvýš zbytek; storno z banky ruší i ruční úhradu;
+--      storno v téže dávce; návrhy zapisuje jen služba; fronta „bez
+--      faktury“ funkcí; smazání faktury s automatickým návrhem;
 --   7. granty a přímý zápis (obejití funkcí), RLS ručních úhrad;
 --   8. audit bez čísel účtů;
 --   9. ukázka: výpis × stažení z banky s jiným VS.
@@ -1022,9 +1027,12 @@ select set_config('test.user_id', :'fin', false);
 select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
   jsonb_build_array(jsonb_build_object('transakce', :'t_x', 'faktura', :'f_u1', 'castka_haleru', 1000,
                                        'duvod', 'vs+castka', 'jistota', 0.9)))) as v \gset
-select pg_temp.check('návrh: finance bez Faktur nic nezapíše — naměřeno: ' || :'v', :'v' = '0');
+select pg_temp.check('návrh: přihlášený (finance bez Faktur) nic nezapíše, 42501 — naměřeno: ' || :'v',
+  :'v' like 'chyba 42501:%'
+  and not exists (select 1 from public.platby_faktury where transakce_id = :'t_x' and faktura = :'f_u1'));
 select pg_temp.potvrd(:'firma', :'n_n2') as v \gset
-select pg_temp.check('návrh: finance bez Faktur nepotvrdí — naměřeno: ' || :'v', :'v' like 'chyba 42501:%');
+select pg_temp.check('návrh: finance bez Faktur nepotvrdí — naměřeno: ' || :'v',
+  :'v' like 'chyba 42501:%potvrzovat párování plateb s fakturami%');
 select pg_temp.check('návrh: finance bez Faktur neodmítne',
   pg_temp.spadne_hlaskou(format('select public.odmitnout_navrh_parovani(%L, %L)', :'firma', :'n_n3'), '42501', 'odmítat návrhy'));
 select set_config('test.user_id', :'maj', false);
@@ -1102,6 +1110,222 @@ select pg_temp.check('zkouška 11: na existujících sloupcích faktur, pohybů,
   and (select attnotnull from pg_attribute where attrelid = 'public.faktury'::regclass and attname = 'stav_pred_uhradou') = false
   and (select attnotnull from pg_attribute where attrelid = 'public.platby_faktury'::regclass and attname = 'duvod') = false);
 
+\echo ''
+\echo '== 6b. Opravy po revizi: práva, jedna platba = jedna úhrada, storno ===='
+
+-- Hana: Finance (čtení i správa) a „Vidět přijaté faktury" za firmu, BEZ
+-- správy Faktur — smí párovat a potvrzovat návrhy, ručně „zaplaceno" ne.
+\set han 11120000-0000-0000-0000-000000000004
+insert into auth.users (id, email, raw_user_meta_data) values
+  (:'han', 'hana112@foodtab.cz', '{"full_name":"Hana Stodvanáctá"}');
+insert into public.positions (tenant_id, key, label, department, active)
+values (:'firma', 'krok112_parovani', 'Krok112 — párování bez správy faktur', 'provoz', true) returning id as z_han \gset
+insert into public.position_permissions (tenant_id, position_id, permission_key) values
+  (:'firma', :'z_han', 'finance.read'),
+  (:'firma', :'z_han', 'finance.manage'),
+  (:'firma', :'z_han', 'faktury.read');
+insert into public.employees (tenant_id, user_id, position_id, full_name, employment_type)
+values (:'firma', :'han', :'z_han', 'Hana Stodvanáctá', 'hpp');
+insert into public.memberships (tenant_id, user_id, role_id, scope, status)
+values (:'firma', :'han', null, 'tenant', 'active');
+
+-- Faktury a pohyby oddílu (superuživatel = služba).
+select pg_temp.faktura(:'firma', 'K112-H1', '11601', 2000, 'EUR') as f_h1 \gset
+select pg_temp.faktura(:'firma', 'K112-H2', '11602', 1000, 'EUR') as f_h2 \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 50000, '11601') as t_h1 \gset
+select pg_temp.faktura(:'firma', 'K112-H3', '11603', 5000) as f_h3 \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 5000, '') as t_h3 \gset
+select pg_temp.faktura(:'firma', 'K112-H4', '11604', 300, 'EUR') as f_h4 \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'prijem', 3000, '') as t_h5 \gset
+select pg_temp.faktura(:'firma', 'K112-H6', '11606', -100, 'EUR') as f_h6 \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 3100, '') as t_h6 \gset
+select pg_temp.faktura(:'firma', 'K112-H7', '11607', 50000) as f_h7 \gset
+select pg_temp.faktura(:'firma', 'K112-H8', '11608', 10000, 'CZK', null, 'Neuhrazeno') as f_h8 \gset
+select pg_temp.faktura(:'firma', 'K112-H9', '11609', 7000) as f_h9 \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 7000, '11609') as t_h9 \gset
+select pg_temp.faktura(:'firma', 'K112-H10', '11610', 3000) as f_h10 \gset
+select pg_temp.faktura(:'firma', 'K112-H11', '11611', 8000) as f_h11 \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 8000, '11611') as t_h11 \gset
+select pg_temp.faktura(:'firma', 'K112-H12', '11612', 8100) as f_h12 \gset
+select pg_temp.pohyb(:'firma', :'ucet', 'vydaj', 8100, '11612') as t_h12 \gset
+
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select pg_temp.check('příprava: Hana (Finance + Vidět přijaté faktury, bez správy Faktur) smí párovat, ručně uhradit ne',
+  public.smi_potvrdit_parovani(:'firma', null) and not app.smi_rucne_uhradit(:'firma'));
+
+-- Ruční úhrada s platbou: kdo jen páruje, smí ji zapsat jen k návrhu 'jina_mena'.
+select pg_temp.check('ruční úhrada s platbou bez návrhu: kdo jen páruje (bez správy Faktur), nezapíše',
+  pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, 2000, 'Platba kurzem banky', %L)$s$, :'firma', :'f_h1', :'t_h1'),
+                         '42501', 'kterou k ní appka navrhla'));
+select pg_temp.check('ruční úhrada bez platby: kdo jen páruje (bez správy Faktur), nezapíše',
+  pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, 1000, 'Zaplaceno hotově')$s$, :'firma', :'f_h2'),
+                         '42501', 'spravuje přijaté faktury'));
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+  jsonb_build_array(jsonb_build_object('transakce', :'t_h1', 'faktura', :'f_h1', 'castka_haleru', 50000,
+                                       'duvod', 'jina_mena', 'jistota', 0.5)))) as v \gset
+set role authenticated;
+select set_config('test.user_id', :'han', false);
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 2000, 'Platba kurzem banky', %L)$s$, :'firma', :'f_h1', :'t_h1')) as v2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('ruční úhrada s platbou k návrhu jina_mena: kdo páruje, zapíše — naměřeno: ' || :'v' || ' / ' || :'v2',
+  :'v' = '1' and :'v2' = 'Uhrazeno'
+  and exists (select 1 from public.faktury_rucni_uhrady where faktura = :'f_h1' and transakce_id = :'t_h1'
+                and zapsal = :'han' and zruseno_kdy is null)
+  and exists (select 1 from public.audit_log where tenant_id = :'firma' and action = 'faktury.rucni_uhrada'
+                and entity_id = :'f_h1' and (after ->> 'z_navrhu')::boolean));
+
+-- Jedna platba = jedna úhrada; jen výdaj k faktuře; nejvýš zbytek.
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select split_part(pg_temp.sparuj(:'firma', :'t_h3', :'f_h3', 5000), ';', 1) as v \gset
+select pg_temp.check('ruční úhrada: platba už zapsaná u jiné ruční úhrady se odmítne',
+  pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, 1000, 'Tatáž platba znovu', %L)$s$, :'firma', :'f_h2', :'t_h1'),
+                         '23514', 'Platba už je použitá'));
+select pg_temp.check('ruční úhrada: platba spárovaná s jinou fakturou se odmítne — příprava: ' || :'v',
+  :'v' = 'Uhrazeno'
+  and pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, 300, 'Spárovaná platba', %L)$s$, :'firma', :'f_h4', :'t_h3'),
+                             '23514', 'Platba už je použitá'));
+select pg_temp.check('ruční úhrada: příchozí platba (příjem) k faktuře se odmítne',
+  pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, 300, 'Příjem místo výdaje', %L)$s$, :'firma', :'f_h4', :'t_h5'),
+                         '23514', 'odchozí platbou'));
+select pg_temp.check('ruční úhrada s platbou k dobropisu se odmítne',
+  pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, 100, 'Dobropis platbou', %L)$s$, :'firma', :'f_h6', :'t_h6'),
+                         '23514', 'odchozí platbou'));
+select pg_temp.sparuj(:'firma', :'t_h1', :'f_h7', 50000) as v \gset
+select pg_temp.check('párování platby zapsané jako ruční úhrada se odmítne (spoušť) — naměřeno: ' || :'v',
+  :'v' like 'chyba 23514:%zapsaná jako ruční úhrada%'
+  and not exists (select 1 from public.platby_faktury where transakce_id = :'t_h1' and stav = 'potvrzeno'));
+select pg_temp.check('ruční úhrada bez částky nebo s nulou se odmítne',
+  pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, null, 'Bez částky')$s$, :'firma', :'f_h8'),
+                         '23514', 'musí být kladná')
+  and pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, 0, 'Nulová částka')$s$, :'firma', :'f_h8'),
+                             '23514', 'musí být kladná'));
+select pg_temp.check('ruční úhrada nad zbytek faktury se odmítne (zbývá 100,00 CZK)',
+  pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, 10001, 'Hotově víc')$s$, :'firma', :'f_h8'),
+                         '23514', 'zbývá 100,00 CZK'));
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 6000, 'Záloha hotově')$s$, :'firma', :'f_h8')) as v1 \gset
+select pg_temp.check('ruční úhrada po záloze: přes zbytek ne, zbytek ano — naměřeno: ' || :'v1',
+  :'v1' = 'Částečně uhrazeno'
+  and pg_temp.spadne_hlaskou(format($s$select public.rucne_uhradit_fakturu(%L, %L, 4001, 'Doplatek hotově')$s$, :'firma', :'f_h8'),
+                             '23514', 'zbývá 40,00 CZK')
+  and pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 4000, 'Doplatek hotově')$s$, :'firma', :'f_h8')) = 'Uhrazeno');
+
+-- Rušit párování smí jen ten, kdo párovat smí (jedno místo práva).
+select id as a_h3 from public.platby_faktury where transakce_id = :'t_h3' and faktura = :'f_h3' and stav = 'potvrzeno' \gset
+select set_config('test.user_id', :'fin', false);
+select pg_temp.check('zrušení párování: finance bez Faktur nesmí',
+  pg_temp.spadne_hlaskou(format($s$select public.zrusit_parovani_faktury(%L, %L, 'Zkouška práva')$s$, :'firma', :'a_h3'),
+                         '42501', 'Rušit párování s fakturami'));
+reset role;
+select set_config('test.user_id', '', false);
+
+-- Návrhy: zapisuje jen služba; příjem k faktuře ani dobropis v jiné měně ne.
+select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+  jsonb_build_array(jsonb_build_object('transakce', :'t_h5', 'faktura', :'f_h10', 'castka_haleru', 3000,
+                                       'duvod', 'castka+dodavatel+okno', 'jistota', 0.7)))) as v \gset
+select pg_temp.check('návrh: příjem k přijaté faktuře se nezapíše — naměřeno: ' || :'v', :'v' = '0');
+select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+  jsonb_build_array(jsonb_build_object('transakce', :'t_h5', 'faktura', :'f_h6', 'castka_haleru', 3000,
+                                       'duvod', 'jina_mena', 'jistota', 0.5)))) as v \gset
+select pg_temp.check('návrh: dobropis v jiné měně se nenavrhuje (otázka 142) — naměřeno: ' || :'v', :'v' = '0');
+select set_config('test.user_id', :'maj', false);
+select pg_temp.check('návrh: funkce sama odmítne přihlášeného (i kdyby grant měl) — zapisuje jen služba',
+  pg_temp.spadne_hlaskou(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+    jsonb_build_array(jsonb_build_object('transakce', :'t_h9', 'faktura', :'f_h9', 'castka_haleru', 7000,
+                                         'duvod', 'vs+castka+ucet', 'jistota', 1))),
+    '42501', 'zapisuje jen appka'));
+select set_config('test.user_id', '', false);
+
+-- Fronta „bez faktury" se ptá funkcí: ruční úhrada a otevřený návrh
+-- k faktuře, kterou jde pořád zaplatit — bez práva na Faktury.
+select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+  jsonb_build_array(jsonb_build_object('transakce', :'t_h9', 'faktura', :'f_h9', 'castka_haleru', 7000,
+                                       'duvod', 'vs+castka', 'jistota', 0.9)))) as v \gset
+set role authenticated;
+select set_config('test.user_id', :'fin', false);
+select coalesce((select x.rucni_uhrada::text || '/' || x.otevreny_navrh::text
+                   from public.platby_bez_faktury_vyrizeni(:'firma', array[:'t_jm'::uuid]) x), 'nic') as vy_jm \gset
+select coalesce((select x.rucni_uhrada::text || '/' || x.otevreny_navrh::text
+                   from public.platby_bez_faktury_vyrizeni(:'firma', array[:'t_h9'::uuid]) x), 'nic') as vy_h9 \gset
+select set_config('test.user_id', :'cizi', false);
+select count(*) as vy_cizi from public.platby_bez_faktury_vyrizeni(:'firma', array[:'t_jm'::uuid, :'t_h9'::uuid]) \gset
+select set_config('test.user_id', :'maj', false);
+select pg_temp.hodnota(format($s$select public.rucne_uhradit_fakturu(%L, %L, 7000, 'Zaplaceno kartou mimo účet')$s$, :'firma', :'f_h9')) as v2 \gset
+select set_config('test.user_id', :'fin', false);
+select coalesce((select x.rucni_uhrada::text || '/' || x.otevreny_navrh::text
+                   from public.platby_bez_faktury_vyrizeni(:'firma', array[:'t_h9'::uuid]) x), 'nic') as vy_h9b \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('fronta bez faktury (funkce): finance bez Faktur pozná ruční úhradu i otevřený návrh, cizí nic — naměřeno: '
+    || :'vy_jm' || ' | ' || :'vy_h9' || ' | ' || :'vy_cizi',
+  :'v' = '1' and :'vy_jm' = 'true/false' and :'vy_h9' = 'false/true' and :'vy_cizi'::bigint = 0);
+select pg_temp.check('fronta bez faktury: návrh k faktuře zaplacené jinak se nepočítá (pohyb zase čeká) — naměřeno: '
+    || :'v2' || ' | ' || :'vy_h9b',
+  :'v2' = 'Uhrazeno' and :'vy_h9b' = 'false/false'
+  and (select stav from public.platby_faktury where transakce_id = :'t_h9' and faktura = :'f_h9') = 'navrzeno');
+
+-- Smazání faktury: automatický návrh nevadí, historie párování ano.
+select pg_temp.hodnota(format($s$select public.zapsat_navrhy_parovani(%L, %L::jsonb)$s$, :'firma',
+  jsonb_build_array(jsonb_build_object('transakce', :'t_h11', 'faktura', :'f_h11', 'castka_haleru', 8000,
+                                       'duvod', 'vs+castka', 'jistota', 0.9)))) as v \gset
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select split_part(pg_temp.sparuj(:'firma', :'t_h12', :'f_h12', 8100), ';', 1) as v1 \gset
+select id as a_h12 from public.platby_faktury where transakce_id = :'t_h12' and faktura = :'f_h12' and stav = 'potvrzeno' \gset
+select pg_temp.hodnota(format($s$select public.zrusit_parovani_faktury(%L, %L, 'Špatná faktura')$s$, :'firma', :'a_h12')) as v2 \gset
+select pg_temp.projde(format('delete from public.faktury where id = %L', :'f_h11')) as v3 \gset
+select pg_temp.check('smazání faktury se zrušeným párováním dál odmítne cizí klíč (historie plateb zůstane) — příprava: '
+    || :'v1' || ' / ' || :'v2',
+  :'v1' = 'Uhrazeno' and :'v2' = 'Ke kontrole úhrady'
+  and pg_temp.spadne_hlaskou(format('delete from public.faktury where id = %L', :'f_h12'), '23503', ''));
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('smazání faktury: automatický nepotvrzený návrh smazání nebrání — naměřeno: ' || :'v' || ' / ' || :'v3',
+  :'v' = '1' and :'v3'
+  and not exists (select 1 from public.faktury where id = :'f_h11')
+  and not exists (select 1 from public.platby_faktury where faktura = :'f_h11')
+  and exists (select 1 from public.faktury where id = :'f_h12')
+  and exists (select 1 from public.platby_faktury where faktura = :'f_h12'));
+
+-- Služba: stav faktury mění i mimo „Uhrazeno" (převod, opravy).
+set role service_role;
+select pg_temp.check('služba: fakturu Ke schválení i Ke kontrole úhrady založí a přepne na Uhrazeno',
+  pg_temp.projde(format($s$insert into public.faktury (tenant_id, dodavatel, cislo_faktury, castka_haleru, stav)
+                           values (%L, 'Služba s.r.o.', 'K112-SL2', 1000, 'Ke schválení')$s$, :'firma'))
+  and pg_temp.projde(format($s$insert into public.faktury (tenant_id, dodavatel, cislo_faktury, castka_haleru, stav)
+                               values (%L, 'Služba s.r.o.', 'K112-SL3', 1000, 'Ke kontrole úhrady')$s$, :'firma'))
+  and pg_temp.projde(format($s$update public.faktury set stav = 'Uhrazeno' where tenant_id = %L and cislo_faktury = 'K112-SL3'$s$, :'firma')));
+reset role;
+select pg_temp.check('služba: přepnutí na Uhrazeno zapamatuje stav před úhradou — naměřeno: '
+    || coalesce((select stav || '|' || coalesce(stav_pred_uhradou, '-') from public.faktury
+                  where tenant_id = :'firma' and cislo_faktury = 'K112-SL3'), 'žádná'),
+  (select stav || '|' || coalesce(stav_pred_uhradou, '-') from public.faktury
+    where tenant_id = :'firma' and cislo_faktury = 'K112-SL3') = 'Uhrazeno|Ke kontrole úhrady'
+  and (select stav from public.faktury where tenant_id = :'firma' and cislo_faktury = 'K112-SL2') = 'Ke schválení');
+
+-- Storno z banky zruší i ruční úhradu s tou platbou.
+select coalesce(pg_temp.pohyb(:'firma', :'ucet', 'prijem', 50000, '11601', '19-2000145399/0800', 'banka_api', 'CZK', :'t_h1')::text, 'žádný') as t_h1s \gset
+select pg_temp.check('storno z banky zruší i ruční úhradu s tou platbou, faktura zpět Ke kontrole úhrady — naměřeno: ' || pg_temp.stav(:'f_h1'),
+  :'t_h1s' <> 'žádný' and pg_temp.stav(:'f_h1') = 'Ke kontrole úhrady'
+  and exists (select 1 from public.faktury_rucni_uhrady where faktura = :'f_h1' and transakce_id = :'t_h1'
+                and zruseno_kdy is not null and zrusil is null and duvod_zruseni = 'Banka pohyb stornovala.')
+  and not exists (select 1 from public.faktury_rucni_uhrady where faktura = :'f_h1' and zruseno_kdy is null)
+  and exists (select 1 from public.audit_log where tenant_id = :'firma' and action = 'faktury.rucni_uhrada_zrusena_stornem'
+                and entity_id = :'f_h1'));
+
+-- Platba i její storno v téže dávce stažení.
+select pg_temp.nahrat(:'firma', :'ucet', 'banka_api', 'k112-sd-1',
+                      jsonb_build_array(pg_temp.radek('vydaj', 44000, '', '19-2000145399/0800', 'k112-sd'),
+                                        pg_temp.radek('prijem', 44000, '', '19-2000145399/0800', 'k112-sd-storno', 'k112-sd'))) is not null as v \gset
+select pg_temp.check('stažení: platba i její storno v téže dávce — storno dostane storno_of — naměřeno: '
+    || coalesce((select storno_of::text from public.transakce where ucet_id = :'ucet' and externi_id = 'k112-sd-storno'), 'nic'),
+  :'v' and (select storno_of from public.transakce where ucet_id = :'ucet' and externi_id = 'k112-sd-storno')
+           = (select id from public.transakce where ucet_id = :'ucet' and externi_id = 'k112-sd'));
+
 
 \echo ''
 \echo '== 7. Granty, přímý zápis, RLS ručních úhrad ============================'
@@ -1168,10 +1392,18 @@ select set_config('test.user_id', :'cizi', false);
 select count(*) as rls_cizi from public.faktury_rucni_uhrady where tenant_id = :'firma' \gset
 reset role;
 select set_config('test.user_id', '', false);
-select pg_temp.check('RLS ručních úhrad (ověří CI): majitelka vidí všechny, finance jen úhradu k pohybu svého účtu, cizí nic — naměřeno: '
+select pg_temp.check('RLS ručních úhrad (ověří CI): majitelka vidí všechny, finance bez Faktur žádnou (ani k pohybu svého účtu), cizí nic — naměřeno: '
     || :'rls_maj' || '/' || :'rls_fin_bez' || '/' || :'rls_fin_jm' || '/' || :'rls_cizi',
   :'rls_maj'::bigint = (select count(*) from public.faktury_rucni_uhrady where tenant_id = :'firma')
-  and :'rls_fin_bez'::bigint = 0 and :'rls_fin_jm'::bigint = 1 and :'rls_cizi'::bigint = 0);
+  and :'rls_maj'::bigint > 0
+  and :'rls_fin_bez'::bigint = 0 and :'rls_fin_jm'::bigint = 0 and :'rls_cizi'::bigint = 0);
+select pg_temp.check('granty: frontu „bez faktury" (vyřízení pohybů) spustí přihlášený, anon ne; návrhy zapisuje jen služba',
+  has_function_privilege('authenticated', 'public.platby_bez_faktury_vyrizeni(uuid, uuid[])', 'execute')
+  and not has_function_privilege('anon', 'public.platby_bez_faktury_vyrizeni(uuid, uuid[])', 'execute')
+  and not has_function_privilege('authenticated', 'public.zapsat_navrhy_parovani(uuid, jsonb)', 'execute')
+  and not has_function_privilege('authenticated', 'app.zapsat_navrhy_parovani(uuid, jsonb)', 'execute')
+  and has_function_privilege('service_role', 'public.zapsat_navrhy_parovani(uuid, jsonb)', 'execute')
+  and has_function_privilege('service_role', 'app.zapsat_navrhy_parovani(uuid, jsonb)', 'execute'));
 
 
 \echo ''
@@ -1182,13 +1414,13 @@ select pg_temp.check('audit: každá cesta zapsala svou akci — chybí: '
          'finance.platba_alokovana', 'finance.platba_alokovana_automaticky', 'finance.platba_zrusena',
          'finance.automaticke_parovani_zruseno', 'finance.parovani_zruseno_stornem', 'finance.navrh_parovani_odmitnut',
          'faktury.rucni_uhrada', 'faktury.rucni_uhrada_zrusena', 'faktury.dobropis_zapocten',
-         'faktury.vraceno_mezi_neuhrazene', 'faktura_rucni_uhrada.insert', 'faktura_rucni_uhrada.update']) a
+         'faktury.vraceno_mezi_neuhrazene', 'faktury.rucni_uhrada_zrusena_stornem', 'faktura_rucni_uhrada.insert', 'faktura_rucni_uhrada.update']) a
         where not exists (select 1 from public.audit_log l where l.tenant_id = :'firma' and l.action = a)), 'nic'),
   not exists (select 1 from unnest(array[
          'finance.platba_alokovana', 'finance.platba_alokovana_automaticky', 'finance.platba_zrusena',
          'finance.automaticke_parovani_zruseno', 'finance.parovani_zruseno_stornem', 'finance.navrh_parovani_odmitnut',
          'faktury.rucni_uhrada', 'faktury.rucni_uhrada_zrusena', 'faktury.dobropis_zapocten',
-         'faktury.vraceno_mezi_neuhrazene', 'faktura_rucni_uhrada.insert', 'faktura_rucni_uhrada.update']) a
+         'faktury.vraceno_mezi_neuhrazene', 'faktury.rucni_uhrada_zrusena_stornem', 'faktura_rucni_uhrada.insert', 'faktura_rucni_uhrada.update']) a
         where not exists (select 1 from public.audit_log l where l.tenant_id = :'firma' and l.action = a)));
 select pg_temp.check('audit párování, návrhů, ručních úhrad a faktur neobsahuje číslo účtu — řádků s účtem: '
     || (select count(*) from public.audit_log l
@@ -1196,21 +1428,21 @@ select pg_temp.check('audit párování, návrhů, ručních úhrad a faktur neo
            and (l.action in ('finance.platba_alokovana', 'finance.platba_alokovana_automaticky', 'finance.platba_zrusena',
                          'finance.automaticke_parovani_zruseno', 'finance.parovani_zruseno_stornem',
                          'finance.navrh_parovani_odmitnut', 'faktury.rucni_uhrada', 'faktury.rucni_uhrada_zrusena',
-                         'faktury.dobropis_zapocten', 'faktury.vraceno_mezi_neuhrazene')
+                         'faktury.dobropis_zapocten', 'faktury.vraceno_mezi_neuhrazene', 'faktury.rucni_uhrada_zrusena_stornem')
                 or l.entity_type in ('platba_faktury', 'faktura_rucni_uhrada', 'faktura'))
            and (coalesce(l.before::text, '') || coalesce(l.after::text, '')) ~ '(2000145399|199488014|CZ6508|CZ9703)'),
   (select count(*) from public.audit_log l where l.tenant_id = :'firma'
      and (l.action in ('finance.platba_alokovana', 'finance.platba_alokovana_automaticky', 'finance.platba_zrusena',
                          'finance.automaticke_parovani_zruseno', 'finance.parovani_zruseno_stornem',
                          'finance.navrh_parovani_odmitnut', 'faktury.rucni_uhrada', 'faktury.rucni_uhrada_zrusena',
-                         'faktury.dobropis_zapocten', 'faktury.vraceno_mezi_neuhrazene')
+                         'faktury.dobropis_zapocten', 'faktury.vraceno_mezi_neuhrazene', 'faktury.rucni_uhrada_zrusena_stornem')
                 or l.entity_type in ('platba_faktury', 'faktura_rucni_uhrada', 'faktura'))) > 20
   and not exists (select 1 from public.audit_log l
                    where l.tenant_id = :'firma'
                      and (l.action in ('finance.platba_alokovana', 'finance.platba_alokovana_automaticky', 'finance.platba_zrusena',
                          'finance.automaticke_parovani_zruseno', 'finance.parovani_zruseno_stornem',
                          'finance.navrh_parovani_odmitnut', 'faktury.rucni_uhrada', 'faktury.rucni_uhrada_zrusena',
-                         'faktury.dobropis_zapocten', 'faktury.vraceno_mezi_neuhrazene')
+                         'faktury.dobropis_zapocten', 'faktury.vraceno_mezi_neuhrazene', 'faktury.rucni_uhrada_zrusena_stornem')
                 or l.entity_type in ('platba_faktury', 'faktura_rucni_uhrada', 'faktura'))
                      and (coalesce(l.before::text, '') || coalesce(l.after::text, '')) ~ '(2000145399|199488014|CZ6508|CZ9703)'));
 
