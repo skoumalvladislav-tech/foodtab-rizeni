@@ -1844,7 +1844,9 @@ grant execute on function public.zrusit_rucni_uhradu(uuid, uuid, text) to authen
 -- potvrzená párování zůstanou (ruší je ten, kdo má právo na Platby).
 -- Odmítne a nic nezmění ve dvou případech:
 --   * po zrušení by faktura zůstala „Uhrazeno" — celou ji platí ručně
---     potvrzené párování (mezi neuhrazené se tím nedostane);
+--     potvrzené párování (mezi neuhrazené se tím nedostane). I když by
+--     šlo zrušit ruční úhradu navíc (přeplatek): tu člověk zruší zvlášť
+--     („Zrušit ruční úhradu"). ROZHODNOUT (otázka 150);
 --   * nebylo co zrušit a stav zůstal — fakturu zčásti platí jen ručně
 --     potvrzené párování.
 -- Jinak zruší, co jde, i když stav zůstane „Částečně uhrazeno" (zčásti
