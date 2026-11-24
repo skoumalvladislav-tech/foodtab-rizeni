@@ -1570,8 +1570,8 @@ select pg_temp.check('Vrátit: Částečně uhrazená ručním párováním i ru
 -- a faktury (pg_advisory_xact_lock) v pořadí podle hashe a DŘÍV než
 -- zamčené řádky; řádky párování a úhrad dřív než řádek faktury.
 select pg_temp.check('ruční úhrada bere zámky pohybu a faktury dřív než řádek návrhu a faktury (kontrola nad tělem funkce)',
-  coalesce((select position('pg_advisory_xact_lock(' in p.prosrc) between 1 and position('for update' in p.prosrc)
-                   and position('pg_advisory_xact_lock(' in p.prosrc) < position('app.faktura_k_rucni_uhrade(' in p.prosrc)
+  coalesce((select position('pg_advisory_xact_lock' in p.prosrc) between 1 and position('for update' in p.prosrc)
+                   and position('pg_advisory_xact_lock' in p.prosrc) < position('app.faktura_k_rucni_uhrade' in p.prosrc)
               from pg_proc p where p.oid = 'app.rucne_uhradit_fakturu(uuid, uuid, integer, text, uuid)'::regprocedure), false));
 select pg_temp.check('ruční úhrada bere zámky pohybu a faktury v pořadí podle hashe jako párování (kontrola nad tělem funkce)',
   coalesce((select p.prosrc like '%if v\_hash\_transakce <= v\_hash\_faktura then%'
