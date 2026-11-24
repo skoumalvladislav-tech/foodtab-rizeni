@@ -634,9 +634,10 @@ begin
   end if;
 
   -- Jediné místo práva párovat (krok 4 ho přepne) — žádná druhá
-  -- podmínka vedle, ať se cesty nerozejdou.
+  -- podmínka vedle, ať se cesty nerozejdou. Hláška začíná jako dřív
+  -- („Nemáte oprávnění párovat…"), ať ji krok99 a appka poznají.
   if not app.smi_potvrdit_parovani(p_tenant, v_t.branch_id, p_castka_haleru) then
-    raise exception 'Párovat platby s fakturami smí ten, kdo má „Správu financí" k účtu a právo „Vidět přijaté faktury" za celou firmu.'
+    raise exception 'Nemáte oprávnění párovat platby s fakturami — smí to ten, kdo má „Správu financí" k účtu a právo „Vidět přijaté faktury" za celou firmu.'
       using errcode = 'insufficient_privilege';
   end if;
   -- Stav převodu až po kontrole práv (hláška by ho jinak prozradila).
