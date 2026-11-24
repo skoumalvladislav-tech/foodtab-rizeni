@@ -72,6 +72,10 @@ export type UcetFronty = { id: string; nazev: string; branchId: string | null }
  *     prázdný filtr (nic se nenačte).
  * Účet z adresy, který do nabídky nepatří (cizí, jiné pobočky, překlep),
  * se nevybere — ukáže se všechno dovolené, nikdy víc.
+ * ROZHODNOUT (otázka 145): firemní účet bez pobočky na pobočce ve frontě
+ * není (opatrnější volba, stejně jako Platby na pobočce). Kdyby tam patřit
+ * měl, přidaly by se do `nabidka` účty bez pobočky — jen tomu, kdo smí
+ * finance celé firmy.
  */
 export function filtrUctuFronty(
   ucty: readonly UcetFronty[],

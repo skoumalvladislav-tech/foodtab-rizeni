@@ -10,6 +10,9 @@
  * nesmí být písmeno ani číslice (jinak by se chytlo i „KVS 12"). Když
  * text nese dva RŮZNÉ symboly, vrátí prázdno — nejistý VS je horší než
  * žádný (zadání: appka nesmí domýšlet). Stejný symbol dvakrát je v pořádku.
+ * ROZHODNOUT (otázka 147): značka „VS" bez ohledu na velká a malá písmena,
+ * 1 až 10 číslic, dva různé = žádný. Jiné zápisy („var. symbol",
+ * „variabilní symbol") se zatím neberou.
  *
  * Čistá funkce bez závislostí — testy scripts/banka-vs-z-textu.test.mjs.
  */

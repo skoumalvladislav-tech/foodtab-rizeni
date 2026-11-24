@@ -1504,6 +1504,9 @@ begin
           (select pr.user_id from public.profiles pr where pr.user_id = (select auth.uid())));
 
   -- Otevřený návrh 'jina_mena' téže dvojice je vyřízený.
+  -- ROZHODNOUT (otázka 144): po zrušení téhle ruční úhrady se návrh znovu
+  -- neotevře (dvojice už v platby_faktury je) — platba se vrátí do Plateb
+  -- bez faktury a znovu ji s fakturou spojí jen správce Faktur.
   if p_transakce is not null then
     v_cesta := current_setting('foodtab.faktury_cesta', true);
     v_nic := set_config('foodtab.faktury_cesta', 'nova', true);

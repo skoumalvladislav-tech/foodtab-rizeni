@@ -18,6 +18,10 @@ import 'server-only'
  * zamítnutých návrhů ani staré historie běh nezastaví. Když dojde čas
  * (\`konecMs\`), skončí po hotové stránce a řekne \`nedokonceno\`; nejnovější
  * platby jsou vždy první.
+ * ROZHODNOUT (otázka 146): kurzor se nikam neukládá, každý běh začne od
+ * nejnovějších. Firma s tolika pohyby, že je jeden běh nestihne, se
+ * k nejstarším nedostane — appka to aspoň řekne (`nedokonceno`). Uložený
+ * kurzor by potřeboval nové místo v databázi.
  *
  * Běží jako služba (po synchronizaci banky, po importu výpisu a z tlačítka
  * „Najít návrhy" po kontrole práva v databázi) — firma se bere jen od
