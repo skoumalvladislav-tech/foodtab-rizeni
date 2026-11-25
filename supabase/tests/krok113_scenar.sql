@@ -32,7 +32,8 @@
 --      přesměrovat ani obnovit; staré živé připojení synchronizace dál
 --      mění a odpojit ho jde; spoušť filtruje firmu sama a zamyká účet;
 --   3c. na vypnutý účet přihlášený platbu nezapíše — přímý zápis,
---      importovat_vypis ani importovat_transakce; služba dál stahuje;
+--      výpis přes importovat_vypis ani uzávěrku pokladny přes
+--      importovat_transakce; služba dál stahuje;
 --      ruční platba v dnešním tvaru appky na zapnutý účet beze změny;
 --   4. zkouška 11 — živé tvary účtů (firemní bez čísla, účet pobočky
 --      s číslem ve starém zápisu) po všech zkouškách beze změny.
@@ -648,7 +649,7 @@ select pg_temp.check('funkce spouští vypnutého účtu přihlášený ani anon
 -- databáze, stejně jako v krok111 (čistý harness nedává service_role
 -- zápis do transakce): staré živé připojení na vypnutém účtu stahuje dál.
 insert into public.import_davky (tenant_id, typ, soubor_nazev, soubor_hash, stav)
-values (:'firma', 'banka_csv', 'krok113-3c.csv', 'krok113-3c-davka', 'zpracovano') returning id as d_3c \gset
+values (:'firma', 'pokladna_csv', 'krok113-3c-pokladna.csv', 'krok113-3c-davka', 'zpracovano') returning id as d_3c \gset
 
 select pg_temp.check('příprava 3c: účet Cyrila je vypnutý a nemá žádnou platbu, účet Bety je zapnutý',
   (select not aktivni from public.platebni_ucty where id = :'u_cyril')
@@ -669,9 +670,11 @@ select pg_temp.check('… ani importem výpisu přes importovat_vypis: 23514',
     '23514', 'platbu na něj zapsat nejde'));
 
 select set_config('test.user_id', :'spr_firma', false);
-select pg_temp.check('správce celé firmy, ne majitelka, nezapíše na vypnutý účet ani přes importovat_transakce: 23514',
+-- Uzávěrka pokladny (csv_pokladna) jde jen přes importovat_transakce —
+-- druhý zdroj importu, ať pravidlo nehlídá jen výpis z banky.
+select pg_temp.check('správce celé firmy, ne majitelka, nezapíše na vypnutý účet ani uzávěrku pokladny přes importovat_transakce: 23514',
   pg_temp.spadne_hlaskou(format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
-    :'firma', :'u_cyril', :'d_3c', 'csv_banka',
+    :'firma', :'u_cyril', :'d_3c', 'csv_pokladna',
     '[{"datum":"2033-03-03","smer":"vydaj","castka_haleru":700,"mena":"CZK","protistrana":"Krok113 3c","protiucet":"","vs":"","poznamka":""}]'),
     '23514', 'platbu na něj zapsat nejde'));
 
@@ -708,10 +711,12 @@ select pg_temp.check('po odmítnutých zápisech na vypnutém účtu nezůstalo 
   and not exists (select 1 from public.import_davky where tenant_id = :'firma' and soubor_hash = 'krok113-3c-vypis')
   and (select pocet_novych from public.import_davky where id = :'d_3c') = 0);
 
+-- tgtype: 1 = pro každý řádek, 2 = před zápisem, 4 = při založení.
 select pg_temp.check('spoušť zápisu na vypnutý účet: před založením platby, s právy volajícího, přihlášený ani anonym ji přímo nespustí',
   exists (select 1 from pg_trigger t
            where t.tgrelid = 'public.transakce'::regclass and t.tgname = 'trg_zapis_na_vypnuty_ucet'
-             and t.tgenabled = 'O' and t.tgfoid = 'app.hlida_zapis_na_vypnuty_ucet()'::regprocedure)
+             and t.tgenabled = 'O' and t.tgfoid = 'app.hlida_zapis_na_vypnuty_ucet()'::regprocedure
+             and (t.tgtype & 1) = 1 and (t.tgtype & 2) = 2 and (t.tgtype & 4) = 4)
   and not (select prosecdef from pg_proc where oid = 'app.hlida_zapis_na_vypnuty_ucet()'::regprocedure)
   and not has_function_privilege('authenticated', 'app.hlida_zapis_na_vypnuty_ucet()', 'execute')
   and not has_function_privilege('anon', 'app.hlida_zapis_na_vypnuty_ucet()', 'execute'));
