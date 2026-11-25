@@ -2135,3 +2135,196 @@ nikdo).
 - **Když to má být jinak:** upozornění v aplikaci by šlo po vzoru
   výpadku Choice (PR #178, spoušť na stavu napojení) — nová migrace
   a texty v `lib/upozorneni-text.ts`.
+
+## 94. Banka: dokončit stávající tabulky, nebo nové `bankovni_ucty` a `bankovni_pohyby`?
+
+**Vzniklo:** 19. 11. 2026 (Finance Fáze 0, audit kroku 0 — `docs/hlaseni/audit-finance-faze0.md`).
+
+- **Teď:** krok 1 staví na tabulkách, které v main už jsou — `platebni_ucty`, `transakce`, `import_davky`,
+  `platby_faktury`. Doplňuje k nim účet protistrany (IBAN), otisk pohybu a obecný zdroj `banka_api` místo
+  jmen bank v jádru. Nové tabulky `bankovni_ucty` a `bankovni_pohyby` nezakládám.
+- **Proč:** na stávajících tabulkách stojí párování faktur i Jiné platby a zadání samo říká „co existuje,
+  dokonči a oprav, nepiš znovu“. Dvě souběžné bankovní vrstvy by se rozcházely a každá obrazovka by musela
+  vědět, kterou číst.
+- **Když to má být jinak:** přejmenování je jedna migrace (`alter table … rename`) plus náhrada jmen v `lib/`
+  a `app/` — jde to i později, nic se tím nezavírá.
+
+## 95. Vzorek výpisu Komerční banky (CSV / GPC)
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 1 — import KB).
+
+- **Teď (volba pro krok 1):** import CSV čte obecný bankovní výpis (sloupce podle hlavičky, české i anglické názvy, kódování
+  UTF-8 i windows-1250). Speciální formát MojeBanka Business **neodhaduji** — bez vzorku bych psal podle
+  dokumentace, která se s exportem nemusí shodovat.
+- **Proč:** chybně přečtený výpis (prohozené znaménko, VS ve špatném sloupci) by vyráběl falešná párování
+  „Uhrazeno“. To je horší než import, který soubor odmítne s jasnou hláškou.
+- **Když to má být jinak:** stačí poslat export jednoho měsíce z MojeBanka Business (CSV, případně GPC/ABO)
+  v původním kódování a s hlavičkou. Čísla účtů v něm můžete začernit. Dopsání formátu je pak jeden soubor
+  v `lib/banka/`.
+
+## 96. Přímé napojení KB (ADAA) — v jakém je stavu?
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0; navazuje na `docs/kb-adaa-navod.md` a hlášení 11. 10.).
+
+- **Teď:** konektor pro přímé API KB v main je (jen čtení), napojení v databázi má stav „odpojeno“
+  a pohyby z KB žádné nejsou. Krok 1 konektor jen převádí na obecnou bankovní vrstvu, nic nepřipojuje.
+- **Proč se ptám:** nevím, jestli je hotová registrace na developers.kb.cz (software statement s kvalifikovanou
+  pečetí) a jestli KB odpověděla, zda je ADAA pro Foodtab služba „Open“, nebo „Partner“. Proměnné na Vercelu
+  jsem nečetl.
+- **Když to má být jinak:** pokud registrace stojí, je CSV import (otázka 95) jediná cesta k pohybům KB
+  a Finance mají fungovat bez API.
+
+## 97. Párování faktury v cizí měně a dobropisy
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 2; navazuje na otázku 62).
+
+- **Teď (volba pro krok 2):** párování porovnává částku **v měně faktury** a jen s platbou ve stejné měně. Platba z korunového
+  účtu na eurovou fakturu zůstane návrhem k ručnímu potvrzení, žádný kurz nepřepočítávám. Dobropis se páruje
+  s příchozí vratkou, nebo ho člověk ručně započte proti faktuře téhož dodavatele (s důvodem).
+- **Proč:** kurz ČNB ke dni platby se od skutečně stržené částky liší o poplatky a spread banky. Automatické
+  „Uhrazeno“ na odhadu kurzu by bylo tvrzení, které banka nepotvrdila.
+- **Když to má být jinak:** tolerance kurzu (třeba ±2 %) je jedna konstanta v párování; přepočet kurzem ČNB
+  potřebuje stahovat kurzovní lístek (nová úloha).
+
+## 98. Který účet patří které pobočce?
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 3; otázka 48 bod 3 je pořád otevřená).
+
+- **Teď (volba pro krok 3):** v databázi je jeden účet bez pobočky a bez čísla. Nic jsem nepřiřazoval. Finance za celou firmu
+  nově říkají jménem, které pobočky účet nemají (Bernard Bar Tábor, Restaurace Černá Perla).
+- **Proč:** přiřadit účet pobočce je zápis do ostrých dat a podle čeho, to ví jen majitel.
+- **Když to má být jinak:** přiřazení udělá majitel v Celá firma → Platby → Platební účty (výběr pobočky).
+  Pokud je účet společný pro obě pobočky, zůstane firemní; rozpočítání klíčem (podle tržeb, pevným podílem)
+  by byla nová funkce — napište, který klíč.
+
+## 99. Kdo dostane právo „Schvalovat nákupy a platby“ při zavedení?
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 4).
+
+- **Teď (volba pro krok 4):** jen majitelé (mají ho vždy a nejde jim odebrat). Nikomu dalšímu ho migrace nepřidá. Bez limitu
+  částky a bez omezení na pobočky, dokud ho někdo nenastaví.
+- **Proč:** dnes nikdo kromě majitelů nemá ani `faktury.*`, ani `finance.*` (0 lidí v zařazeních) — nikomu
+  se tedy nic nebere. Zpětné rozdání podle `faktury.manage` by dalo právo platit lidem, kterým ho nikdo
+  vědomě nedal.
+- **Když to má být jinak:** právo se přidá zařazení v Lidé → Zařazení (bez migrace). Limit částky je v Kč;
+  faktury v jiné měně schvaluje jen ten, kdo limit nemá.
+
+## 100. Osnova kategorií nákladů od účetní
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 5).
+
+- **Teď (volba pro krok 5):** základní sada ze zadání (potraviny, nápoje, obaly, energie, nájem, služby, opravy, marketing,
+  ostatní) s příznakem pro foodcost (jídlo / nápoj / ne). Kategorii u faktury jen navrhuje AI nebo výchozí
+  kategorie dodavatele, potvrzuje člověk.
+- **Proč:** kategorie se dají přejmenovat a přidat bez migrace, ale jednou potvrzené zařazení faktur se
+  špatně přeřazuje — proto žádné hromadné zařazení bez potvrzení.
+- **Když to má být jinak:** pošlete osnovu od účetní (názvy a případně účty). Rozpočty mají dnes vlastní
+  pevný výčet (tržby, suroviny, mzdy…); sjednocení s novými kategoriemi je samostatný krok.
+
+## 101. Fronta 542 nemá soubory — odkud je přečíst?
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 8; čtecí dotaz `fronta_542_odkazy`).
+
+- **Teď:** všech 542 faktur „Nutná ruční kontrola“ je z převodu ze staré databáze a **žádná nemá soubor
+  v úložišti Foodtabu**. 537 má jen odkaz na OneDrive, 5 nemá nic. Krok 8 jsem proto jen připravil
+  (dávka, odhad ceny, výsledky do „Ke schválení“), číst nemá co.
+- **Proč:** OneDrive odkaz vyžaduje přihlášení k cizímu účtu a stahovat z něj bez souhlasu by znamenalo
+  sahat na data mimo Foodtab.
+- **Když to má být jinak:** tři cesty — (a) soubory z OneDrive jednorázově nahrát do úložiště Foodtabu
+  (složka se přiřadí podle odkazu), (b) dohledat přílohy v e-mailových schránkách, pokud tam ještě jsou,
+  (c) přepsat je ručně. Odhad ceny za přečtení je v hlášení.
+
+## 102. AI zapisuje faktury rovnou do „Ke kontrole úhrady“ a sama vyřazuje „není doklad“
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 8 — „AI nic neschvaluje“).
+
+- **Teď:** příjem z e-mailu jsem neměnil. AI zapsala bez lidského schválení 54 faktur (615 353,64 Kč) rovnou
+  mezi schválené a 248 příloh sama vyřadila jako „není doklad / dodací list / jiný doklad“. Vychází to
+  z rozhodnutí 8. 10. o průběžném zpracování a příjem patří jiné relaci.
+- **Proč se ptám:** zadání Fáze 0 v kroku 8 chce, aby AI nic neschvalovala. Obojí dohromady nejde: při stovkách
+  dokladů měsíčně by „vše ke schválení“ znamenalo stovky kliknutí, pokud nevznikne hromadné schválení po
+  kontrole náhledu.
+- **Když to má být jinak:** „vše ke schválení“ je jedna podmínka v `lib/faktury-prijem-kontrola.ts:357`;
+  vyřazení jen při vysoké jistotě (střední jde člověku) je podmínka na `:318`. Udělá to relace příjmu.
+
+## 103. Registr dodavatelů: jedno IČO = jeden dodavatel? A vlastní IČO
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 6).
+
+- **Teď (volba pro krok 6):** registr má klíč IČO; různé názvy (MAKRO má 17 variant) jsou aliasy jednoho dodavatele. Sloučení
+  jsou jen návrhy k potvrzení a jdou vrátit. **Vlastní IČO firmy se nikdy nepáruje** — v datech je pod ním
+  23 faktur od 7 různých dodavatelů (AI přečetla IČO odběratele). Dodavatelé bez IČO se sami nesloučí nikdy.
+  Registr řídí právo `faktury.manage`.
+- **Proč:** sloučit podle názvu bez IČO by spojilo různé firmy s podobným jménem; vlastní IČO by spojilo
+  všechny, u kterých AI chybovala.
+- **Když to má být jinak:** provozovny pod jedním IČO jako samostatné záznamy = zrušit unikátnost IČO
+  v registru (migrace); jiné právo = jedna podmínka v RLS a akcích.
+
+## 104. Dotykačka: tržby s DPH, dělení na jídlo a nápoje, receptury
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, oblast pokladny; podklad pro foodcost ve Fázi 2).
+
+- **Teď:** ve Fázi 0 na pokladnu nesahám. Tržba se ukládá tak, jak ji Dotykačka vrátí (nejspíš s DPH, naživo
+  neověřeno), hodnota bez DPH se zahazuje, prodej je uložený podle názvu produktu, bez id a bez kategorie.
+- **Proč se ptám:** foodcost ve Fázi 2 potřebuje tržby bez DPH a rozdělené na jídlo a nápoje. Kategorie
+  produktů v Dotykačce appka nečte a nevím, jestli je u Perly i Bernarda máte oddělené.
+- **Když to má být jinak:** pošlete denní uzávěrku z Dotykačky za jeden den (obě provozovny) — ověří se na ní
+  DPH i odpisy. Ukládání tržby bez DPH a id produktu je migrace plus úprava `lib/pokladna-dotykacka.ts`.
+
+## 105. Upomínky a možné duplicity v „Otevřeno k úhradě“
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, čísla: z 7,7 mil. Kč je 2,03 mil. možných duplicit a 0,82 mil. upomínek).
+
+- **Teď (volba pro krok 7):** potvrzená duplicita (krok 7) ze součtů vypadne. Nepotvrzené možné duplicity a upomínky ukazuji
+  ve Fakturách **zvlášť pod hlavním číslem** („navíc možné duplicity X Kč, upomínky Y Kč“), ne v něm.
+- **Proč:** upomínka je připomínka už vystavené faktury, takže se tentýž dluh počítá dvakrát; z 217 možných
+  duplicit je jistá kopie souboru jen 81. Hlavní číslo má být to, za čím si stojíme.
+- **Když to má být jinak:** zahrnutí zpátky do hlavního čísla je jedna podmínka v `lib/faktury-types.ts`
+  (`jeNezaplacena`) — žádná data se tím nemění.
+
+## 106. Větev `oprava-audit-log-fk-pravidlo` — dodělat, nebo zahodit?
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, větve).
+
+- **Teď:** nic s ní nedělám. Je z 2. 10., bez PR a bez vzdálené větve, a opravuje pád při mazání pobočky
+  nebo firmy, která má řádek v audit logu. Její migrace `20261002120000` v main není. Podle kódu chyba
+  v main trvá: `audit_log.branch_id` má `on delete set null` a pravidlo proti změně auditu tu změnu odmítne.
+  Ověřeno čtením migrací, ne spuštěním.
+- **Proč:** sloučit cizí větev zadání zakazuje a razítko je starší než poslední migrace v main.
+- **Když to má být jinak:** oprava se dá převzít s novým razítkem a scénářem, který mazání pobočky s audit
+  záznamem zkusí.
+
+## 107. Staré otevřené faktury, na které výpis z banky nedosáhne
+
+**Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 9: 217 faktur je po splatnosti víc než 250 dní, nejstarší
+od 25. 6. 2025; automatické párování sahá 180 dní zpět).
+
+- **Teď (volba pro krok 9):** suchý běh (krok 9) vypíše jen faktury, jejichž úhradu potvrzuje banka. Ostatní staré faktury
+  zůstanou otevřené, nic je hromadně nezavírá. 1 090 otevřených faktur nemá splatnost (1 023 i částku 0),
+  ty ukazuji zvlášť, nic nedopočítávám.
+- **Proč:** zavřít fakturu bez důkazu platby je přesně ten falešný stav „zaplaceno“, který Fáze 0 odstraňuje.
+- **Když to má být jinak:** uzavření podle seznamu od účetní by šlo jako ruční „Uhrazeno“ s důvodem
+  „podle účetní k datu …“, po jedné faktuře nebo jako dávka se souhlasem majitele.
+
+## 108. Koeficient odvodů zaměstnavatele (pro Fázi 1)
+
+**Vzniklo:** 20. 11. 2026 (zadání Fáze 0, oddíl 7 — patří do otázek, ve Fázi 0 se nepoužije).
+
+- **Teď:** nic. Fáze 0 mzdy nepočítá a v kódu Financí žádný koeficient není.
+- **Proč se ptám teď:** Fáze 1 bude počítat mzdové náklady pobočky z výdělků a bez koeficientu odvodů
+  (sociální + zdravotní pojištění placené zaměstnavatelem, u DPP/DPČ jinak) by byly podhodnocené.
+- **Když to má být jinak:** napište koeficient (např. 1,338 pro HPP) a jestli se u DPP/DPČ počítá jinak.
+  Uloží se jako nastavení firmy, ne napevno v kódu.
+
+## 109. Zkouška 11 — migrace „na kopii ostrých dat“
+
+**Vzniklo:** 20. 11. 2026 (zadání Fáze 0, oddíl 5, zkouška 11).
+
+- **Teď:** migrace Fáze 0 zkouším na čisté databázi se zkušebními daty (PGlite a PostgreSQL 16 na CI)
+  a scénáře kontrolují, že po migraci zůstanou všechny faktury, párování i pohyby. **Kopii ostrých dat jsem
+  si na tenhle počítač nestahoval.**
+- **Proč:** kopie ostré databáze znamená stáhnout faktury, dodavatele a čísla účtů na lokální disk.
+  Do ostré DB smím jen čtecími dotazy a stahovat celé tabulky bez souhlasu mi nepřišlo správné.
+- **Když to má být jinak:** nejbezpečnější je větev databáze v Supabase (kopie projektu) nebo `pg_dump`
+  spuštěný majitelem; na ní pak pustit migrace a porovnat počty faktur před a po. Postup připravím, spustí ho
+  majitel.
