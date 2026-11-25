@@ -20,13 +20,13 @@
  * supabase/tests/krok113_scenar.sql.
  */
 
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 
 const {
   nactiPobockyBezUctu, maPobockaAktivniUcet, vetaPobockyBezUctu, hlaskaBezUctuPobocky, popisUctuPlatby,
   uctyMimoAktivnichPobocek, vetaUctuMimoPobocky, CHYBA_POBOCEK_BEZ_UCTU, FIREMNI_UCET, FIREMNI_VOLBA, KOTVA_UCTU,
   vetaUctuPobocky, nactiUctyMimoPobocek, vetaUctuMimoPobocekFirmy, CHYBA_UCTU_MIMO_POBOCKY, hlaskaZalozeniPripojeni,
-  adresaUctu, mistoHlaskyUctu, PRAVO_SPRAVY_FINANCI, KDO_SPRAVUJE_UCTY,
+  adresaUctu, mistoHlaskyUctu, PRAVO_SPRAVY_FINANCI, KDO_SPRAVUJE_UCTY, kotvaUctu, PRAVO_CIST_FAKTURY, KDO_PARUJE,
 } = await import('../lib/finance-ucty-pobocek.ts')
 const { upravaUctu, hodnotaPobockyUctu } = await import('../lib/finance-platby-pobocka.ts')
 
@@ -253,16 +253,29 @@ console.log('\n== Připojení banky k vypnutému účtu: věta, ne „nepodařil
 
 console.log('\n== Hláška po úpravě účtu: u účtu, kam stránka sjede ==')
 {
+  // Kotva KARTY účtu, ne celé sekce: u čtvrtého a dalšího účtu (na
+  // telefonu u třetího) by stránka sjela na nadpis sekce a hláška u účtu
+  // by zůstala pod okrajem obrazovky (2. kolo revize kroku 3).
+  ok(`kotva karty účtu = ucet-<id> a liší se od kotvy sekce — naměřeno: ${kotvaUctu('u-1')}`,
+    kotvaUctu('u-1') === 'ucet-u-1' && kotvaUctu('u-1') !== KOTVA_UCTU)
   const chybaAdresa = adresaUctu('firma', { chyba: 'IBAN nesedí' }, 'u-1')
-  ok(`chyba: adresa s textem, id účtu a kotvou sekce účtů — naměřeno: ${chybaAdresa}`,
-    chybaAdresa === `/firma/finance/platby?chyba=${encodeURIComponent('IBAN nesedí')}&ucet=u-1#${KOTVA_UCTU}`)
-  ok('uloženo: ucet_upraven=1 a id účtu', adresaUctu('firma', { upraveno: true }, 'u-1') === `/firma/finance/platby?ucet_upraven=1&ucet=u-1#${KOTVA_UCTU}`)
-  ok('účet neznámý: prázdné ucet (hláška na začátek sekce)', adresaUctu('firma', { chyba: 'x' }, null).endsWith(`&ucet=#${KOTVA_UCTU}`))
+  ok(`chyba: adresa s textem, id účtu a kotvou KARTY účtu — naměřeno: ${chybaAdresa}`,
+    chybaAdresa === `/firma/finance/platby?chyba=${encodeURIComponent('IBAN nesedí')}&ucet=u-1#${kotvaUctu('u-1')}`)
+  const ulozeno = adresaUctu('firma', { upraveno: true }, 'u-1')
+  ok(`uloženo: ucet_upraven=1, id účtu a kotva KARTY účtu — naměřeno: ${ulozeno}`,
+    ulozeno === `/firma/finance/platby?ucet_upraven=1&ucet=u-1#${kotvaUctu('u-1')}`)
+  ok('účet neznámý: prázdné ucet a kotva začátku sekce účtů (hláška tam)', adresaUctu('firma', { chyba: 'x' }, null).endsWith(`&ucet=#${KOTVA_UCTU}`))
   ok('bez ucet v adrese → nahoře (zápis platby, import…)', mistoHlaskyUctu(undefined, ['u-1']).kde === 'nahore')
   const u = mistoHlaskyUctu('u-1', ['u-0', 'u-1'])
   ok('ucet jednoho z vypsaných účtů → u něj', u.kde === 'ucet' && u.id === 'u-1')
   ok('ucet prázdné nebo neznámé → začátek sekce účtů, ne nahoře',
     mistoHlaskyUctu('', ['u-1']).kde === 'sekce' && mistoHlaskyUctu('u-cizi', ['u-1']).kde === 'sekce')
+  // Účet z adresy na stránce není (zmizel, seznam se nenačetl): kotvu jeho
+  // karty, na kterou adresa míří, musí nést hláška na začátku sekce.
+  const neznamy = mistoHlaskyUctu('u-cizi', ['u-1'])
+  const prazdny = mistoHlaskyUctu('', ['u-1'])
+  ok(`ucet neznámý → hláška na začátku sekce nese kotvu jeho karty; prázdné ucet bez kotvy — naměřeno: ${JSON.stringify(neznamy)} ${JSON.stringify(prazdny)}`,
+    neznamy.kde === 'sekce' && neznamy.kotva === kotvaUctu('u-cizi') && prazdny.kde === 'sekce' && prazdny.kotva === null)
   ok('ucet dvakrát v adrese (pole) → nahoře, nic se nehádá', mistoHlaskyUctu(['u-1', 'u-1'], ['u-1']).kde === 'nahore')
 }
 
@@ -415,6 +428,22 @@ ok('Platby: hláška z adresy se kreslí tam, kam patří — nahoře, na začá
 ok('Platby: hláška u účtu je za údaji účtu, před formulářem úpravy',
   platby.indexOf('{hlaskaZde(u.id)}') > platby.indexOf('vetaUctuMimoPobocky(mimo)')
     && platby.indexOf('{hlaskaZde(u.id)}') < platby.indexOf('action={upravitPlatebniUcet}'))
+// Kotva, na kterou míří adresaUctu, je na stránce opravdu na KARTĚ účtu
+// (ne jen na celé sekci) — a hláška u účtu je uvnitř té karty.
+{
+  const karta = platby.match(/<div\s+key=\{u\.id\}\s+id=\{pobocka \? undefined : kotvaUctu\(u\.id\)\}\s+style=\{\{\s*display: 'grid', gap: '8px', scrollMarginTop: '16px',/)
+  ok('Platby: karta účtu má kotvu kotvaUctu(u.id) s odsazením od horního okraje — hláška u účtu je v ní, před formulářem úpravy',
+    karta !== null
+      && platby.indexOf(karta[0]) < platby.indexOf('{hlaskaZde(u.id)}')
+      && platby.indexOf('{hlaskaZde(u.id)}') < platby.indexOf('action={upravitPlatebniUcet}'))
+  ok('Platby: hláška na začátku sekce nese kotvu karty účtu, který na stránce není',
+    /const kotva = mistoHlasky\.kde === 'sekce' \? mistoHlasky\.kotva \?\? undefined : undefined/.test(platby)
+      && /<p role="status" id=\{kotva\}/.test(platby))
+}
+const akcePlateb = zdroj('app/[rozsah]/finance/platby/akce.ts')
+ok('upravitPlatebniUcet: beze změny zpět na kartu účtu, ne na začátek sekce',
+  /if \(uprava\.stav === 'beze_zmeny'\) redirect\(`\/\$\{rozsah\}\/finance\/platby#\$\{kotvaUctu\(ucet\.id\)\}`\)/.test(akcePlateb)
+    && !/finance\/platby#\$\{KOTVA_UCTU\}/.test(akcePlateb))
 
 const bezFaktury = zdroj(STRANKY['Platby bez faktury'])
 ok('Platby bez faktury: na pobočce věta přes vetaUctuPobocky — chyba zjištění se řekne, nemlčí',
@@ -431,14 +460,32 @@ ok('import výpisu: na vypnutý účet nic nezapíše — kontrola aktivni před
   /\.from\('platebni_ucty'\)\s*\.select\('aktivni'\)/.test(importAkce) && /if \(!ucet\.aktivni\) \{\s*redirect\(/.test(importAkce)
     && importAkce.indexOf('if (!ucet.aktivni)') < importAkce.indexOf('await zapsatVypis('))
 
-// Žádný text pro člověka nejmenuje právo „Správa financí" (na obrazovce Role není).
-for (const cesta of [
-  'lib/finance-ucty-pobocek.ts', 'lib/finance-platby-pobocka.ts', 'app/[rozsah]/finance/platby/akce.ts',
-  STRANKY['Platby'], STRANKY['Přehled'], STRANKY['Cashflow'], STRANKY['Rozpočty'], STRANKY['Platby bez faktury'],
-  'app/[rozsah]/finance/pobocky-bez-uctu.tsx', 'app/[rozsah]/finance/platby/import/page.tsx',
-  'app/[rozsah]/finance/platby/import/akce-nahled.ts', 'app/[rozsah]/finance/integrace/prodeje/page.tsx',
-]) {
-  ok(`${cesta}: žádné „Správa financí“ v textu`, !/„Správa financí“/.test(zdroj(cesta)))
+// Žádný text pro člověka nejmenuje právo „Správa financí" (na obrazovce
+// Role není) — v ŽÁDNÉM pádě („Správu financí", „Správou financí"…) a
+// v žádném souboru appky. Dřív se hledal jen první pád v seznamu souborů
+// a „Správu financí" v Návrzích párování prošlo (2. kolo revize kroku 3).
+// Komentáře se vynechají: v nich je staré jméno jako historie.
+{
+  const bezKomentaru = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[\s;{}(),])\/\/.*$/gm, '$1')
+  const STARE_JMENO = /Správ(a|u|y|ě|ou) financí/
+  const soubory = ['app', 'lib'].flatMap((koren) =>
+    readdirSync(new URL(`../${koren}`, import.meta.url), { recursive: true })
+      .map((f) => `${koren}/${String(f).replace(/\\/g, '/')}`)
+      .filter((f) => /\.(ts|tsx)$/.test(f)))
+  const sJmenem = soubory.filter((f) => STARE_JMENO.test(bezKomentaru(zdroj(f))))
+  ok(`app a lib: žádné „Správa financí“ v žádném pádě v textu mimo komentáře — naměřeno: ${sJmenem.join(', ') || 'nic'}`,
+    sJmenem.length === 0)
+  const akceText = bezKomentaru(zdroj('app/[rozsah]/finance/platby/akce.ts'))
+  const navrhyText = bezKomentaru(zdroj('app/[rozsah]/finance/platby/navrhy/page.tsx'))
+  ok(`hledání prošlo celé app i lib, Platby i Návrhy párování, a texty o tom, kdo páruje, v nich po vynechání komentářů zůstaly — souborů: ${soubory.length}`,
+    soubory.length > 200
+      && soubory.includes('app/[rozsah]/finance/platby/akce.ts') && soubory.includes('app/[rozsah]/finance/platby/navrhy/page.tsx')
+      && akceText.includes('`Hledat návrhy smí ${KDO_PARUJE}.`') && navrhyText.includes('Potvrzovat návrhy smí {KDO_PARUJE}.'))
+  const katalogFaktur = readFileSync(new URL('../supabase/migrations/20260915100000_modul_faktury.sql', import.meta.url), 'utf8')
+  const nazevCteni = katalogFaktur.match(/\('faktury\.read',\s*'finance',\s*'([^']+)'/)?.[1] ?? ''
+  ok(`kdo páruje: obě práva jménem z katalogu, za celou firmu — katalog faktury.read: ${nazevCteni}`,
+    nazevCteni.length > 0 && PRAVO_CIST_FAKTURY === nazevCteni
+      && KDO_PARUJE === `ten, kdo má právo „${PRAVO_SPRAVY_FINANCI}“ i „${nazevCteni}“ za celou firmu`)
 }
 
 ok('migrace: založení účtu jen se sloupci formuláře (revoke insert, grant insert na 5 sloupců)',

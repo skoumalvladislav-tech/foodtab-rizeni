@@ -54,6 +54,16 @@
 --      dál a součty (zůstatky, „pobočky bez účtu") by ty pohyby
 --      nepočítaly. Jedna definice „živého připojení": app.pripojeni_je_zive.
 --
+--   4. Na vypnutý účet přihlášený platbu nezapíše (spoušť
+--      app.hlida_zapis_na_vypnuty_ucet). Appka to hlídá u ruční platby
+--      i importu výpisu, ale přímý zápis přes REST (POST /rest/v1/transakce)
+--      a volání importovat_vypis / importovat_transakce by to obešly —
+--      a pohyb na vypnutém účtu ze zůstatků zmizí (app.aktualni_zustatky_uctu
+--      počítá jen aktivní účty). Synchronizace banky (služba) zapisuje dál:
+--      staré živé připojení na vypnutém účtu nesmí přestat stahovat.
+--      ROZHODNOUT: (otázka 159) smí se na vypnutý účet dopsat platba
+--      (doplnění historie zavřeného účtu)? Teď ne — nejdřív účet zapnout.
+--
 -- Co se záměrně NEDĚLÁ:
 --   * Žádný účet se nikomu nepřiřazuje (otázka 98) a nic se nepřepisuje.
 --     Ostrá data se nemění: jen funkce, politiky, granty a spouště.
@@ -250,6 +260,58 @@ revoke all on function app.hlida_pripojeni_vypnuteho_uctu() from public, anon, a
 create trigger trg_pripojeni_vypnuteho_uctu
   before insert or update of platebni_ucet_id, stav, odpojeno_kdy on public.integrace_pripojeni
   for each row execute function app.hlida_pripojeni_vypnuteho_uctu();
+
+
+-- ---------------------------------------------------------------------
+-- 4. Na vypnutý účet přihlášený platbu nezapíše
+--
+-- SECURITY INVOKER schválně (vzor app.hlida_zdroj_transakce): rozhoduje
+-- role, která zapisuje (current_user), ne vlastník funkce. Přihlášený
+-- (přímý zápis přes REST, importovat_vypis i importovat_transakce — obě
+-- běží s právy volajícího) na vypnutý účet nezapíše. Služba a SECURITY
+-- DEFINER funkce (current_user = vlastník) ano: synchronizace banky staré
+-- živé připojení na vypnutém účtu dál stahuje (oddíl 3b).
+--
+-- Účet se čte přes RLS jako přihlášený. Nenajde-li ho (není vidět, nebo
+-- je jiné firmy), spoušť nerozhoduje — takový zápis odmítne politika
+-- transakce_insert (finance.manage za celou firmu vidí všechny účty
+-- firmy) a spoušť firmy app.hlida_firmu_transakce. Firma se tu proto
+-- nefiltruje podruhé.
+--
+-- Hlídá jen INSERT: přihlášený transakci měnit nemůže (bez grantu UPDATE
+-- a pravidlo transakce_no_update), staré platby na vypnutém účtu zůstávají.
+-- ---------------------------------------------------------------------
+
+create function app.hlida_zapis_na_vypnuty_ucet()
+returns trigger
+language plpgsql security invoker set search_path = ''
+as $$
+declare
+  v_aktivni boolean;
+begin
+  if current_user not in ('authenticated', 'anon') then
+    return new;
+  end if;
+
+  select u.aktivni into v_aktivni
+    from public.platebni_ucty u
+   where u.id = new.ucet_id;
+  if v_aktivni is false then
+    raise exception 'Platební účet je vypnutý — platbu na něj zapsat nejde. Zapněte ho v pohledu Celá firma → Platby → Platební účty, nebo platbu zapište na jiný účet.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+comment on function app.hlida_zapis_na_vypnuty_ucet() is
+  'Spoušť: přihlášený (přímý zápis i import výpisu) nezapíše platbu na vypnutý '
+  'platební účet — součty ho nepočítají. Služba zapisuje dál (synchronizace banky).';
+
+revoke all on function app.hlida_zapis_na_vypnuty_ucet() from public, anon, authenticated;
+
+create trigger trg_zapis_na_vypnuty_ucet
+  before insert on public.transakce
+  for each row execute function app.hlida_zapis_na_vypnuty_ucet();
 
 
 -- Stará data: vypnutý účet, na který už živé připojení míří, se jen

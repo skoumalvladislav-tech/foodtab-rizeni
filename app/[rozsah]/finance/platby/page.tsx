@@ -28,6 +28,7 @@ import {
   hlaskaBezUctuPobocky,
   KDO_SPRAVUJE_UCTY,
   KOTVA_UCTU,
+  kotvaUctu,
   maPobockaAktivniUcet,
   mistoHlaskyUctu,
   nactiPobockyBezUctu,
@@ -381,8 +382,9 @@ export default async function FinancePlatby({
   const pobockaBezUctu = pobocka !== null && (maPobockaAktivniUcet(bezUctu, pobocka) ?? platebniUcty.length > 0) === false
 
   // Hláška po úpravě účtu (chyba i „Účet uložen"): stránka po ní sjede na
-  // sekci Platební účty (kotva), takže se kreslí U ÚČTU, ne nahoře mimo
-  // obrazovku (adresaUctu v akce.ts). Bez `ucet` v adrese nahoře jako dřív.
+  // kartu upraveného účtu (kotvaUctu, adresaUctu v akce.ts), takže se
+  // kreslí v ní, U ÚČTU — ne nahoře mimo obrazovku. Bez `ucet` v adrese
+  // nahoře jako dřív.
   const mistoHlasky = pobocka ? { kde: 'nahore' as const } : mistoHlaskyUctu(ucetHlasky, vsechnyUcty.map((u) => u.id))
   const hlaskaUctu = chyba
     ? { text: chyba, barva: 'var(--bad)' }
@@ -393,9 +395,15 @@ export default async function FinancePlatby({
   const hlaskaZde = (kde: string) => {
     if (!hlaskaUctu) return null
     const sedi = mistoHlasky.kde === 'ucet' ? kde === mistoHlasky.id : kde === mistoHlasky.kde
-    return sedi
-      ? <p role="status" style={{ margin: 0, fontSize: '13px', color: hlaskaUctu.barva }}>{hlaskaUctu.text}</p>
-      : null
+    if (!sedi) return null
+    // Účet z adresy na stránce není (zmizel, seznam se nenačetl): kotvu
+    // jeho karty nese hláška na začátku sekce, ať stránka sjede k ní.
+    const kotva = mistoHlasky.kde === 'sekce' ? mistoHlasky.kotva ?? undefined : undefined
+    return (
+      <p role="status" id={kotva} style={{ margin: 0, fontSize: '13px', color: hlaskaUctu.barva, scrollMarginTop: '16px' }}>
+        {hlaskaUctu.text}
+      </p>
+    )
   }
 
   // Součet potvrzených alokací PER TRANSAKCE — appka podle toho pozná,
@@ -730,10 +738,12 @@ export default async function FinancePlatby({
                 {(pobocka ? platebniUcty : vsechnyUcty).map((u, i) => {
                   const mimo = mimoPobocky.get(u.id)
                   return (
+                    // Kotva karty: sem se stránka vrací po úpravě účtu (adresaUctu) — hláška je hned pod názvem.
                     <div
                       key={u.id}
+                      id={pobocka ? undefined : kotvaUctu(u.id)}
                       style={{
-                        display: 'grid', gap: '8px',
+                        display: 'grid', gap: '8px', scrollMarginTop: '16px',
                         ...(i > 0 ? { borderTop: '1px solid var(--line-2)', paddingTop: '10px' } : {}),
                       }}
                     >

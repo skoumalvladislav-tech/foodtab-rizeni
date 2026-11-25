@@ -11,7 +11,7 @@ import { hlaskaBrany } from '@/lib/faktury-brana'
 import { naHalere } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { hlaskaUpravyUctu, NEPODARILO_ULOZIT_UCET, pobockaUctu, problemUctuProZapis, upravaUctu } from '@/lib/finance-platby-pobocka'
-import { adresaUctu, FIREMNI_VOLBA, KDO_SPRAVUJE_UCTY, KOTVA_UCTU } from '@/lib/finance-ucty-pobocek'
+import { adresaUctu, FIREMNI_VOLBA, KDO_PARUJE, KDO_SPRAVUJE_UCTY, kotvaUctu } from '@/lib/finance-ucty-pobocek'
 import { overitCisloUctu } from '@/lib/banka/ucet'
 import { najitNavrhyParovani } from '@/lib/finance-navrhy-parovani'
 
@@ -177,9 +177,9 @@ export async function zapsatTransakci(formData: FormData): Promise<void> {
 }
 
 /**
- * Zpět na Platební účty s chybou — hláška se ukáže U ÚČTU (`ucetId`),
- * stránka totiž sjede na kotvu sekce účtů (adresaUctu). Explicitní
- * `never` — za voláním TS ví, že se nepokračuje.
+ * Zpět na Platební účty s chybou — stránka sjede na kartu účtu (`ucetId`)
+ * a hláška se ukáže v ní (adresaUctu); bez účtu na začátku sekce účtů.
+ * Explicitní `never` — za voláním TS ví, že se nepokračuje.
  */
 function zpetNaUcty(rozsah: string, text: string, ucetId: string | null = null): never {
   redirect(adresaUctu(rozsah, { chyba: text }, ucetId))
@@ -189,7 +189,7 @@ function zpetNaUcty(rozsah: string, text: string, ucetId: string | null = null):
  * Úprava EXISTUJÍCÍHO platebního účtu (Finance Fáze 0, krok 3, bod 4):
  * pobočka, číslo účtu / IBAN, název a aktivní.
  *
- * Jen v pohledu Celá firma a jen se „Správa financí" ZA CELOU FIRMU —
+ * Jen v pohledu Celá firma a jen s finance.manage ZA CELOU FIRMU —
  * spolu s pobočkou účtu se přesunou VŠECHNY jeho dosavadní platby
  * (transakce pobočku nemá, patří jí přes účet) v Platbách, Cashflow,
  * Tržbách i v exportu pro účetního, a číslo účtu je to, podle čeho
@@ -229,8 +229,8 @@ export async function upravitPlatebniUcet(formData: FormData): Promise<void> {
     await aktivniPobockaFirmy(supabase, tenantId, vybrana),
   )
   if (uprava.stav === 'chyba') zpetNaUcty(rozsah, uprava.text, ucet.id)
-  // Beze změny se nic nezapisuje (ani do auditu).
-  if (uprava.stav === 'beze_zmeny') redirect(`/${rozsah}/finance/platby#${KOTVA_UCTU}`)
+  // Beze změny se nic nezapisuje (ani do auditu) — zpět ke kartě účtu, ne na začátek sekce.
+  if (uprava.stav === 'beze_zmeny') redirect(`/${rozsah}/finance/platby#${kotvaUctu(ucet.id)}`)
 
   // `.select()` vrací změněné řádky: RLS umí UPDATE odmítnout tiše
   // (0 řádků, žádná chyba) — bez vráceného řádku se nic nezměnilo.
@@ -413,8 +413,8 @@ export async function odmitnoutNavrh(formData: FormData): Promise<void> {
 /**
  * „Najít návrhy" — hledání na žádost (jinak běží po synchronizaci banky
  * a po importu výpisu). Nejdřív DATABÁZE pod přihlášeným: potvrzovat
- * párování smí (`smi_potvrdit_parovani` — Správa financí + Vidět přijaté
- * faktury za celou firmu). Teprve pak hledání službou
+ * párování smí (`smi_potvrdit_parovani` — finance.manage + faktury.read
+ * za celou firmu). Teprve pak hledání službou
  * (lib/finance-navrhy-parovani.ts): firma jen z přihlášení, do Faktur
  * přes pristupKFakturamUlohy, zápis jen funkcí `zapsat_navrhy_parovani`
  * (návrh nic neplatí, potvrzuje ho člověk). Z formuláře se nebere nic
@@ -425,7 +425,7 @@ export async function najitNavrhyTed(formData: FormData): Promise<void> {
   const { supabase, tenantId } = await pripravitFiremni(rozsah, 'finance.manage', PAROVANI_JEN_FIRMA)
   const { data: smi, error } = await supabase.rpc('smi_potvrdit_parovani', { p_tenant: tenantId })
   if (error || smi !== true) {
-    redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent('Hledat návrhy smí ten, kdo má „Správu financí“ i „Vidět přijaté faktury“ za celou firmu.')}`)
+    redirect(`${FRONTA(rozsah)}?chyba=${encodeURIComponent(`Hledat návrhy smí ${KDO_PARUJE}.`)}`)
   }
   const vysledek = await najitNavrhyParovani(tenantId, { konecMs: Date.now() + 20_000 })
   revalidatePath(`/${rozsah}/finance/platby`)

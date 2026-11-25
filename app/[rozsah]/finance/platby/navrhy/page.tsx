@@ -13,6 +13,7 @@ import { koruny } from '@/lib/mzdy'
 import { DUVODY_NAVRHU, jeVKorunach, navrhPlati, type DuvodNavrhu } from '@/lib/finance-parovani'
 import { protistranaNeboUcet } from '@/lib/banka/ucet'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
+import { KDO_PARUJE } from '@/lib/finance-ucty-pobocek'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../../pobocka-bez-firmy'
 import Nadpis from '../../../nadpis'
@@ -235,7 +236,7 @@ export default async function NavrhyParovani({
           ) : null}
           {!smiPotvrdit ? (
             <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
-              Potvrzovat návrhy smí ten, kdo má „Správu financí“ i „Vidět přijaté faktury“ za celou firmu.
+              Potvrzovat návrhy smí {KDO_PARUJE}.
             </p>
           ) : null}
         </div>

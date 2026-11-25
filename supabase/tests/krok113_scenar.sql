@@ -31,6 +31,9 @@
 --   3b. a naopak: k vypnutému účtu nejde živé připojení založit,
 --      přesměrovat ani obnovit; staré živé připojení synchronizace dál
 --      mění a odpojit ho jde; spoušť filtruje firmu sama a zamyká účet;
+--   3c. na vypnutý účet přihlášený platbu nezapíše — přímý zápis,
+--      importovat_vypis ani importovat_transakce; služba dál stahuje;
+--      ruční platba v dnešním tvaru appky na zapnutý účet beze změny;
 --   4. zkouška 11 — živé tvary účtů (firemní bez čísla, účet pobočky
 --      s číslem ve starém zápisu) po všech zkouškách beze změny.
 --
@@ -83,6 +86,20 @@ declare
 begin
   execute p_sql;
   get diagnostics n = row_count;
+  return n;
+exception when others then
+  raise notice '  (spadlo: % %)', sqlstate, sqlerrm;
+  return -1;
+end $$;
+
+-- Výsledek dotazu jako číslo (počet nových pohybů importu); -1, když
+-- spadl (vypíše proč) — kontrola za ním pak spadne SVÝM jménem.
+create or replace function pg_temp.novych(p_sql text)
+returns integer language plpgsql as $$
+declare
+  n integer;
+begin
+  execute p_sql into n;
   return n;
 exception when others then
   raise notice '  (spadlo: % %)', sqlstate, sqlerrm;
@@ -623,6 +640,84 @@ select pg_temp.check('funkce spouští vypnutého účtu přihlášený ani anon
 
 
 \echo ''
+\echo '== 3c. Na vypnutý účet přihlášený platbu nezapíše ======================='
+
+-- Pravidlo „na vypnutý účet nic" drží databáze, ne jen appka: přímý zápis
+-- přes REST i import výpisu (importovat_vypis, importovat_transakce) pod
+-- přihlášeným skončí 23514. Služba zapisuje dál — tady jako vlastník
+-- databáze, stejně jako v krok111 (čistý harness nedává service_role
+-- zápis do transakce): staré živé připojení na vypnutém účtu stahuje dál.
+insert into public.import_davky (tenant_id, typ, soubor_nazev, soubor_hash, stav)
+values (:'firma', 'banka_csv', 'krok113-3c.csv', 'krok113-3c-davka', 'zpracovano') returning id as d_3c \gset
+
+select pg_temp.check('příprava 3c: účet Cyrila je vypnutý a nemá žádnou platbu, účet Bety je zapnutý',
+  (select not aktivni from public.platebni_ucty where id = :'u_cyril')
+  and not exists (select 1 from public.transakce where ucet_id = :'u_cyril')
+  and (select aktivni from public.platebni_ucty where id = :'u_beta'));
+
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select pg_temp.check('majitelka přímým zápisem nezapíše platbu na vypnutý účet: 23514',
+  pg_temp.spadne_hlaskou(format(
+    'insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj) values (%L, %L, %L, 12345, %L, %L)',
+    :'firma', :'u_cyril', 'prijem', '2033-03-01', 'rucni'),
+    '23514', 'platbu na něj zapsat nejde'));
+select pg_temp.check('… ani importem výpisu přes importovat_vypis: 23514',
+  pg_temp.spadne_hlaskou(format('select * from public.importovat_vypis(%L, %L, %L, %L, %L, %L::jsonb)',
+    :'firma', :'u_cyril', 'csv_banka', 'krok113-3c.csv', 'krok113-3c-vypis',
+    '[{"datum":"2033-03-02","smer":"prijem","castka_haleru":500,"mena":"CZK","protistrana":"Krok113 3c","protiucet":"","vs":"","poznamka":""}]'),
+    '23514', 'platbu na něj zapsat nejde'));
+
+select set_config('test.user_id', :'spr_firma', false);
+select pg_temp.check('správce celé firmy, ne majitelka, nezapíše na vypnutý účet ani přes importovat_transakce: 23514',
+  pg_temp.spadne_hlaskou(format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
+    :'firma', :'u_cyril', :'d_3c', 'csv_banka',
+    '[{"datum":"2033-03-03","smer":"vydaj","castka_haleru":700,"mena":"CZK","protistrana":"Krok113 3c","protiucet":"","vs":"","poznamka":""}]'),
+    '23514', 'platbu na něj zapsat nejde'));
+
+-- Zkouška 11: ruční platba v tvaru, v jakém ji zapisuje appka
+-- (zapsatTransakci: prázdná protistrana a VS, bez dávky a id od banky),
+-- na zapnutý účet projde a spoušť ji nezmění.
+select set_config('test.user_id', :'maj', false);
+select pg_temp.check('na zapnutý účet Bety zapíše majitelka ruční platbu v dnešním tvaru appky',
+  pg_temp.projde(format(
+    'insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, poznamka, zdroj) values (%L, %L, %L, 4321, %L, %L, %L, %L, %L)',
+    :'firma', :'u_beta', 'vydaj', '2033-03-04', '', '', 'Krok113 3c živý tvar', 'rucni')));
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('… a spoušť ji nezměnila: částka, měna CZK, prázdná protistrana a VS, bez dávky, id od banky a storna',
+  exists (select 1 from public.transakce
+           where ucet_id = :'u_beta' and poznamka = 'Krok113 3c živý tvar'
+             and tenant_id = :'firma' and smer = 'vydaj' and castka_haleru = 4321 and mena = 'CZK'
+             and datum = '2033-03-04' and protistrana = '' and vs = '' and protiucet = '' and zdroj = 'rucni'
+             and externi_id is null and import_davka_id is null and storno_of is null));
+
+-- Import a kontrola ve DVOU příkazech: dotaz `exists` ve stejném příkazu
+-- jako volání importu by řádek, který import teprve zapisuje, neviděl
+-- (snímek dat je ze začátku příkazu).
+select pg_temp.novych(format('select pocet_novych from public.importovat_vypis(%L, %L, %L, %L, %L, %L::jsonb)',
+    :'firma', :'u_cyril', 'banka_api', 'krok113-3c-api', 'krok113-3c-api',
+    '[{"datum":"2033-03-05","smer":"prijem","castka_haleru":900,"mena":"CZK","protistrana":"Krok113 banka","protiucet":"","vs":"","poznamka":"","externi_id":"krok113-3c-x1"}]'))
+  as n_3c_sluzba \gset
+select pg_temp.check('služba zapisuje na vypnutý účet dál: stažení z banky přes importovat_vypis, 1 nový pohyb — naměřeno: ' || :'n_3c_sluzba',
+  :'n_3c_sluzba'::integer = 1
+  and exists (select 1 from public.transakce
+               where ucet_id = :'u_cyril' and externi_id = 'krok113-3c-x1' and zdroj = 'banka_api' and castka_haleru = 900));
+select pg_temp.check('po odmítnutých zápisech na vypnutém účtu nezůstalo nic: jen pohyb služby, dávka importovat_vypis se nezaložila',
+  (select count(*) from public.transakce where ucet_id = :'u_cyril') = 1
+  and not exists (select 1 from public.import_davky where tenant_id = :'firma' and soubor_hash = 'krok113-3c-vypis')
+  and (select pocet_novych from public.import_davky where id = :'d_3c') = 0);
+
+select pg_temp.check('spoušť zápisu na vypnutý účet: před založením platby, s právy volajícího, přihlášený ani anonym ji přímo nespustí',
+  exists (select 1 from pg_trigger t
+           where t.tgrelid = 'public.transakce'::regclass and t.tgname = 'trg_zapis_na_vypnuty_ucet'
+             and t.tgenabled = 'O' and t.tgfoid = 'app.hlida_zapis_na_vypnuty_ucet()'::regprocedure)
+  and not (select prosecdef from pg_proc where oid = 'app.hlida_zapis_na_vypnuty_ucet()'::regprocedure)
+  and not has_function_privilege('authenticated', 'app.hlida_zapis_na_vypnuty_ucet()', 'execute')
+  and not has_function_privilege('anon', 'app.hlida_zapis_na_vypnuty_ucet()', 'execute'));
+
+
+\echo ''
 \echo '== 4. Zkouška 11: živé tvary účtů beze změny ============================'
 
 select md5(string_agg(u::text, '|' order by u.id)) as otisk_po
@@ -635,6 +730,8 @@ select pg_temp.check('firemní účet a účet Bety po všech zkouškách beze z
 \echo '== Úklid ================================================================'
 
 delete from public.integrace_pripojeni where tenant_id in (:'firma', :'firma_b');
+delete from public.transakce where tenant_id in (:'firma', :'firma_b');
+delete from public.import_davky where tenant_id in (:'firma', :'firma_b');
 delete from public.platebni_ucty where tenant_id in (:'firma', :'firma_b');
 -- Majitelé, jejich firmy a pobočky zůstávají (jako v krocích 103 až 112):
 -- posledního majitele firmy pojistka smazat nedovolí. Ostatní lidé pryč.
@@ -648,8 +745,10 @@ delete from public.employees where id in (:'e_spr_pob', :'e_cte_pob', :'e_cte_fi
 delete from public.position_permissions where position_id in (:'z_sprava', :'z_cteni', :'z_jen_sprava');
 delete from public.positions where id in (:'z_sprava', :'z_cteni', :'z_jen_sprava');
 
-select pg_temp.check('úklid: účty a připojení kroku 113 pryč, spouště účtu zapnuté',
+select pg_temp.check('úklid: účty, platby, dávky a připojení kroku 113 pryč, spouště účtu zapnuté',
   not exists (select 1 from public.platebni_ucty where tenant_id in (:'firma', :'firma_b'))
+  and not exists (select 1 from public.transakce where tenant_id in (:'firma', :'firma_b'))
+  and not exists (select 1 from public.import_davky where tenant_id in (:'firma', :'firma_b'))
   and not exists (select 1 from public.integrace_pripojeni where tenant_id in (:'firma', :'firma_b'))
   and (select count(*) from pg_trigger
         where tgrelid = 'public.platebni_ucty'::regclass

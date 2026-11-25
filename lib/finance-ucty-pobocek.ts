@@ -32,6 +32,16 @@ export const FIREMNI_UCTY = 'Firemní účty (bez pobočky)'
 export const KOTVA_UCTU = 'platebni-ucty'
 
 /**
+ * Kotva karty JEDNOHO účtu v sekci Platební účty. Na ni se stránka vrací
+ * po úpravě účtu — karta má pod sebou formulář, takže u čtvrtého a dalšího
+ * účtu (na telefonu u třetího) by kotva celé sekce nechala účet i jeho
+ * hlášku pod okrajem obrazovky.
+ */
+export function kotvaUctu(ucetId: string): string {
+  return `ucet-${ucetId}`
+}
+
+/**
  * Název práva `finance.manage` tak, jak ho majitel vidí v Nastavení →
  * Role (katalog `permissions`, 20260823120100_catalog.sql). Hlášky „kdo to
  * smí" ho musí jmenovat stejně — dřív psaly „Správa financí", právo, které
@@ -41,6 +51,15 @@ export const PRAVO_SPRAVY_FINANCI = 'Zadávat faktury a náklady'
 
 /** Kdo spravuje platební účty (přiřazení pobočky, úprava, import výpisů). */
 export const KDO_SPRAVUJE_UCTY = `ten, kdo má právo „${PRAVO_SPRAVY_FINANCI}“ za celou firmu`
+
+/** Název práva `faktury.read` z obrazovky Role (20260915100000_modul_faktury.sql). */
+export const PRAVO_CIST_FAKTURY = 'Vidět přijaté faktury'
+
+/**
+ * Kdo hledá a potvrzuje návrhy párování (`smi_potvrdit_parovani`): obě
+ * práva za celou firmu, pojmenovaná jako na obrazovce Role.
+ */
+export const KDO_PARUJE = `ten, kdo má právo „${PRAVO_SPRAVY_FINANCI}“ i „${PRAVO_CIST_FAKTURY}“ za celou firmu`
 
 export type PobockaBezUctu = { branchId: string; nazev: string }
 
@@ -265,25 +284,32 @@ export function hlaskaZalozeniPripojeni(chyba: { code?: string | null; message?:
 }
 
 /**
- * Adresa zpět na Platební účty po úpravě účtu. Stránka sjede na kotvu
- * sekce účtů — hláška (chyba i „Účet uložen") se proto kreslí U ÚČTU
- * (`ucet`), ne nahoře, kde by byla mimo obrazovku. Prázdné `ucet` = účet
- * neznáme, hláška nahoře v sekci účtů.
+ * Adresa zpět na Platební účty po úpravě účtu. Stránka sjede na kartu
+ * TOHO účtu (`kotvaUctu`) a hláška (chyba i „Účet uložen") se kreslí
+ * v ní, hned pod názvem účtu. Účet neznáme (`ucetId` null) = kotva
+ * začátku sekce účtů, hláška tam.
  */
 export function adresaUctu(rozsah: string, hlaska: { chyba: string } | { upraveno: true }, ucetId: string | null): string {
   const parametr = 'chyba' in hlaska ? `chyba=${encodeURIComponent(hlaska.chyba)}` : 'ucet_upraven=1'
-  return `/${rozsah}/finance/platby?${parametr}&ucet=${encodeURIComponent(ucetId ?? '')}#${KOTVA_UCTU}`
+  const kotva = ucetId ? kotvaUctu(ucetId) : KOTVA_UCTU
+  return `/${rozsah}/finance/platby?${parametr}&ucet=${encodeURIComponent(ucetId ?? '')}#${encodeURIComponent(kotva)}`
 }
 
 /**
  * Kam na stránce Plateb patří hláška z adresy: bez `ucet` nahoru (zápis
  * platby, import…), s `ucet` jednoho z vypsaných účtů k němu, jinak na
  * začátek sekce účtů.
+ *
+ * `kotva` u začátku sekce: adresa míří na kartu účtu, která na stránce
+ * není (účet mezitím zmizel, nebo se seznam účtů nenačetl). Hláška na
+ * začátku sekce pak tu kotvu nese sama — jinak by stránka zůstala nahoře
+ * a hláška by byla mimo obrazovku.
  */
 export function mistoHlaskyUctu(
   ucetParam: string | string[] | undefined,
   idUctu: readonly string[],
-): { kde: 'nahore' } | { kde: 'sekce' } | { kde: 'ucet'; id: string } {
+): { kde: 'nahore' } | { kde: 'sekce'; kotva: string | null } | { kde: 'ucet'; id: string } {
   if (typeof ucetParam !== 'string') return { kde: 'nahore' }
-  return idUctu.includes(ucetParam) ? { kde: 'ucet', id: ucetParam } : { kde: 'sekce' }
+  if (idUctu.includes(ucetParam)) return { kde: 'ucet', id: ucetParam }
+  return { kde: 'sekce', kotva: ucetParam ? kotvaUctu(ucetParam) : null }
 }
