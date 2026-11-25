@@ -552,9 +552,12 @@ reset role;
 select set_config('test.user_id', '', false);
 
 -- Odpojené připojení (historie) k vypnutému účtu nevadí.
-insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id, odpojeno_kdy)
-values (:'firma', 'banka', 'krok113-odpojene', 'zakaznicky', 'Krok113 odpojené', 'odpojeno', :'u_cyril', now())
-returning id as pr_odpojene \gset
+select pg_temp.check('odpojené připojení k vypnutému účtu spoušť pustí: historie',
+  pg_temp.projde(format(
+    'insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id, odpojeno_kdy) values (%L, %L, %L, %L, %L, %L, %L, now())',
+    :'firma', 'banka', 'krok113-odpojene', 'zakaznicky', 'Krok113 odpojené', 'odpojeno', :'u_cyril')));
+select id as pr_odpojene from public.integrace_pripojeni
+ where tenant_id = :'firma' and poskytovatel = 'krok113-odpojene' \gset
 select pg_temp.check('odpojené připojení na vypnutém účtu nejde vrátit stavem do živého: 23514',
   pg_temp.spadne_hlaskou(format('update public.integrace_pripojeni set stav = %L where id = %L', 'pripojeno', :'pr_odpojene'),
     '23514', 'Platební účet je vypnutý'));
@@ -564,10 +567,13 @@ select pg_temp.check('… ani smazáním času odpojení: 23514',
 
 -- Živé připojení na zapnutém účtu Bety (dnešní tvar: připojeno, bez času
 -- odpojení) spoušť přijme a nezmění; přesměrovat na vypnutý účet nejde.
-insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id)
-values (:'firma', 'banka', 'krok113-beta', 'zakaznicky', 'Krok113 Beta', 'pripojeno', :'u_beta')
-returning id as pr_beta \gset
-select pg_temp.check('živé připojení k zapnutému účtu Bety: spoušť ho přijala beze změny',
+select pg_temp.check('živé připojení k zapnutému účtu Bety spoušť pustí',
+  pg_temp.projde(format(
+    'insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id) values (%L, %L, %L, %L, %L, %L, %L)',
+    :'firma', 'banka', 'krok113-beta', 'zakaznicky', 'Krok113 Beta', 'pripojeno', :'u_beta')));
+select id as pr_beta from public.integrace_pripojeni
+ where tenant_id = :'firma' and poskytovatel = 'krok113-beta' \gset
+select pg_temp.check('… a nezměnila ho: připojeno, bez času odpojení, na účtu Bety',
   exists (select 1 from public.integrace_pripojeni
            where id = :'pr_beta' and stav = 'pripojeno' and odpojeno_kdy is null and platebni_ucet_id = :'u_beta'));
 select pg_temp.check('živé připojení nejde přesměrovat na vypnutý účet: 23514',
