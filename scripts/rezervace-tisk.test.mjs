@@ -479,19 +479,23 @@ console.log('\n== 3. Vykreslení listu (skutečný tisk/obsah.tsx) ==\n')
     && b28[1].bunky[0] === '01:30' && b28[1].bunky[4] === 'Noční Host' && !list.includes('Zrušený Host')
     && !den(bernard, 'Neděle 29. listopadu 2026').includes('Noční Host'))
   ok('souhrn dne: „1 akce · 1 rezervace · 44 hostů“', den(bernard, 'Pátek 27. listopadu 2026').includes('<span class="ds-tisk-souhrn">1 akce · 1 rezervace · 44 hostů</span>'))
-  ok('týden: den bez záznamu je v listu s „Nic zapsaného“', den(bernard, 'Pondělí 23. listopadu 2026').includes('Nic zapsaného') && !den(bernard, 'Pondělí 23. listopadu 2026').includes('<table'))
+  ok('týden: den bez záznamu je v listu s „Žádná akce ani rezervace“ (ne „nic“ — poznámka ke dni být může)',
+    den(bernard, 'Pondělí 23. listopadu 2026').includes('<span class="ds-tisk-souhrn">Žádná akce ani rezervace</span>') && !den(bernard, 'Pondělí 23. listopadu 2026').includes('<table'))
   ok('poznámka ke dni u své pobočky a dne (ne poznámka k rezervaci)',
     den(bernard, 'Pátek 27. listopadu 2026').includes('<li>Sál: zavřený od 22:00</li>') && den(perla, 'Pátek 27. listopadu 2026').includes('<li>Perla: kapela od 20:00</li>')
     && !perla.includes('Sál: zavřený') && !list.includes('K rezervaci, ne ke dni'))
 
   const sZrusenymi = await tisk({ hledani: { od: '2026-11-23', do: '2026-11-29', zrusene: '1' } })
-  const zr = radky(den(oddil.call(null, 'Bernard Bar Tábor').length ? sZrusenymi.html.match(/<section class="ds-tisk-oddil" aria-label="Bernard Bar Tábor">[\s\S]*?(?=<section class="ds-tisk-oddil")/)?.[0] ?? '' : '', 'Sobota 28. listopadu 2026'))
+  const bernardZr = sZrusenymi.html.match(/<section class="ds-tisk-oddil" aria-label="Bernard Bar Tábor">[\s\S]*?(?=<section class="ds-tisk-oddil")/)?.[0] ?? ''
+  const zr = radky(den(bernardZr, 'Sobota 28. listopadu 2026'))
   const zrusena = zr.find((r) => r.bunky[4] === 'Zrušený Host')
   ok(`zrusene=1: zrušená vytištěná, označená (data-zrusena) a se slovem „Zrušená“ (${JSON.stringify(zrusena)})`,
     !!zrusena && zrusena.zrusena && zrusena.bunky[1] === 'Rezervace Zrušená' && sZrusenymi.html.includes('i zrušené a nedorazivší'))
 
   const jenAkce = await tisk({ hledani: { od: '2026-11-23', do: '2026-11-29', co: 'akce' } })
   ok('co=akce: nadpis „Přehled akcí“, jen akce', jenAkce.html.includes('<h1>Přehled akcí</h1>') && jenAkce.html.includes('Firemní večírek Alfa') && jenAkce.html.includes('Svatba') && !jenAkce.html.includes('Jana Nováková'))
+  ok('co=akce: den jen s rezervacemi má souhrn „Žádná akce“ (ne „ani rezervace“ — ty se netisknou)',
+    /Sobota 28\. listopadu 2026 <span class="ds-tisk-souhrn">Žádná akce<\/span>/.test(jenAkce.html) && !jenAkce.html.includes('Žádná akce ani rezervace'))
 
   const mesic = await tisk({ hledani: { od: '2026-11-01', do: '2026-11-30' } })
   const dnyBernardu = [...(mesic.html.match(/<section class="ds-tisk-oddil" aria-label="Bernard Bar Tábor">[\s\S]*?(?=<section class="ds-tisk-oddil")/)?.[0] ?? '').matchAll(/<h3 class="ds-tisk-den-nadpis">([^<]+)/g)].map((m) => m[1].trim())

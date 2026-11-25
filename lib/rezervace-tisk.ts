@@ -236,7 +236,7 @@ export type DenTisku = {
   den: string
   /** „Pátek 27. listopadu 2026“ */
   nadpis: string
-  /** „1 akce · 3 rezervace · 64 hostů“ / „Nic zapsaného“ */
+  /** „1 akce · 3 rezervace · 64 hostů“ / „Žádná akce ani rezervace“ */
   souhrn: string
   poznamky: string[]
   polozky: PolozkaTisku[]
@@ -260,7 +260,7 @@ export type Tisk = {
   vynechano: number
 }
 
-/** Do kolika dní se v přehledu ukazují i dny bez záznamu („Nic zapsaného“) — den a týden ano, měsíc ne. */
+/** Do kolika dní se v přehledu ukazují i dny bez záznamu („Žádná akce ani rezervace“) — den a týden ano, měsíc ne. */
 export const PRAZDNE_DNY_DO = 7
 
 const poznamkaText = (p: { nadpis: string; obsah: string }) => {
@@ -271,9 +271,16 @@ const poznamkaText = (p: { nadpis: string; obsah: string }) => {
 
 const podleVzniku = (a: PoznamkaKTisku, b: PoznamkaKTisku) => Date.parse(a.vytvoreno_kdy) - Date.parse(b.vytvoreno_kdy)
 
-/** „1 akce · 3 rezervace · 64 hostů“ — bez nul; prázdný den „Nic zapsaného“. */
-export function souhrnTisku(s: SouhrnDne): string {
-  if (s.rezervaci + s.akci === 0) return s.zrusenych ? 'Jen zrušené nebo nedorazili' : 'Nic zapsaného'
+/**
+ * „1 akce · 3 rezervace · 64 hostů“ — bez nul. Den bez záznamu říká, ČEHO
+ * tam není („Žádná akce ani rezervace“, u „Jen akce“ „Žádná akce“) — ne
+ * „nic“: poznámka ke dni („kapela od 20:00“) pod ním být může.
+ */
+export function souhrnTisku(s: SouhrnDne, jenAkce = false): string {
+  if (s.rezervaci + s.akci === 0) {
+    if (s.zrusenych) return 'Jen zrušené nebo nedorazili'
+    return jenAkce ? 'Žádná akce' : 'Žádná akce ani rezervace'
+  }
   return [
     s.akci ? pocet(s.akci, 'akce', 'akce', 'akcí') : null,
     s.rezervaci ? pocet(s.rezervaci, 'rezervace', 'rezervace', 'rezervací') : null,
@@ -355,12 +362,12 @@ export function sestavitTisk({
       dnyOddilu.push({
         den,
         nadpis: denDlouze(den),
-        souhrn: souhrnTisku(souhrnDne(radky)),
+        souhrn: souhrnTisku(souhrnDne(radky), volby.jenAkce),
         poznamky,
         polozky: radky.map((r) => polozkaTisku(r, telefony.get(r.id) ?? '')),
       })
     }
-    return { pobocka: { id: p.id, nazev: p.nazev }, souhrn: souhrnTisku(souhrnDne(jeho)), dny: dnyOddilu }
+    return { pobocka: { id: p.id, nazev: p.nazev }, souhrn: souhrnTisku(souhrnDne(jeho), volby.jenAkce), dny: dnyOddilu }
   })
 
   const co = volby.jenAkce ? 'Jen akce' : 'Akce i rezervace'
