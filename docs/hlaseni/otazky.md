@@ -2197,6 +2197,12 @@ nikdo).
   Pokud je účet společný pro obě pobočky, zůstane firemní; rozpočítání klíčem (podle tržeb, pevným podílem)
   by byla nová funkce — napište, který klíč.
 
+> **ROZHODNUTÍ ŠÉFÍKA (25. 11.): obě pobočky mají stejný bankovní účet, a to firemní účet FoodTab.**
+> Účet zůstává firemní (bez pobočky) a žádné pobočce se nepřiřazuje. Jeho platby jsou v přehledech za
+> celou firmu, na pobočce se neukazují. Varování „pobočka nemá účet" se proto u firmy se společným účtem
+> mění na vysvětlení (dodatek ke kroku 3). Otázka je tím uzavřená. Jestli se mají platby společného účtu
+> dát připsat pobočce, je nová otázka 280.
+
 ## 99. Kdo dostane právo „Schvalovat nákupy a platby“ při zavedení?
 
 **Vzniklo:** 19. 11. 2026 (audit kroku 0, krok 4).
@@ -2220,6 +2226,12 @@ nikdo).
   špatně přeřazuje — proto žádné hromadné zařazení bez potvrzení.
 - **Když to má být jinak:** pošlete osnovu od účetní (názvy a případně účty). Rozpočty mají dnes vlastní
   pevný výčet (tržby, suroviny, mzdy…); sjednocení s novými kategoriemi je samostatný krok.
+
+> **ROZHODNUTÍ ŠÉFÍKA (25. 11.): osnovu od účetní nebude, vytvoříme vlastní.** Krok 5 proto zakládá
+> bohatší výchozí sadu pro gastro ve skupinách (Suroviny a zboží, Provozní materiál, Prostory a energie,
+> Služby, Lidé, Ostatní). U každé kategorie je příznak pro foodcost a beverage cost (pivo, víno, lihoviny,
+> nealko a káva zvlášť) a nepovinně číslo účtu jako vodítko pro účetní. Všechno jde v appce přejmenovat,
+> přidat a vypnout. Otázka je tím uzavřená.
 
 ## 101. Fronta 542 nemá soubory — odkud je přečíst?
 
@@ -2346,6 +2358,21 @@ od 25. 6. 2025; automatické párování sahá 180 dní zpět).
   nakupuje), doplní se jako další vlastní IČO a faktury s ním se budou řadit podle názvu dodavatele. Když je
   správně to v nastavení a 21249946 je chyba čtení faktur, opraví se těch 23 faktur ručně.
 
+> **ROZHODNUTÍ ŠÉFÍKA (25. 11.): IČO firmy je 21249946 (FoodTab).** Ověřil jsem to čtením ostré databáze
+> 25. 11.: 202 přijatých faktur je vystavených na odběratele 21249946, žádná na IČO z nastavení. IČO
+> v nastavení firmy navíc neprojde kontrolní číslicí, takže ho appka bere jako prázdné. Kontrola „faktura je
+> vystavená na jinou firmu" proto při příjmu faktur dnes vůbec neběží. 21249946 jako IČO DODAVATELE je chyba
+> čtení (AI vzala odběratele) — dnes 24 faktur.
+>
+> **Čeká na Šéfíka:** opravit IČO v nastavení firmy na 21249946. Appka na to obrazovku nemá; je to jeden
+> zápis do ostré databáze a udělám ho na výslovné „zapiš IČO". Potom začne příjem faktur hlídat odběratele:
+> faktura vystavená na jiné IČO (zatím jich přišlo 11) půjde do kontroly. Kód dál nic natvrdo nepíše
+> a pojistka „sporné IČO" zůstává.
+>
+> **Šéfík doplnil (25. 11.): některé faktury a doklady mohou být bez IČO.** V ostré databázi nemá IČO
+> dodavatele 2 324 z 3 177 faktur. Chybějící IČO proto samo není chyba ani důvod ke kontrole; dodavatel bez
+> IČO se pozná podle názvu a nikdy se sám nesloučí s jiným (platí pro kroky 5–8).
+
 ## 111. Faktury bez měny
 
 **Vzniklo:** 20. 11. 2026 (Finance Fáze 0, příprava kroku 2 — párování).
@@ -2392,6 +2419,9 @@ od 25. 6. 2025; automatické párování sahá 180 dní zpět).
   každý s právem číst Finance. V ostré databázi je dnes jeden účet a pobočku nemá.
 - **Když to má být jinak:** napište, který účet patří které pobočce. Nastaví se v Platbách u účtu a uvidí
   ho i lidé té pobočky.
+
+> **ROZHODNUTÍ ŠÉFÍKA (25. 11.): společný firemní účet FoodTab pro obě pobočky** — viz otázka 98.
+> Otázka je tím uzavřená.
 
 ## 115. Zrušit čtení přístupových údajů přes databázi i u rezervací?
 
@@ -2771,3 +2801,100 @@ krok 1. Nic jsem na něm neměnil.**
   faktura stejně nedostala.
 - **Když to má být jinak:** úhradu zrušit a fakturu nechat Uhrazenou. Je to malá změna v databázi
   a jedna kontrola ve scénáři.
+
+## 151. Odkud brát tržby v Rozpočtech
+
+**Vzniklo:** 24.–25. 11. 2026 (Finance Fáze 0, krok 3).
+
+- **Teď:** Rozpočty berou tržby jen z plateb zařazených do kategorie Tržby, ne z pokladny (Přehled přitom
+  ukazuje tržby z pokladny). Zdroj jsem nepřepínal. Pobočka, která platby nezařazuje, má u tržeb
+  „chybí tržby".
+- **Když to má být jinak:** Rozpočty začnou brát tržby z pokladny. Změní se skutečné tržby v Rozpočtech
+  i prime cost a zmizí „chybí tržby".
+
+## 152. Vypnout účet, na který je napojená banka
+
+**Vzniklo:** 24.–25. 11. 2026 (Finance Fáze 0, krok 3).
+
+- **Teď:** nejde — nejdřív se banka odpojí v Integracích. A naopak: k vypnutému účtu nejde banku napojit.
+- **Proč:** synchronizace na vypnutí účtu nehledí a zapisovala by na něj dál.
+- **Když to má být jinak:** obě pojistky zrušit a naučit synchronizaci vypnuté účty přeskakovat.
+
+## 153. Vypnutý účet se počítá jako žádný účet
+
+**Vzniklo:** 24.–25. 11. 2026 (Finance Fáze 0, krok 3).
+
+- **Teď:** pobočka, jejíž jediný účet je vypnutý, se všude bere jako „bez účtu", stejně jako u zůstatků.
+  Rozpočty a KPI u ní ukážou „–" místo starých čísel z vypnutého účtu.
+- **Když to má být jinak:** vypnuté účty počítat kvůli historii. Pak se ale rozejdou se zůstatky
+  a s Cashflow.
+
+## 154. Kdo smí založit účet pobočky
+
+**Vzniklo:** 24.–25. 11. 2026 (Finance Fáze 0, krok 3).
+
+- **Teď:** kdo má „Zadávat faktury a náklady" jen na jedné pobočce, smí účet své pobočky dál založit, ale
+  ne upravit ani vypnout. To smí jen správa financí za celou firmu.
+- **Když to má být jinak:** zakládání jen pro správu za celou firmu (jedna politika v databázi a jedna
+  akce v appce).
+
+## 155. Typ účtu, měna a počáteční zůstatek
+
+**Vzniklo:** 24.–25. 11. 2026 (Finance Fáze 0, krok 3).
+
+- **Teď:** přihlášený je při úpravě účtu nezmění a při založení nenastaví. Appka je ani nenabízí. Viz 157.
+
+## 156. Rozpočty bez práva vidět mzdy
+
+**Vzniklo:** 24. 11. 2026 (Finance Fáze 0, krok 3).
+
+- **Teď:** kdo nemá právo vidět mzdy, uvidí na kartě Mzdy „bez práva" a prime cost (%) se mu nespočítá.
+  Dřív mu prime cost vyšel, jako by mzdy byly 0.
+- **Když to má být jinak:** ukazovat prime cost i bez mezd — s rizikem zavádějícího procenta.
+
+## 157. Kdo zapíše počáteční zůstatek a měnu účtu
+
+**Vzniklo:** 25. 11. 2026 (Finance Fáze 0, krok 3, po revizi).
+
+- **Teď:** nikdo z přihlášených, jen služba. Nové účty mají zůstatek 0 a měnu CZK. Dřív si je správce
+  pobočky mohl nastavit přímým zápisem mimo appku.
+- **Když to má být jinak:** nová akce jen pro správu financí za celou firmu.
+
+## 158. Jak se jmenuje právo vidět finance
+
+**Vzniklo:** 25. 11. 2026 (Finance Fáze 0, krok 3, po revizi).
+
+- **Teď:** appka ho na 22 místech jmenuje „Vidět finanční přehled", obrazovka Role „Vidět tržby, náklady
+  a faktury". Neopravoval jsem — týká se to i obrazovek mimo krok 3.
+- **Když to má být jinak:** sjednotit — texty podle obrazovky Role, nebo přejmenovat právo. Mění se jen
+  texty, oprávnění ne.
+
+## 159. Dopsat platbu na vypnutý účet
+
+**Vzniklo:** 25. 11. 2026 (Finance Fáze 0, krok 3, po revizi).
+
+- **Teď:** nejde, ani ručně, ani importem výpisu — účet se musí nejdřív zapnout. Synchronizace banky
+  zapisuje dál.
+- **Proč:** pohyby vypnutého účtu se nepočítají do zůstatků ani přehledů, takže by z čísel tiše zmizely.
+- **Když to má být jinak:** povolit a ukazovat vypnuté účty v součtech zvlášť.
+
+## 160. Hlášky při párování jmenují právo, které neexistuje
+
+**Vzniklo:** 25. 11. 2026 (Finance Fáze 0, krok 3, po revizi).
+
+- **Teď:** dvě hlášky z databáze při párování mluví o „Správě financí"; na obrazovce Role je to
+  „Zadávat faktury a náklady".
+- **Volím:** opravit jen text v migraci kroku 2, která ještě není nasazená (začátek „Nemáte oprávnění
+  párovat" zůstane, podle něj hlášku poznává jeden scénář). Dělá se v dodatku ke kroku 3.
+- **Když to má být jinak:** nechat a opravit později novou migrací.
+
+## 280. Platby společného firemního účtu po pobočkách
+
+**Vzniklo:** 25. 11. 2026 (po rozhodnutí k otázkám 98 a 114).
+
+- **Teď:** platby společného účtu jsou jen v přehledech za celou firmu. Na pobočce se neukazují a žádné
+  pobočce se nepřipisují, ani odhadem. Pobočkové přehledy (Cashflow, Rozpočty, KPI po pobočkách) je tedy
+  nemají — appka to u firmy se společným účtem řekne vysvětlením místo varování.
+- **Když to má být jinak:** obě možnosti jsou nová funkce. (a) U jednotlivé platby ručně vybrat pobočku,
+  třeba nájem Perly. (b) Rozpočítat klíčem, třeba podle podílu tržeb nebo pevným procentem. Napište,
+  kterou.
