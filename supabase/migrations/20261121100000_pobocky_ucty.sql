@@ -33,14 +33,32 @@
 --      a počáteční zůstatek appka měnit nenabízí — kdyby to někdy bylo
 --      potřeba: `grant update (sloupec) on public.platebni_ucty to
 --      authenticated;`.
+--      Sloupcový grant i na ZALOŽENÍ: jen tenant_id, branch_id, nazev,
+--      typ, cislo_uctu — přesně to, co posílá formulář nového účtu
+--      (zalozitPlatebniUcet, app/[rozsah]/finance/platby/akce.ts). Dřív
+--      měl přihlášený INSERT na celou tabulku: správce jedné pobočky si
+--      přímým zápisem přes REST založil účet své pobočky s libovolným
+--      počátečním zůstatkem (app.aktualni_zustatky_uctu ho přičte do
+--      zůstatku pobočky i celé firmy, a opravit ho pak nejde), měnou,
+--      vypnutý nebo s vlastním id. Ostatní sloupce dostanou výchozí
+--      hodnotu; služba (service_role) má svá práva.
+--      ROZHODNOUT: (otázka 157) kdo a jak smí zapsat počáteční zůstatek
+--      a měnu účtu — appka to dnes nenabízí; až bude, pak RPC jen pro
+--      Správu financí za celou firmu, ne grant sloupce všem přihlášeným.
 --
---   3. Účet, na který míří živé připojení banky, nejde vypnout (spoušť
---      app.hlida_vypnuti_platebniho_uctu) — synchronizace by do něj
---      zapisovala dál a součty by ty pohyby nepočítaly.
+--   3. Vypnutý účet a živé připojení banky se nesejdou (spouště
+--      app.hlida_vypnuti_platebniho_uctu a app.hlida_pripojeni_vypnuteho_uctu)
+--      — z obou stran: účet se živým připojením nejde vypnout a k vypnutému
+--      účtu nejde připojení založit, přesměrovat ho na něj ani vrátit
+--      odpojené do živého stavu. Synchronizace by do něj zapisovala
+--      dál a součty (zůstatky, „pobočky bez účtu") by ty pohyby
+--      nepočítaly. Jedna definice „živého připojení": app.pripojeni_je_zive.
 --
 -- Co se záměrně NEDĚLÁ:
 --   * Žádný účet se nikomu nepřiřazuje (otázka 98) a nic se nepřepisuje.
---     Ostrá data se nemění: jen funkce, politiky a granty.
+--     Ostrá data se nemění: jen funkce, politiky, granty a spouště.
+--     Vypnutý účet, na který už dnes míří živé připojení, migrace jen
+--     ohlásí (raise warning s počtem) — neodpojuje ho ani účet nezapíná.
 --   * Účet na smazané, vypnuté nebo cizí pobočce se nepřesouvá sám —
 --     stránka Platby (Celá firma) ho najde a nabídne opravu člověku.
 --   * Spoušť z kroku 1 (app.hlida_firmu_platebniho_uctu) se nemění: cizí
@@ -111,20 +129,53 @@ create policy platebni_ucty_update on public.platebni_ucty for update to authent
 revoke update on public.platebni_ucty from authenticated;
 grant update (nazev, branch_id, cislo_uctu, aktivni) on public.platebni_ucty to authenticated;
 
+-- Založení jen se sloupci formuláře nového účtu (zalozitPlatebniUcet).
+-- Počáteční zůstatek, měna, aktivní, id a čas založení = výchozí hodnoty.
+revoke insert on public.platebni_ucty from authenticated;
+grant insert (tenant_id, branch_id, nazev, typ, cislo_uctu) on public.platebni_ucty to authenticated;
+
 
 -- ---------------------------------------------------------------------
--- 3. Účet, na který míří živé připojení banky, nejde vypnout
+-- 3. Vypnutý účet a živé připojení banky se nesejdou
 --
 -- Synchronizace banky na `aktivni` účtu nehledí (lib/banka/konektor.ts):
 -- pohyby by do vypnutého účtu chodily dál, ale součty (zůstatky, „pobočky
--- bez účtu") by ho už nepočítaly — peníze by tiše zmizely z čísel. Stejný
--- vzor jako přesun účtu od připojení pobočky (spoušť z kroku 1): nejdřív
--- odpojit, pak vypnout. SECURITY DEFINER, protože musí vidět VŠECHNA
--- připojení účtu, i ta, která volající přes RLS nevidí.
+-- bez účtu") by ho už nepočítaly — peníze by tiše zmizely z čísel. Proto
+-- z OBOU stran:
+--   a) účet, na který míří živé připojení, nejde vypnout (nejdřív odpojit,
+--      pak vypnout — stejný vzor jako přesun účtu od připojení pobočky,
+--      spoušť z kroku 1);
+--   b) k vypnutému účtu nejde připojení založit, přesměrovat na něj živé
+--      připojení ani vrátit odpojené do živého stavu (nejdřív účet zapnout).
+-- Obě spouště jsou SECURITY DEFINER: musí vidět VŠECHNA připojení účtu
+-- a účet sám, i když je volající přes RLS nevidí (správce integrací bez
+-- finance.read). Podle role nerozhodují, firmu si filtrují samy.
+--
+-- Souběh: spoušť b) zamkne řádek účtu (`for share`). Vypnutí účtu drží
+-- zámek řádku účtu, takže založení připojení počká, až vypnutí skončí,
+-- a uvidí účet už vypnutý; a vypnutí počká na založené připojení a jeho
+-- dotaz na připojení ho uvidí. Bez zámku by dvě souběžné transakce prošly
+-- obě.
 --
 -- ROZHODNOUT: (otázka 152) smí se vypnout účet se živým připojením (a pohyby
 -- z banky pak brát jako „mimo součty")? Teď opatrněji ne.
 -- ---------------------------------------------------------------------
+
+-- Jedna definice „živého" připojení pro obě spouště: neodpojené (bez
+-- času odpojení), nebo se stavem jiným než odpojeno — i když jen jedno
+-- z toho, synchronizace by ho mohla brát jako běžící.
+create function app.pripojeni_je_zive(p_stav text, p_odpojeno_kdy timestamptz)
+returns boolean
+language sql immutable set search_path = ''
+as $$
+  select p_odpojeno_kdy is null or p_stav is distinct from 'odpojeno'
+$$;
+
+comment on function app.pripojeni_je_zive(text, timestamptz) is
+  'Živé připojení = bez času odpojení, nebo se stavem jiným než odpojeno. '
+  'Jedna definice pro spouště vypnutého účtu (krok 3).';
+
+revoke all on function app.pripojeni_je_zive(text, timestamptz) from public, anon, authenticated;
 
 create function app.hlida_vypnuti_platebniho_uctu()
 returns trigger
@@ -134,7 +185,7 @@ begin
   if old.aktivni and not new.aktivni and exists (
     select 1 from public.integrace_pripojeni c
      where c.platebni_ucet_id = new.id
-       and (c.odpojeno_kdy is null or c.stav <> 'odpojeno')
+       and app.pripojeni_je_zive(c.stav, c.odpojeno_kdy)
   ) then
     raise exception 'Na účet míří živé připojení banky — nejdřív ho v Integracích odpojte, pak účet vypněte.'
       using errcode = 'check_violation';
@@ -151,3 +202,68 @@ revoke all on function app.hlida_vypnuti_platebniho_uctu() from public, anon, au
 create trigger trg_vypnuti_platebniho_uctu
   before update of aktivni on public.platebni_ucty
   for each row execute function app.hlida_vypnuti_platebniho_uctu();
+
+
+-- b) Živé připojení jen k zapnutému účtu.
+--
+-- Hlídá jen PŘECHOD do „živé připojení k vypnutému účtu": založení,
+-- přesměrování na jiný účet, návrat odpojeného do živého stavu. Připojení,
+-- které už živé na tomtéž účtu je (stará data z doby před touhle
+-- spouští), se nehlídá znovu — synchronizace (service_role) mu mění stav
+-- mezi pripojeno, chyba a vyzaduje_pozornost a nesmí kvůli tomu spadnout.
+create function app.hlida_pripojeni_vypnuteho_uctu()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_aktivni boolean;
+begin
+  if new.platebni_ucet_id is null or not app.pripojeni_je_zive(new.stav, new.odpojeno_kdy) then
+    return new;
+  end if;
+  if tg_op = 'UPDATE'
+     and old.platebni_ucet_id is not distinct from new.platebni_ucet_id
+     and app.pripojeni_je_zive(old.stav, old.odpojeno_kdy) then
+    return new;
+  end if;
+
+  -- Účet téže firmy (definer: RLS tu neplatí, firmu filtruje dotaz sám;
+  -- účet cizí firmy odmítá spoušť z kroku 1). Zámek viz Souběh nahoře.
+  select u.aktivni into v_aktivni
+    from public.platebni_ucty u
+   where u.id = new.platebni_ucet_id
+     and u.tenant_id = new.tenant_id
+     for share;
+  if v_aktivni is false then
+    raise exception 'Platební účet je vypnutý — nejdřív ho v Platbách zapněte, pak k němu připojte banku.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+comment on function app.hlida_pripojeni_vypnuteho_uctu() is
+  'Spoušť: živé připojení banky nejde založit, přesměrovat ani obnovit k vypnutému '
+  'platebnímu účtu (pohyby by chodily do účtu, který součty nepočítají).';
+
+revoke all on function app.hlida_pripojeni_vypnuteho_uctu() from public, anon, authenticated;
+
+create trigger trg_pripojeni_vypnuteho_uctu
+  before insert or update of platebni_ucet_id, stav, odpojeno_kdy on public.integrace_pripojeni
+  for each row execute function app.hlida_pripojeni_vypnuteho_uctu();
+
+
+-- Stará data: vypnutý účet, na který už živé připojení míří, se jen
+-- ohlásí — nic se neodpojuje ani nezapíná (ostrá data se nemění).
+do $$
+declare
+  n integer;
+begin
+  select count(*) into n
+    from public.platebni_ucty u
+    join public.integrace_pripojeni c on c.platebni_ucet_id = u.id and c.tenant_id = u.tenant_id
+   where not u.aktivni
+     and app.pripojeni_je_zive(c.stav, c.odpojeno_kdy);
+  if n > 0 then
+    raise warning 'Vypnutý platební účet s živým připojením banky: % — v Integracích odpojit, nebo účet v Platbách zapnout.', n;
+  end if;
+end $$;

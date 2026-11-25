@@ -20,11 +20,17 @@
 --        celé firmy účet neupraví (0 řádků) — ověří CI;
 --      * pobočkový uživatel nevidí firemní účet — ověří CI;
 --      * správce pobočky dál založí účet své pobočky, firemní ne;
+--      * založit účet jde jen se sloupci formuláře — počáteční zůstatek,
+--        měnu ani vypnutý účet přihlášený nezaloží (sloupcový grant)
+--        — ověří CI;
 --      * správce celé firmy (ne majitel) přesune účet ze smazané pobočky;
 --      * měnu, typ ani firmu účtu přihlášený nezmění (sloupcový grant)
 --        — ověří CI; katalog grantů a politik ověří i PGlite;
 --   3. účet, na který míří živé připojení banky, nejde vypnout
 --      (spoušť platí i pro vlastníka databáze); po úplném odpojení ano;
+--   3b. a naopak: k vypnutému účtu nejde živé připojení založit,
+--      přesměrovat ani obnovit; staré živé připojení synchronizace dál
+--      mění a odpojit ho jde; spoušť filtruje firmu sama a zamyká účet;
 --   4. zkouška 11 — živé tvary účtů (firemní bez čísla, účet pobočky
 --      s číslem ve starém zápisu) po všech zkouškách beze změny.
 --
@@ -366,6 +372,12 @@ select pg_temp.check('správce pobočky dál založí účet své pobočky',
 select pg_temp.check('správce pobočky nezaloží firemní účet: 42501 — ověří CI',
   pg_temp.spadne_hlaskou(format('insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ) values (%L, null, %L, %L)',
     :'firma', 'Krok113 firemní od pobočky', 'banka'), '42501', ''));
+-- Založení jen se sloupci formuláře: přímým zápisem přes REST by si
+-- správce pobočky jinak „nadělil" zůstatek, který se přičte do čísel
+-- pobočky i celé firmy (app.aktualni_zustatky_uctu).
+select pg_temp.check('správce pobočky nezaloží účet své pobočky s počátečním zůstatkem: grant, 42501 — ověří CI',
+  pg_temp.spadne_hlaskou(format('insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ, pocatecni_zustatek_haleru) values (%L, %L, %L, %L, %s)',
+    :'firma', :'pb', 'Krok113 zakázaný zůstatek Bety', 'pokladna', 2000000000), '42501', 'permission denied'));
 
 -- Pavla: jen čtení na Betě.
 select set_config('test.user_id', :'cte_pob', false);
@@ -405,16 +417,32 @@ select pg_temp.check('správce celé firmy: měnu účtu nezmění, 42501 — ov
 select pg_temp.check('správce celé firmy: typ účtu ani firmu nezmění, 42501 — ověří CI',
   pg_temp.spadne_hlaskou(format('update public.platebni_ucty set typ = %L where id = %L', 'pokladna', :'u_beta'), '42501', '')
   and pg_temp.spadne_hlaskou(format('update public.platebni_ucty set tenant_id = %L where id = %L', :'firma_b', :'u_beta'), '42501', ''));
+-- Založení: přesně sloupce, které posílá zalozitPlatebniUcet, projdou.
+select pg_temp.check('správce celé firmy založí firemní účet sloupci formuláře: firma, pobočka, název, typ, číslo',
+  pg_temp.projde(format('insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ, cislo_uctu) values (%L, null, %L, %L, %L)',
+    :'firma', 'Krok113 firemní z formuláře', 'banka', 'CZ6508000000192000145399')));
+select pg_temp.check('správce celé firmy nezaloží účet s počátečním zůstatkem, měnou ani vypnutý: grant, 42501 — ověří CI',
+  pg_temp.spadne_hlaskou(format('insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ, pocatecni_zustatek_haleru) values (%L, null, %L, %L, %s)',
+    :'firma', 'Krok113 zakázaný zůstatek', 'banka', 100), '42501', 'permission denied')
+  and pg_temp.spadne_hlaskou(format('insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ, mena) values (%L, null, %L, %L, %L)',
+    :'firma', 'Krok113 zakázaná měna', 'banka', 'EUR'), '42501', 'permission denied')
+  and pg_temp.spadne_hlaskou(format('insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ, aktivni) values (%L, null, %L, %L, false)',
+    :'firma', 'Krok113 zakázaně vypnutý', 'banka'), '42501', 'permission denied'));
 
 reset role;
 select set_config('test.user_id', '', false);
 
-select pg_temp.check('po zkouškách: účet Fany je na Betě, nový účet Bety je pod Betou, firemní od pobočky nevznikl',
+select pg_temp.check('po zkouškách: účet Fany je na Betě, nový účet Bety je pod Betou, firemní od pobočky ani zakázané nevznikly',
   exists (select 1 from public.platebni_ucty where id = :'u_fany' and branch_id = :'pb')
   and exists (select 1 from public.platebni_ucty
                where tenant_id = :'firma' and branch_id = :'pb' and nazev = 'Krok113 nový účet Bety')
+  and exists (select 1 from public.platebni_ucty
+               where tenant_id = :'firma' and branch_id is null and nazev = 'Krok113 firemní z formuláře'
+                 and pocatecni_zustatek_haleru = 0 and mena = 'CZK' and aktivni)
   and not exists (select 1 from public.platebni_ucty
-                   where tenant_id = :'firma' and nazev = 'Krok113 firemní od pobočky'));
+                   where tenant_id = :'firma' and nazev = 'Krok113 firemní od pobočky')
+  and not exists (select 1 from public.platebni_ucty
+                   where tenant_id = :'firma' and nazev like 'Krok113 zakázan%'));
 
 -- Katalog až za chováním: rozbitá politika nebo grant má shodit kontrolu
 -- chování (přes RLS), ne jen tuhle o textu politiky.
@@ -439,9 +467,21 @@ select pg_temp.check('sloupcový grant: přihlášený mění jen název, poboč
   and not has_column_privilege('authenticated', 'public.platebni_ucty', 'pocatecni_zustatek_haleru', 'UPDATE')
   and not has_column_privilege('authenticated', 'public.platebni_ucty', 'id', 'UPDATE')
   and not has_column_privilege('authenticated', 'public.platebni_ucty', 'created_at', 'UPDATE')
-  and has_table_privilege('authenticated', 'public.platebni_ucty', 'INSERT')
   and not has_table_privilege('authenticated', 'public.platebni_ucty', 'DELETE')
   and not has_table_privilege('anon', 'public.platebni_ucty', 'UPDATE'));
+select pg_temp.check('sloupcový grant založení: přihlášený zakládá jen firmu, pobočku, název, typ a číslo',
+  not has_table_privilege('authenticated', 'public.platebni_ucty', 'INSERT')
+  and has_column_privilege('authenticated', 'public.platebni_ucty', 'tenant_id', 'INSERT')
+  and has_column_privilege('authenticated', 'public.platebni_ucty', 'branch_id', 'INSERT')
+  and has_column_privilege('authenticated', 'public.platebni_ucty', 'nazev', 'INSERT')
+  and has_column_privilege('authenticated', 'public.platebni_ucty', 'typ', 'INSERT')
+  and has_column_privilege('authenticated', 'public.platebni_ucty', 'cislo_uctu', 'INSERT')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'pocatecni_zustatek_haleru', 'INSERT')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'mena', 'INSERT')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'aktivni', 'INSERT')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'id', 'INSERT')
+  and not has_column_privilege('authenticated', 'public.platebni_ucty', 'created_at', 'INSERT')
+  and not has_table_privilege('anon', 'public.platebni_ucty', 'INSERT'));
 
 
 \echo ''
@@ -484,6 +524,99 @@ select set_config('test.user_id', '', false);
 
 
 \echo ''
+\echo '== 3b. K vypnutému účtu nejde živé připojení banky ======================'
+
+-- Druhá strana téhož pravidla: k vypnutému účtu Cyrila nejde připojení
+-- založit, přesměrovat ho na něj ani vrátit odpojené do živého stavu.
+-- Jako vlastník databáze (spoušť platí všem), jedno i pod přihlášenou
+-- majitelkou. Každé připojení má vlastního poskytovatele — živé smí být
+-- jen jedno na firmu a poskytovatele (index integrace_pripojeni_zive).
+select pg_temp.check('příprava 3b: účet Cyrila je vypnutý, účet Bety zapnutý',
+  (select not aktivni from public.platebni_ucty where id = :'u_cyril')
+  and (select aktivni from public.platebni_ucty where id = :'u_beta'));
+
+select pg_temp.check('k vypnutému účtu nejde založit živé připojení: 23514',
+  pg_temp.spadne_hlaskou(format(
+    'insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id) values (%L, %L, %L, %L, %L, %L, %L)',
+    :'firma', 'banka', 'krok113-k-vypnutemu', 'zakaznicky', 'Krok113 k vypnutému', 'pripojuje_se', :'u_cyril'),
+    '23514', 'Platební účet je vypnutý'));
+
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select pg_temp.check('… ani přihlášená majitelka, s větou, co udělat',
+  pg_temp.spadne_hlaskou(format(
+    'insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id) values (%L, %L, %L, %L, %L, %L, %L)',
+    :'firma', 'banka', 'krok113-k-vypnutemu-appka', 'zakaznicky', 'Krok113 k vypnutému z appky', 'pripojeno', :'u_cyril'),
+    '23514', 'nejdřív ho v Platbách zapněte'));
+reset role;
+select set_config('test.user_id', '', false);
+
+-- Odpojené připojení (historie) k vypnutému účtu nevadí.
+insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id, odpojeno_kdy)
+values (:'firma', 'banka', 'krok113-odpojene', 'zakaznicky', 'Krok113 odpojené', 'odpojeno', :'u_cyril', now())
+returning id as pr_odpojene \gset
+select pg_temp.check('odpojené připojení na vypnutém účtu nejde vrátit stavem do živého: 23514',
+  pg_temp.spadne_hlaskou(format('update public.integrace_pripojeni set stav = %L where id = %L', 'pripojeno', :'pr_odpojene'),
+    '23514', 'Platební účet je vypnutý'));
+select pg_temp.check('… ani smazáním času odpojení: 23514',
+  pg_temp.spadne_hlaskou(format('update public.integrace_pripojeni set odpojeno_kdy = null where id = %L', :'pr_odpojene'),
+    '23514', 'Platební účet je vypnutý'));
+
+-- Živé připojení na zapnutém účtu Bety (dnešní tvar: připojeno, bez času
+-- odpojení) spoušť přijme a nezmění; přesměrovat na vypnutý účet nejde.
+insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id)
+values (:'firma', 'banka', 'krok113-beta', 'zakaznicky', 'Krok113 Beta', 'pripojeno', :'u_beta')
+returning id as pr_beta \gset
+select pg_temp.check('živé připojení k zapnutému účtu Bety: spoušť ho přijala beze změny',
+  exists (select 1 from public.integrace_pripojeni
+           where id = :'pr_beta' and stav = 'pripojeno' and odpojeno_kdy is null and platebni_ucet_id = :'u_beta'));
+select pg_temp.check('živé připojení nejde přesměrovat na vypnutý účet: 23514',
+  pg_temp.spadne_hlaskou(format('update public.integrace_pripojeni set platebni_ucet_id = %L where id = %L', :'u_cyril', :'pr_beta'),
+    '23514', 'Platební účet je vypnutý'));
+select pg_temp.check('… synchronizace mu na zapnutém účtu stav mění dál: 1 řádek',
+  pg_temp.zmeneno(format('update public.integrace_pripojeni set stav = %L where id = %L', 'chyba', :'pr_beta')) = 1);
+
+-- Staré živé připojení na vypnutém účtu (z doby před spouští — vloží se
+-- s vypnutou spouští): synchronizace mu dál mění stav a odpojit ho jde.
+alter table public.integrace_pripojeni disable trigger trg_pripojeni_vypnuteho_uctu;
+insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id)
+values (:'firma', 'banka', 'krok113-stare', 'zakaznicky', 'Krok113 staré', 'pripojeno', :'u_cyril')
+returning id as pr_stare \gset
+alter table public.integrace_pripojeni enable trigger trg_pripojeni_vypnuteho_uctu;
+select pg_temp.check('staré živé připojení na vypnutém účtu: synchronizace mu mění stav — 1 řádek, dvakrát',
+  pg_temp.zmeneno(format('update public.integrace_pripojeni set stav = %L, posledni_chyba = %L where id = %L', 'chyba', 'Krok113 výpadek', :'pr_stare')) = 1
+  and pg_temp.zmeneno(format('update public.integrace_pripojeni set stav = %L, posledni_chyba = null where id = %L', 'pripojeno', :'pr_stare')) = 1);
+select pg_temp.check('… a odpojit ho jde: 1 řádek',
+  pg_temp.zmeneno(format('update public.integrace_pripojeni set stav = %L, odpojeno_kdy = now() where id = %L', 'odpojeno', :'pr_stare')) = 1);
+
+-- Vlastní filtr firmy ve spoušti (definer, RLS tu neplatí): bez spouště
+-- z kroku 1 se vypnutý účet CIZÍ firmy spoušti nepočítá — kdyby ho četla,
+-- odmítla by připojení svou větou.
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ, aktivni)
+values (:'firma_b', null, 'Krok113 vypnutý účet cizí firmy', 'banka', false) returning id as u_cizi_vypnuty \gset
+alter table public.integrace_pripojeni disable trigger trg_firma_integrace_pripojeni;
+select pg_temp.check('bez spouště kroku 1: vypnutý účet cizí firmy spoušť připojení nečte, firmu filtruje sama',
+  pg_temp.projde(format(
+    'insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev, stav, platebni_ucet_id) values (%L, %L, %L, %L, %L, %L, %L)',
+    :'firma', 'banka', 'krok113-cizi-ucet', 'zakaznicky', 'Krok113 cizí účet', 'pripojeno', :'u_cizi_vypnuty')));
+delete from public.integrace_pripojeni where tenant_id = :'firma' and poskytovatel = 'krok113-cizi-ucet';
+alter table public.integrace_pripojeni enable trigger trg_firma_integrace_pripojeni;
+
+select pg_temp.check('spouště připojení jsou zase zapnuté',
+  (select count(*) from pg_trigger
+    where tgrelid = 'public.integrace_pripojeni'::regclass
+      and tgname in ('trg_firma_integrace_pripojeni', 'trg_pripojeni_vypnuteho_uctu')
+      and tgenabled = 'O') = 2);
+select pg_temp.check('spoušť připojení zamyká řádek účtu proti souběžnému vypnutí: for share',
+  (select prosrc ilike '%for share%' from pg_proc where oid = 'app.hlida_pripojeni_vypnuteho_uctu()'::regprocedure));
+select pg_temp.check('funkce spouští vypnutého účtu přihlášený ani anonym přímo nespustí',
+  not has_function_privilege('authenticated', 'app.hlida_pripojeni_vypnuteho_uctu()', 'execute')
+  and not has_function_privilege('authenticated', 'app.hlida_vypnuti_platebniho_uctu()', 'execute')
+  and not has_function_privilege('anon', 'app.hlida_pripojeni_vypnuteho_uctu()', 'execute')
+  and not has_function_privilege('authenticated', 'app.pripojeni_je_zive(text, timestamptz)', 'execute'));
+
+
+\echo ''
 \echo '== 4. Zkouška 11: živé tvary účtů beze změny ============================'
 
 select md5(string_agg(u::text, '|' order by u.id)) as otisk_po
@@ -495,7 +628,7 @@ select pg_temp.check('firemní účet a účet Bety po všech zkouškách beze z
 \echo ''
 \echo '== Úklid ================================================================'
 
-delete from public.integrace_pripojeni where tenant_id = :'firma' and poskytovatel = 'krok113-banka';
+delete from public.integrace_pripojeni where tenant_id in (:'firma', :'firma_b');
 delete from public.platebni_ucty where tenant_id in (:'firma', :'firma_b');
 -- Majitelé, jejich firmy a pobočky zůstávají (jako v krocích 103 až 112):
 -- posledního majitele firmy pojistka smazat nedovolí. Ostatní lidé pryč.
@@ -515,6 +648,10 @@ select pg_temp.check('úklid: účty a připojení kroku 113 pryč, spouště ú
   and (select count(*) from pg_trigger
         where tgrelid = 'public.platebni_ucty'::regclass
           and tgname in ('trg_firma_platebniho_uctu', 'trg_vypnuti_platebniho_uctu')
+          and tgenabled = 'O') = 2
+  and (select count(*) from pg_trigger
+        where tgrelid = 'public.integrace_pripojeni'::regclass
+          and tgname in ('trg_firma_integrace_pripojeni', 'trg_pripojeni_vypnuteho_uctu')
           and tgenabled = 'O') = 2);
 
 \echo ''

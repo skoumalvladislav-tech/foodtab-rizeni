@@ -37,9 +37,14 @@ select set_config('test.user_id', :'majitel', false);
 \echo ''
 \echo '== 1. Počáteční zůstatek + transakce ==========================='
 
+-- Počáteční zůstatek přihlášený nezapíše (sloupcový grant na založení
+-- účtu, 20261121100000 — Finance Fáze 0, krok 3): účet s ním založí
+-- služba, transakce a zůstatek dál jako přihlášená majitelka.
+reset role;
 insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ, pocatecni_zustatek_haleru)
 values (:'tenant', :'perla', 'Krok77 pokladna', 'pokladna', 500000)
 returning id as ucet \gset
+set role authenticated;
 
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj)
 values (:'tenant', :'ucet', 'prijem', 200000, current_date, 'rucni');
@@ -57,9 +62,11 @@ select pg_temp.check('zůstatek = počáteční (500000) + příjem (200000) - v
 \echo ''
 \echo '== 2. Firemní účet (bez pobočky) se počítá samostatně =========='
 
+reset role;
 insert into public.platebni_ucty (tenant_id, nazev, typ, pocatecni_zustatek_haleru)
 values (:'tenant', 'Krok77 firemní účet', 'banka', 1000000)
 returning id as ucet_firemni \gset
+set role authenticated;
 
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj)
 values (:'tenant', :'ucet_firemni', 'vydaj', 100000, current_date, 'rucni');
