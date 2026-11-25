@@ -142,6 +142,12 @@ grant execute on function public.pobocky_bez_aktivniho_uctu(uuid, uuid) to authe
 -- neexistuje — účty se nemažou (grant DELETE odebrán v 20261006120000)
 -- a sloupec pro označení smazání tabulka nemá.
 --
+-- ROZHODNOUT: (otázka 281) počítá se KAŽDÝ typ účtu bez pobočky (banka,
+-- pokladna, karta), jak zadání definuje firemní účet. Kdyby za firemní
+-- účet měl platit jen bankovní účet (typ = 'banka'), přibude podmínka
+-- u.typ = 'banka' a firma s jedinou firemní pokladnou dostane zase
+-- varování. Čísla se tím nemění — jen to, co stránky říkají.
+--
 -- SECURITY DEFINER schválně: kdo má finance.read jen na pobočce, firemní
 -- účet přes RLS nevidí (platebni_ucty_read) a vidět ho nemá — appka mu
 -- přesto má říct „platby pobočky můžou chodit přes firemní účet, který

@@ -136,6 +136,9 @@ export const CHYBA_FIREMNIHO_UCTU =
  *
  * Chyba NIKDY není „ne": „ne" by stránku přepnulo na varování, jako by
  * firma žádný účet neměla. Stránka chybu řekne (`CHYBA_FIREMNIHO_UCTU`).
+ *
+ * ROZHODNOUT: (otázka 281) firemní účet = jakýkoli aktivní účet bez
+ * pobočky (banka, pokladna i karta) — rozhoduje databázová funkce.
  */
 export async function nactiFiremniUcet(rpc: VolaniRpc, tenantId: string): Promise<FiremniUcet> {
   let vysledek: VysledekRpc
