@@ -20,6 +20,7 @@ import {
 import { mistoKratce, prostorZeZdroje } from '@/lib/rezervace-misto'
 import { poPobockach, souhrnText, type PobockaKalendare } from '@/lib/rezervace-pobocky'
 import { adresaPrilohy, otevritVProhlizeci, rozdelitNazev, velikostText, jeObrazek, type DokumentRezervace } from '@/lib/rezervace-prilohy'
+import { adresaTisku, obdobiTiskuZPohledu } from '@/lib/rezervace-tisk'
 import {
   NAZVY_DRUHU,
   NAZVY_STAVU,
@@ -327,20 +328,33 @@ export function NastrojePohledu({
       </div>
       {/* U dne nese datum už nadpis stránky — druhý by byl jen opakování. */}
       {pohled === 'den' ? null : <h2 className="ds-rez-obdobi">{nazevPohledu(pohled, datum)}</h2>}
-      {smiZapisovat ? (
-        <div className="ds-rez-vpravo">
-          <Link href={`/${rozsah}/rezervace/nova?datum=${datum}`} className="ft-tl ft-tl-hlavni">
-            <Ikona klic="plus" /> Nová rezervace
-          </Link>
-          <Link href={`/${rozsah}/rezervace/nova?datum=${datum}&druh=akce`} className="ft-tl ft-tl-vedlejsi">
-            <Ikona klic="praporek" /> Nová akce
-          </Link>
-          {/* Komu chodí upozornění k akcím a rezervacím — stránka upozorneni/. */}
-          <Link href={`/${rozsah}/rezervace/upozorneni`} className="ft-tl ft-tl-vedlejsi">
-            <Ikona klic="zvonek" /> Upozornění
-          </Link>
-        </div>
-      ) : null}
+      <div className="ds-rez-vpravo">
+        {smiZapisovat ? (
+          <>
+            <Link href={`/${rozsah}/rezervace/nova?datum=${datum}`} className="ft-tl ft-tl-hlavni">
+              <Ikona klic="plus" /> Nová rezervace
+            </Link>
+            <Link href={`/${rozsah}/rezervace/nova?datum=${datum}&druh=akce`} className="ft-tl ft-tl-vedlejsi">
+              <Ikona klic="praporek" /> Nová akce
+            </Link>
+            {/* Komu chodí upozornění k akcím a rezervacím — stránka upozorneni/. */}
+            <Link href={`/${rozsah}/rezervace/upozorneni`} className="ft-tl ft-tl-vedlejsi">
+              <Ikona klic="zvonek" /> Upozornění
+            </Link>
+          </>
+        ) : null}
+        {/*
+          Tisk přehledu za období, které je vidět (den, týden, měsíc bez
+          dnů sousedních měsíců) — každý, kdo kalendář vidí. Co smí, ověří
+          tisková stránka sama (rezervace/tisk/page.tsx).
+        */}
+        <Link
+          href={adresaTisku(rozsah, { ...obdobiTiskuZPohledu(pohled, datum), zpet: adresaPohledu(rozsah, pohled, datum), hned: true })}
+          className="ft-tl ft-tl-vedlejsi"
+        >
+          <Ikona klic="tisk" /> Vytisknout
+        </Link>
+      </div>
     </div>
   )
 }

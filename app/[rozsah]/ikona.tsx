@@ -222,6 +222,14 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
       <path d="M7.3 12.9l1.9 1.8 3.6-3.7" />
     </>
   ),
+  // Tiskárna — tisk přehledu akcí a rezervací.
+  tisk: (
+    <>
+      <path d="M6 7V2.5h8V7" />
+      <path d="M5.5 14.5H4A1.5 1.5 0 012.5 13V8.5A1.5 1.5 0 014 7h12a1.5 1.5 0 011.5 1.5V13a1.5 1.5 0 01-1.5 1.5h-1.5" />
+      <path d="M6 11.5h8v6H6z" />
+    </>
+  ),
 };
 
 export default function Ikona({ klic, velikost }: { klic: IkonaKlic; velikost?: number }) {

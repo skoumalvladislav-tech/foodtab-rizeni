@@ -48,6 +48,7 @@ import {
   type PotvrzeniRozpisu,
 } from "@/lib/rozpis-desktop";
 import { hostePobocek, type HosteDnu } from "@/lib/rezervace-pobocky";
+import { adresaTisku, obdobiTiskuZRozpisu } from "@/lib/rezervace-tisk";
 import { nazevMesice } from "@/lib/rozpis-export";
 import { BEZ_USEKU, denVTydnu, dnyTydne, mesicniMrizka, minutSmeny } from "@/lib/rozpis-mobil";
 import { svatekDne, svatkyObdobi, type ZemeSvatku } from "@/lib/svatky";
@@ -558,6 +559,27 @@ export default function RozpisView({
                 <Ikona klic="fajfkaKruh" velikost={15} />
                 Potvrzení směn
               </Link>
+              {/*
+                Tisk přehledu akcí a rezervací (Šéfík 25. 11. 2026) za období,
+                které mřížka ukazuje, a za pobočku vybranou v „Zobrazit“. Jen
+                tomu, kdo rezervace vidí (`hoste` není null — rozhodla táž
+                funkce jako stránka Rezervací); tisková stránka si právo
+                ověří znovu sama a výběr pobočky jen zúží.
+              */}
+              {hostePobocek(hoste, filtr.pobocky) ? (
+                <Link
+                  href={adresaTisku(mobil.rozsah, {
+                    ...obdobiTiskuZRozpisu(pohled, den, zacatek),
+                    pobocky: filtr.pobocky,
+                    zpet: `/${mobil.rozsah}/smeny?pohled=${pohled}&den=${den}`,
+                    hned: true,
+                  })}
+                  className="ft-tl ft-tl-male ft-tl-vedlejsi"
+                >
+                  <Ikona klic="tisk" velikost={15} />
+                  Tisk akcí
+                </Link>
+              ) : null}
               {planovani ? (
                 <>
                   {/*
