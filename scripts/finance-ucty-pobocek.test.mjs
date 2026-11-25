@@ -214,12 +214,13 @@ await okAsync('načte účty a nesmazané pobočky firmy a najde účty na vypnu
     && k.filtry.includes(`platebni_ucty.tenant_id=${FIRMA}`) && k.filtry.includes(`branches.tenant_id=${FIRMA}`)
     && k.filtry.includes('branches.deleted_at is null')
 })
+// Chyba i s prázdným seznamem v `data` — rozhodnout musí `.error`, ne tvar dat.
 await okAsync('chyba dotazu na účty → stav chyba, NE „žádný účet mimo pobočky"', async () => {
-  const v = await nactiUctyMimoPobocek(klient({ platebni_ucty: { data: null, error: { code: '42501' } }, branches: { data: POBOCKY, error: null } }), FIRMA)
+  const v = await nactiUctyMimoPobocek(klient({ platebni_ucty: { data: [], error: { code: '42501' } }, branches: { data: POBOCKY, error: null } }), FIRMA)
   return v.stav === 'chyba' && v.text === CHYBA_UCTU_MIMO_POBOCKY
 })
 await okAsync('chyba dotazu na pobočky → stav chyba (jinak by každý účet pobočky vypadal „mimo seznam")', async () => {
-  const v = await nactiUctyMimoPobocek(klient({ platebni_ucty: { data: UCTY, error: null }, branches: { data: null, error: { code: 'XX000' } } }), FIRMA)
+  const v = await nactiUctyMimoPobocek(klient({ platebni_ucty: { data: UCTY, error: null }, branches: { data: [], error: { code: 'XX000' } } }), FIRMA)
   return v.stav === 'chyba'
 })
 await okAsync('výjimka nebo data, která nejsou seznam → stav chyba, ne výjimka ven', async () => {

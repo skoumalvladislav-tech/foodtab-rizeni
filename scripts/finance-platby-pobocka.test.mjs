@@ -167,8 +167,9 @@ ok('zalozitPlatebniUcet: pobočka přes pobockaUctu(pobocka, …) a do insertu j
 {
   const t = telo(akce, 'zapsatTransakci')
   ok('zapsatTransakci: účet (pobočku i aktivní) ověří VŽDY přes problemUctuProZapis, před zápisem',
-    /\.select\('branch_id, aktivni'\)/.test(t) && /problemUctuProZapis\(pobocka, ucet\)/.test(t)
-      && /if \(problemUctu\) redirect\(/.test(t) && !/if \(pobocka\) \{\s*const \{ data: ucet/.test(t)
+    /\.select\('branch_id, aktivni'\)/.test(t)
+      && /const problemUctu = problemUctuProZapis\(pobocka, ucet\)\n\s*if \(problemUctu\) redirect\(/.test(t)
+      && !/if \(pobocka\) \{\s*const \{ data: ucet/.test(t)
       && t.indexOf('problemUctuProZapis(') < t.indexOf(".from('transakce').insert("))
 }
 const upravit = telo(akce, 'upravitPlatebniUcet')
