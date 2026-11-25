@@ -10,7 +10,7 @@ import { jeVKorunach } from '@/lib/finance-parovani'
 import { nactiPlatbyBezFaktury, nactiUctyFronty } from '@/lib/finance-bez-faktury-nacteni'
 import { filtrUctuFronty } from '@/lib/finance-bez-faktury'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
-import { FIREMNI_UCET, nactiPobockyBezUctu, vetaUctuPobocky } from '@/lib/finance-ucty-pobocek'
+import { FIREMNI_UCET, nactiFiremniUcet, nactiPobockyBezUctu, vetaUctuPobocky } from '@/lib/finance-ucty-pobocek'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../../pobocka-bez-firmy'
 import PobockyBezUctu from '../../pobocky-bez-uctu'
@@ -87,10 +87,12 @@ export default async function PlatbyBezFaktury({
   const doData = hledani.do && DATUM.test(hledani.do) ? hledani.do : dnes
 
   const supabase = await getServerSupabase()
-  const [uctyRes, bezUctu, smiSpravovatUcty] = await Promise.all([
+  const [uctyRes, bezUctu, smiSpravovatUcty, firemni] = await Promise.all([
     nactiUctyFronty(supabase, tenantId),
     nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId, pobocka),
     smiSpravovatUctyFirmy(tenantId, pristup.ctx),
+    // Platí firma přes firemní účet (dodatek 3d)? Jen jiná věta, čísla stejná.
+    nactiFiremniUcet((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId),
   ])
   const { nabidka, vybrany, filtr } = filtrUctuFronty(uctyRes.stav === 'ok' ? uctyRes.ucty : [], pobocka, hledani.ucet)
   const vysledek = uctyRes.stav === 'ok'
@@ -100,9 +102,10 @@ export default async function PlatbyBezFaktury({
   const soucetKc = vysledek.stav === 'ok'
     ? vysledek.platby.filter((p) => jeVKorunach(p.mena)).reduce((s, p) => s + p.zbyvaHaleru, 0)
     : 0
-  // Na pobočce: věta „nemá aktivní účet", nebo že se to nepodařilo zjistit
-  // (chyba není „má účet" — lib/finance-ucty-pobocek.ts).
-  const vetaUctu = pobocka ? vetaUctuPobocky(bezUctu, pobocka) : null
+  // Na pobočce: věta „nemá aktivní účet" (u firmy s firemním účtem „platby
+  // můžou chodit přes firemní účet"), nebo že se to nepodařilo zjistit
+  // (chyba není „má účet" ani „nemá firemní účet" — lib/finance-ucty-pobocek.ts).
+  const vetaUctu = pobocka ? vetaUctuPobocky(bezUctu, pobocka, firemni) : null
 
   return (
     <Navigace rozsah={rozsah}>
@@ -146,7 +149,7 @@ export default async function PlatbyBezFaktury({
             </p>
           </div>
         ) : (
-          <PobockyBezUctu vysledek={bezUctu} smiPrirazovat={smiSpravovatUcty} />
+          <PobockyBezUctu vysledek={bezUctu} firemni={firemni} smiPrirazovat={smiSpravovatUcty} />
         )}
 
         {vysledek.stav !== 'ok' ? (

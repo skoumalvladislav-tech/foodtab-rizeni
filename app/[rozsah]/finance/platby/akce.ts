@@ -10,7 +10,7 @@ import { pristupKFakturam } from '@/lib/faktury-pristup'
 import { hlaskaBrany } from '@/lib/faktury-brana'
 import { naHalere } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
-import { hlaskaUpravyUctu, NEPODARILO_ULOZIT_UCET, pobockaUctu, problemUctuProZapis, upravaUctu } from '@/lib/finance-platby-pobocka'
+import { hlaskaUpravyUctu, hlaskaZapisuPlatby, NEPODARILO_ULOZIT_UCET, pobockaUctu, problemUctuProZapis, upravaUctu } from '@/lib/finance-platby-pobocka'
 import { adresaUctu, FIREMNI_VOLBA, KDO_PARUJE, KDO_SPRAVUJE_UCTY, kotvaUctu } from '@/lib/finance-ucty-pobocek'
 import { overitCisloUctu } from '@/lib/banka/ucet'
 import { najitNavrhyParovani } from '@/lib/finance-navrhy-parovani'
@@ -170,7 +170,9 @@ export async function zapsatTransakci(formData: FormData): Promise<void> {
     zdroj: 'rucni',
   })
 
-  if (error) redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Platbu se nepodařilo zapsat.')}`)
+  // Účet se mohl vypnout až po kontrole výš (spoušť vrátí 23514) — i tehdy
+  // věta „vyberte aktivní účet", ne obecné „nepodařilo se".
+  if (error) redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(hlaskaZapisuPlatby(error))}`)
 
   revalidatePath(`/${rozsah}/finance/platby`)
   redirect(`/${rozsah}/finance/platby`)

@@ -9,7 +9,16 @@ import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { hodnotaPohleduRozpoctu, pohledRozpoctu, ROZPOCTY_FIRMY } from '@/lib/finance-evidence-pobocka'
-import { hlaskaBezUctuPobocky, maPobockaAktivniUcet, nactiPobockyBezUctu, nactiUctyMimoPobocek } from '@/lib/finance-ucty-pobocek'
+import {
+  hlaskaBezUctuPobocky,
+  KRATCE_PRES_FIREMNI_UCET,
+  maPobockaAktivniUcet,
+  nactiFiremniUcet,
+  nactiPobockyBezUctu,
+  nactiUctyMimoPobocek,
+  platiPresFiremniUcet,
+  vetaPobockyPresFiremniUcet,
+} from '@/lib/finance-ucty-pobocek'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
@@ -45,6 +54,9 @@ export const dynamic = 'force-dynamic'
  * větu (`hlaskaBezUctuPobocky`), ne „0 Kč" tržeb — na pobočce i ve výběru
  * pobočky za celou firmu. Kdo účet nemá, rozhoduje jedna funkce pro
  * všechny Finance (pobocky_bez_aktivniho_uctu, krok 3): jen AKTIVNÍ účet.
+ * Firma s aktivním firemním účtem (dodatek 3d, `firemniUcet`) přes něj
+ * platí — pobočka bez účtu pak dostane „platí přes firemní účet", čísla
+ * zůstávají stejná (skutečnost pobočky se dál neukazuje).
  *
  * Chyba dotazu NENÍ nula (krok 3, bod 6): supabase.rpc nehází, chybu
  * vrací v `.error` — dřív se tu tiše proměnila v „0 Kč" a prime cost.
@@ -152,12 +164,16 @@ export default async function FinanceRozpocty({
   // Bez účtu se skutečnost neukazuje vůbec (věta místo „0 Kč") — na pobočce
   // i ve výběru pobočky za celou firmu (krok 3).
   const skrytSkutecnost = bezUctu
-  const [smiSpravovatUcty, mimoPobocky] = await Promise.all([
+  const [smiSpravovatUcty, mimoPobocky, firemniUcet] = await Promise.all([
     smiSpravovatUctyFirmy(tenantId, pristup.ctx),
     // Celá firma: účty na vypnuté nebo smazané pobočce — jejich platby
     // nejsou v žádném součtu (krok 3). Na pobočce se neptá.
     pobocka ? Promise.resolve(null) : nactiUctyMimoPobocek(supabase, tenantId),
+    // Platí firma přes firemní účet (dodatek 3d)? `firemni` níž znamená
+    // „firemní rozpočty bez pobočky", proto jiné jméno.
+    nactiFiremniUcet((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId),
   ])
+  const presFiremni = platiPresFiremniUcet(firemniUcet)
   // Mzdy (a s nimi prime cost) jen s payroll.read — bez práva vrací
   // vydelky_prehled prázdno a prime cost by tiše vyšel bez mezd.
   const smiVidetMzdy = canSee(pristup.ctx, 'payroll.read')
@@ -230,11 +246,16 @@ export default async function FinanceRozpocty({
         {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
 
         {/* Celá firma: aktivní pobočky bez aktivního účtu (krok 3, bod 1). */}
-        {!pobocka ? <PobockyBezUctu vysledek={bezUctuVysledek} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
+        {!pobocka ? <PobockyBezUctu vysledek={bezUctuVysledek} firemni={firemniUcet} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
 
+        {/* Za celou firmu u vybrané pobočky s firemním účtem věta „platí přes firemní účet" (dodatek 3d). */}
         {bezUctu ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-            {pobocka ? hlaskaBezUctuPobocky(smiSpravovatUcty) : `${nazevPohledu}: ${hlaskaBezUctuPobocky(smiSpravovatUcty)}`}
+            {pobocka
+              ? hlaskaBezUctuPobocky(smiSpravovatUcty, firemniUcet)
+              : presFiremni
+                ? vetaPobockyPresFiremniUcet([{ branchId: branchId ?? '', nazev: nazevPohledu }])
+                : `${nazevPohledu}: ${hlaskaBezUctuPobocky(smiSpravovatUcty, firemniUcet)}`}
           </p>
         ) : null}
 
@@ -248,7 +269,7 @@ export default async function FinanceRozpocty({
           <div>
             <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>Tržby (skutečnost)</div>
             {skrytSkutecnost ? (
-              <div style={vetaVKarte}>bez platebního účtu pobočky</div>
+              <div style={vetaVKarte}>{presFiremni ? KRATCE_PRES_FIREMNI_UCET : 'bez platebního účtu pobočky'}</div>
             ) : chybaPrehledu ? (
               <strong style={{ fontSize: '18px' }}>–</strong>
             ) : (
@@ -258,7 +279,7 @@ export default async function FinanceRozpocty({
           <div>
             <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>Suroviny (odhad spotřeby z plateb)</div>
             {skrytSkutecnost ? (
-              <div style={vetaVKarte}>bez platebního účtu pobočky</div>
+              <div style={vetaVKarte}>{presFiremni ? KRATCE_PRES_FIREMNI_UCET : 'bez platebního účtu pobočky'}</div>
             ) : chybaPrehledu ? (
               <strong style={{ fontSize: '18px' }}>–</strong>
             ) : (

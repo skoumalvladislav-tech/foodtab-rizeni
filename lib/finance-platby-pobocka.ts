@@ -95,10 +95,27 @@ export function problemUctuProZapis(
       ? 'Na pobočce jde platbu zapsat jen na platební účet této pobočky.'
       : 'Platební účet se nenašel.'
   }
-  if (!ucet.aktivni) {
-    return 'Na vypnutý platební účet platbu zapsat nejde — vyberte aktivní účet, nebo tenhle nejdřív zapněte v Platebních účtech.'
-  }
+  if (!ucet.aktivni) return VYPNUTY_UCET_ZAPIS
   return null
+}
+
+/** Proč na účet nejde zapsat platbu: je vypnutý (stránka, akce i spoušť v databázi). */
+export const VYPNUTY_UCET_ZAPIS =
+  'Na vypnutý platební účet platbu zapsat nejde — vyberte aktivní účet, nebo tenhle nejdřív zapněte v Platebních účtech.'
+
+export const NEPODARILO_ZAPSAT_PLATBU = 'Platbu se nepodařilo zapsat.'
+
+/**
+ * Hláška, když databáze zápis platby odmítla (Platby, Zakázky).
+ * 23514 s „vypnutý" = účet se mezi načtením stránky a odesláním vypnul,
+ * nebo ho stránka k zápisu nabídla, ač vypnutý je — spoušť
+ * app.hlida_zapis_na_vypnuty_ucet (20261121100000) zápis odmítne.
+ * Člověk má vybrat jiný účet, ne číst „nepodařilo se". Jinak obecná věta
+ * (technickou hlášku databáze nikomu neukazujeme).
+ */
+export function hlaskaZapisuPlatby(chyba: { code?: string | null; message?: string | null } | null | undefined): string {
+  if (chyba?.code === '23514' && /vypnut/i.test(chyba.message ?? '')) return VYPNUTY_UCET_ZAPIS
+  return NEPODARILO_ZAPSAT_PLATBU
 }
 
 /** Kam účet patří — pro výpis účtů. Vypnutou pobočku řekne nahlas. */

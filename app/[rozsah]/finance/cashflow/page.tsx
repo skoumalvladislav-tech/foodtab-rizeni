@@ -8,7 +8,15 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { nactiRollingVyhledy } from '@/lib/finance-rolling-prehled'
 import { KOEFICIENTY_SCENARU, type Scenar } from '@/lib/finance-rolling-vyhled'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
-import { hlaskaBezUctuPobocky, maPobockaAktivniUcet, nactiPobockyBezUctu, nactiUctyMimoPobocek } from '@/lib/finance-ucty-pobocek'
+import {
+  hlaskaBezUctuPobocky,
+  maPobockaAktivniUcet,
+  nactiFiremniUcet,
+  nactiPobockyBezUctu,
+  nactiUctyMimoPobocek,
+  platiPresFiremniUcet,
+  stitekPobockyBezUctu,
+} from '@/lib/finance-ucty-pobocek'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { koruny } from '@/lib/mzdy'
 import Sdeleni from '@/app/sdeleni'
@@ -87,14 +95,18 @@ export default async function FinanceCashflow({
   let vyhledy: Awaited<ReturnType<typeof nactiRollingVyhledy>> = []
   let chybaNacteni = false
   const supabase = await getServerSupabase()
-  const [vyhledyRes, bezUctuVysledek, smiSpravovatUcty, mimoPobocky] = await Promise.all([
+  const [vyhledyRes, bezUctuVysledek, smiSpravovatUcty, mimoPobocky, firemni] = await Promise.all([
     nactiRollingVyhledy(tenantId, scenar, pobocka).then((v) => ({ ok: true as const, v }), () => ({ ok: false as const })),
     nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId, pobocka),
     smiSpravovatUctyFirmy(tenantId, pristup.ctx),
     // Celá firma: účty na vypnuté nebo smazané pobočce — výhled je
     // nepočítá (app.cashflow_prehled bere jen aktivní pobočky), krok 3.
     pobocka ? Promise.resolve(null) : nactiUctyMimoPobocek(supabase, tenantId),
+    // Platí firma přes firemní účet (dodatek 3d)? Mění se jen to, co se
+    // o pobočce bez účtu ŘÍKÁ — čísla zůstávají.
+    nactiFiremniUcet((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId),
   ])
+  const presFiremni = platiPresFiremniUcet(firemni)
   if (vyhledyRes.ok) vyhledy = vyhledyRes.v
   else chybaNacteni = true
   // Pobočky bez aktivního účtu (za celou firmu jen aktivní pobočky).
@@ -137,16 +149,20 @@ export default async function FinanceCashflow({
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '20px' }}>
         {naPobocce ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{POZNAMKA_FIREMNI}</p> : null}
         {/* Celá firma: aktivní pobočky bez aktivního účtu (krok 3, bod 1). */}
-        {!naPobocce ? <PobockyBezUctu vysledek={bezUctuVysledek} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
+        {!naPobocce ? <PobockyBezUctu vysledek={bezUctuVysledek} firemni={firemni} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
 
         {bezUctu ? (
           <div style={karta}>
-            <h2 style={{ margin: '0 0 6px', fontSize: '15px' }}>{nazevPobocky} zatím nemá vlastní aktivní platební účet</h2>
+            {/* Firma platí přes firemní účet (dodatek 3d): normální stav, ne „zatím nemá". */}
+            <h2 style={{ margin: '0 0 6px', fontSize: '15px' }}>
+              {presFiremni ? `${nazevPobocky} platí přes firemní účet` : `${nazevPobocky} zatím nemá vlastní aktivní platební účet`}
+            </h2>
             <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
-              Bez aktivního účtu pobočky appka nezná její zůstatek, takže výhled by začínal vymyšlenou nulou.
-              Platební účty jsou zatím vedené za celou firmu — výhled společných účtů je v pohledu Celá firma.
+              {presFiremni
+                ? 'Pobočka nemá vlastní účet, takže appka nezná její zůstatek a výhled by začínal vymyšlenou nulou.'
+                : 'Bez aktivního účtu pobočky appka nezná její zůstatek, takže výhled by začínal vymyšlenou nulou. Platební účty jsou zatím vedené za celou firmu — výhled společných účtů je v pohledu Celá firma.'}
             </p>
-            <p style={{ margin: '6px 0 0', fontSize: '13.5px', color: 'var(--muted)' }}>{hlaskaBezUctuPobocky(smiSpravovatUcty)}</p>
+            <p style={{ margin: '6px 0 0', fontSize: '13.5px', color: 'var(--muted)' }}>{hlaskaBezUctuPobocky(smiSpravovatUcty, firemni)}</p>
             {pristup.ctx.membership.scope === 'tenant' ? (
               <div style={{ marginTop: '10px' }}>
                 <Link href={`/${TENANT_SCOPE_SEGMENT}/finance/cashflow${scenar === 'zakladni' ? '' : `?scenar=${scenar}`}`} className="ft-tl">
@@ -168,10 +184,10 @@ export default async function FinanceCashflow({
             <section key={v.branchId ?? 'firma'} style={{ display: 'grid', gap: '10px' }}>
               <h2 style={{ margin: 0, fontSize: '15px' }}>
                 {v.pobocka}
-                {/* Za celou firmu: aktivní pobočka bez aktivního účtu — zůstatek startuje z nuly, kterou appka nezná. */}
+                {/* Za celou firmu: aktivní pobočka bez aktivního účtu — zůstatek startuje z nuly, kterou appka nezná. U firmy s firemním účtem „platí přes firemní účet" (dodatek 3d). */}
                 {!naPobocce && v.branchId !== null && bezUctuIds.has(v.branchId) ? (
                   <span style={{ marginLeft: '10px', fontSize: '11px', padding: '2px 8px', borderRadius: 'var(--radius-full)', background: 'var(--sunken)', color: 'var(--muted)' }}>
-                    Bez aktivního účtu — zůstatek appka nezná
+                    {stitekPobockyBezUctu(firemni)}
                   </span>
                 ) : null}
                 {v.vyhled.nekdyPodNulou ? (

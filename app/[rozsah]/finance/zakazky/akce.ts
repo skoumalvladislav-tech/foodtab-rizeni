@@ -9,6 +9,7 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { naHalere } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { pobockaZaznamu, zaznamPatriRozsahu } from '@/lib/finance-evidence-pobocka'
+import { hlaskaZapisuPlatby } from '@/lib/finance-platby-pobocka'
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>
 
@@ -180,8 +181,11 @@ export async function zapsatPlatbuZakazky(formData: FormData): Promise<void> {
     protistrana: 'Platba na zakázku',
   })
 
+  // Účet vypnutý mezi načtením stránky a odesláním (spoušť
+  // app.hlida_zapis_na_vypnuty_ucet vrátí 23514): věta „vyberte jiný
+  // účet", ne obecné „nepodařilo se" — stejně jako Platby.
   if (error) {
-    redirect(`/${rozsah}/finance/zakazky/${zakazkaId}?chyba=${encodeURIComponent('Platbu se nepodařilo zapsat.')}`)
+    redirect(`/${rozsah}/finance/zakazky/${zakazkaId}?chyba=${encodeURIComponent(hlaskaZapisuPlatby(error))}`)
   }
 
   revalidatePath(`/${rozsah}/finance/zakazky/${zakazkaId}`)

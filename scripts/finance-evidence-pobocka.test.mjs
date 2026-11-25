@@ -431,7 +431,7 @@ ok('rozpočty: výběr pobočky jen za celou firmu a v něm volba firemních roz
 // pro toho, kdo smí, a „bez účtu" z jedné funkce pro všechny Finance.
 ok('rozpočty: pobočka bez účtu → věta místo „0 Kč" skutečnosti (na pobočce i ve výběru za celou firmu)',
   /const skrytSkutecnost = bezUctu\n/.test(stranaRozpoctu) &&
-  /\{skrytSkutecnost \? \(/.test(stranaRozpoctu) && /hlaskaBezUctuPobocky\(smiSpravovatUcty\)/.test(stranaRozpoctu) &&
+  /\{skrytSkutecnost \? \(/.test(stranaRozpoctu) && /hlaskaBezUctuPobocky\(smiSpravovatUcty, firemniUcet\)/.test(stranaRozpoctu) &&
   /nactiPobockyBezUctu\(/.test(stranaRozpoctu) && !/from\('platebni_ucty'\)/.test(stranaRozpoctu))
 
 console.log(chyb === 0 ? '\nVše v pořádku.' : `\n${chyb} kontrol selhalo.`)

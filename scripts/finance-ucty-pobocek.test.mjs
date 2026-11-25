@@ -27,8 +27,16 @@ const {
   uctyMimoAktivnichPobocek, vetaUctuMimoPobocky, CHYBA_POBOCEK_BEZ_UCTU, FIREMNI_UCET, FIREMNI_VOLBA, KOTVA_UCTU,
   vetaUctuPobocky, nactiUctyMimoPobocek, vetaUctuMimoPobocekFirmy, CHYBA_UCTU_MIMO_POBOCKY, hlaskaZalozeniPripojeni,
   adresaUctu, mistoHlaskyUctu, PRAVO_SPRAVY_FINANCI, KDO_SPRAVUJE_UCTY, kotvaUctu, PRAVO_CIST_FAKTURY, KDO_PARUJE,
+  nactiFiremniUcet, platiPresFiremniUcet, rozhodnoutBezUctuFirmy, vetaPobockyPresFiremniUcet, stitekPobockyBezUctu,
+  CHYBA_FIREMNIHO_UCTU, PRES_FIREMNI_UCET_POBOCKA, KRATCE_PRES_FIREMNI_UCET, ODKAZ_VLASTNI_UCET, pobockyProKpi,
 } = await import('../lib/finance-ucty-pobocek.ts')
-const { upravaUctu, hodnotaPobockyUctu } = await import('../lib/finance-platby-pobocka.ts')
+const { upravaUctu, hodnotaPobockyUctu, hlaskaZapisuPlatby, VYPNUTY_UCET_ZAPIS, NEPODARILO_ZAPSAT_PLATBU } =
+  await import('../lib/finance-platby-pobocka.ts')
+
+/** Odpověď public.firma_ma_firemni_ucet, jak ji vrátí nactiFiremniUcet. */
+const MA_FIREMNI = { stav: 'ok', ma: true }
+const BEZ_FIREMNIHO = { stav: 'ok', ma: false }
+const FIREMNI_CHYBA = { stav: 'chyba', text: 'Nepodařilo se zjistit, jestli má firma aktivní firemní účet.', kod: '42501' }
 
 let chyb = 0
 /** Kontrola s pevným jménem; výjimka v ní je selhání TÉTO kontroly, ne konec běhu. */
@@ -126,8 +134,9 @@ ok(`tři pobočky: „A, B a C" — naměřeno: ${tri}`, /^Pobočky A, B a C nem
 ok('pobočka bez jména se neztratí', /Pobočka bez názvu/.test(vetaPobockyBezUctu([{ branchId: 'x', nazev: '  ' }]) ?? ''))
 
 console.log('\n== Věta pro pobočku bez účtu: kde se účet přiřazuje, jen tomu, kdo smí ==')
-const smi = hlaskaBezUctuPobocky(true)
-const nesmi = hlaskaBezUctuPobocky(false)
+// Firma BEZ aktivního firemního účtu — věta jako do dodatku 3d.
+const smi = hlaskaBezUctuPobocky(true, BEZ_FIREMNIHO)
+const nesmi = hlaskaBezUctuPobocky(false, BEZ_FIREMNIHO)
 ok(`kdo smí (finance.manage za celou firmu): cesta Celá firma → Platby → Platební účty — naměřeno: ${smi}`,
   /Celá firma → Platby → Platební účty/.test(smi))
 ok(`kdo nesmí: žádná cesta, jen kdo to udělá — naměřeno: ${nesmi}`,
@@ -146,14 +155,150 @@ ok('obě řeknou, že pobočka nemá AKTIVNÍ účet a čísla se nedají spoč�
 
 console.log('\n== Věta pro stránku pobočky (Platby bez faktury): chyba se řekne ==')
 ok('nemá účet → „Pobočka nemá aktivní platební účet."',
-  vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, BERNARD)?.text === 'Pobočka nemá aktivní platební účet.'
-    && vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, BERNARD)?.chyba === false)
-ok('má účet → nic (null)', vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, PERLA) === null)
+  vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, BERNARD, BEZ_FIREMNIHO)?.text === 'Pobočka nemá aktivní platební účet.'
+    && vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, BERNARD, BEZ_FIREMNIHO)?.chyba === false)
+ok('má účet → nic (null)', vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, PERLA, BEZ_FIREMNIHO) === null)
 {
-  const v = vetaUctuPobocky({ stav: 'chyba', text: CHYBA_POBOCEK_BEZ_UCTU }, BERNARD)
+  const v = vetaUctuPobocky({ stav: 'chyba', text: CHYBA_POBOCEK_BEZ_UCTU }, BERNARD, MA_FIREMNI)
   ok('chyba zjištění → věta o chybě (chyba: true), NE mlčení jako u pobočky s účtem',
     v !== null && v.chyba === true && v.text === CHYBA_POBOCEK_BEZ_UCTU)
 }
+
+console.log('\n== Společný firemní účet (dodatek 3d): nactiFiremniUcet — chyba není „ne" ==')
+await okAsync('volá firma_ma_firemni_ucet s firmou (jen p_tenant)', async () => {
+  const { rpc, volani } = podvrh({ data: true, error: null })
+  await nactiFiremniUcet(rpc, FIRMA)
+  return volani.length === 1 && volani[0].fn === 'firma_ma_firemni_ucet'
+    && volani[0].argumenty.p_tenant === FIRMA && Object.keys(volani[0].argumenty).length === 1
+})
+await okAsync('true → má firemní účet', async () => {
+  const v = await nactiFiremniUcet(podvrh({ data: true, error: null }).rpc, FIRMA)
+  return v.stav === 'ok' && v.ma === true
+})
+await okAsync('false → nemá', async () => {
+  const v = await nactiFiremniUcet(podvrh({ data: false, error: null }).rpc, FIRMA)
+  return v.stav === 'ok' && v.ma === false
+})
+await okAsync('chyba databáze (42501) → stav chyba s kódem, NE „nemá"', async () => {
+  const v = await nactiFiremniUcet(podvrh({ data: null, error: { code: '42501', message: 'Nemáte oprávnění' } }).rpc, FIRMA)
+  return v.stav === 'chyba' && v.text === CHYBA_FIREMNIHO_UCTU && v.kod === '42501'
+})
+await okAsync('data null bez chyby → chyba, ne „nemá"', async () => {
+  return (await nactiFiremniUcet(podvrh({ data: null, error: null }).rpc, FIRMA)).stav === 'chyba'
+})
+await okAsync('data, která nejsou boolean (řádky, text) → chyba', async () => {
+  const a = await nactiFiremniUcet(podvrh({ data: [{ ma: true }], error: null }).rpc, FIRMA)
+  const b = await nactiFiremniUcet(podvrh({ data: 'true', error: null }).rpc, FIRMA)
+  return a.stav === 'chyba' && b.stav === 'chyba'
+})
+await okAsync('volání, které spadne výjimkou → chyba, ne výjimka ven', async () => {
+  return (await nactiFiremniUcet(podvrh(new Error('spojení spadlo')).rpc, FIRMA)).stav === 'chyba'
+})
+ok('platiPresFiremniUcet: jen „ok a má" je ano; nemá i chyba ne',
+  platiPresFiremniUcet(MA_FIREMNI) === true && platiPresFiremniUcet(BEZ_FIREMNIHO) === false && platiPresFiremniUcet(FIREMNI_CHYBA) === false)
+
+console.log('\n== Celá firma: varování, nebo vysvětlení (rozhodnoutBezUctuFirmy) ==')
+const OBE = [{ branchId: BERNARD, nazev: 'Bernard Bar Tábor' }, { branchId: PERLA, nazev: 'Restaurace Černá Perla' }]
+{
+  // 1. Žádný účet: obě pobočky bez účtu, firemní účet žádný → varování.
+  const v = rozhodnoutBezUctuFirmy({ stav: 'ok', pobocky: OBE }, BEZ_FIREMNIHO)
+  ok(`žádný účet → varování se jmény obou poboček — naměřeno: ${v.druh}`,
+    v.druh === 'varovani' && v.pobocky.length === 2 && v.pobocky[0].nazev === 'Bernard Bar Tábor')
+}
+{
+  // 2. Jen aktivní firemní účet: obě pobočky bez vlastního, firma má firemní → vysvětlení.
+  const v = rozhodnoutBezUctuFirmy({ stav: 'ok', pobocky: OBE }, MA_FIREMNI)
+  ok(`jen aktivní firemní účet → vysvětlení, ne varování — naměřeno: ${v.druh}`,
+    v.druh === 'vysvetleni' && v.pobocky.length === 2)
+}
+{
+  // 3. Firemní účet + účet jedné pobočky: zbývající pobočka se vysvětlí, pobočka s účtem se nejmenuje.
+  const v = rozhodnoutBezUctuFirmy({ stav: 'ok', pobocky: [OBE[1]] }, MA_FIREMNI)
+  ok(`firemní účet + účet Bernardu → vysvětlení jen pro Perlu — naměřeno: ${v.druh}`,
+    v.druh === 'vysvetleni' && v.pobocky.length === 1 && v.pobocky[0].branchId === PERLA)
+  const vsechny = rozhodnoutBezUctuFirmy({ stav: 'ok', pobocky: [] }, MA_FIREMNI)
+  ok(`každá pobočka má vlastní účet → nic, ani vysvětlení — naměřeno: ${vsechny.druh}`, vsechny.druh === 'nic')
+}
+{
+  // 4. Vypnutý firemní účet = žádný: databáze vrátí false (aktivni filtr ve funkci) → varování.
+  const v = rozhodnoutBezUctuFirmy({ stav: 'ok', pobocky: OBE }, BEZ_FIREMNIHO)
+  ok(`vypnutý firemní účet (funkce vrátí false) → varování beze změny — naměřeno: ${v.druh}`, v.druh === 'varovani')
+}
+{
+  // 5. Chyba ano/ne funkce → „nevíme": varování zůstane a k němu chyba. NE vysvětlení, NE tiché „ne".
+  const v = rozhodnoutBezUctuFirmy({ stav: 'ok', pobocky: OBE }, FIREMNI_CHYBA)
+  ok(`chyba firma_ma_firemni_ucet → „nevíme" s textem chyby a pobočkami — naměřeno: ${v.druh}`,
+    v.druh === 'nevime' && v.text === FIREMNI_CHYBA.text && v.pobocky.length === 2)
+}
+{
+  const v = rozhodnoutBezUctuFirmy({ stav: 'chyba', text: CHYBA_POBOCEK_BEZ_UCTU }, MA_FIREMNI)
+  ok(`chyba zjištění poboček bez účtu → chyba, i když firma firemní účet má — naměřeno: ${v.druh}`,
+    v.druh === 'chyba' && v.text === CHYBA_POBOCEK_BEZ_UCTU)
+}
+
+console.log('\n== Texty dodatku 3d ==')
+{
+  const dve = vetaPobockyPresFiremniUcet(OBE)
+  const jednaP = vetaPobockyPresFiremniUcet([OBE[0]])
+  ok(`celá firma, dvě pobočky: jména z dat, „nemají vlastní účet a platí přes firemní účet", čísla poboček — naměřeno: ${dve}`,
+    dve === 'Bernard Bar Tábor a Restaurace Černá Perla nemají vlastní platební účet a platí přes firemní účet. '
+      + 'Jeho platby jsou v přehledu za celou firmu, do čísel poboček se nepočítají.')
+  ok(`celá firma, jedna pobočka: „nemá … do čísel pobočky" — naměřeno: ${jednaP}`,
+    /^Bernard Bar Tábor nemá vlastní platební účet a platí přes firemní účet\./.test(jednaP ?? '') && /do čísel pobočky se nepočítají/.test(jednaP ?? ''))
+  ok('celá firma, žádná pobočka → nic (null)', vetaPobockyPresFiremniUcet([]) === null)
+  ok('vysvětlení nepoužívá slova varování („nemají aktivní", „nejsou")', !/aktivní platební účet|nejsou\./.test(dve ?? ''))
+}
+{
+  const smiF = hlaskaBezUctuPobocky(true, MA_FIREMNI)
+  const nesmiF = hlaskaBezUctuPobocky(false, MA_FIREMNI)
+  ok(`pobočka, firma s firemním účtem, kdo nesmí: jen klidná věta, žádná cesta ani výzva — naměřeno: ${nesmiF}`,
+    nesmiF === PRES_FIREMNI_UCET_POBOCKA && !/→/.test(nesmiF) && !/zatím nemá/.test(nesmiF))
+  ok(`pobočka, firma s firemním účtem, kdo smí: klidná věta a cesta jen jako možnost — naměřeno: ${smiF}`,
+    smiF.startsWith(PRES_FIREMNI_UCET_POBOCKA) && /Kdyby pobočka měla mít vlastní účet/.test(smiF) && /Celá firma → Platby → Platební účty/.test(smiF)
+      && !/nedají spočítat/.test(smiF))
+  const smiChyba = hlaskaBezUctuPobocky(true, FIREMNI_CHYBA)
+  ok(`pobočka, chyba firemního účtu: dosavadní věta + chyba, ne klidná věta — naměřeno: ${smiChyba}`,
+    smiChyba.startsWith(smi) && smiChyba.endsWith(FIREMNI_CHYBA.text) && !smiChyba.includes(PRES_FIREMNI_UCET_POBOCKA))
+}
+{
+  const naPob = vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, BERNARD, MA_FIREMNI)
+  ok(`stránka pobočky, firma s firemním účtem → klidná věta, chyba: false — naměřeno: ${naPob?.text}`,
+    naPob?.text === PRES_FIREMNI_UCET_POBOCKA && naPob?.chyba === false)
+  const chybaF = vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, BERNARD, FIREMNI_CHYBA)
+  ok(`stránka pobočky, chyba firemního účtu → chyba: true s oběma větami — naměřeno: ${chybaF?.text}`,
+    chybaF?.chyba === true && /^Pobočka nemá aktivní platební účet\./.test(chybaF?.text ?? '') && (chybaF?.text ?? '').endsWith(FIREMNI_CHYBA.text))
+  ok('stránka pobočky s vlastním účtem → nic, i u firmy s firemním účtem',
+    vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, PERLA, MA_FIREMNI) === null)
+}
+ok(`štítek Cashflow: firma s firemním účtem — naměřeno: ${stitekPobockyBezUctu(MA_FIREMNI)}`,
+  stitekPobockyBezUctu(MA_FIREMNI) === 'Platí přes firemní účet — zůstatek je v přehledu za celou firmu')
+ok(`štítek Cashflow: bez firemního účtu i při chybě dosavadní — naměřeno: ${stitekPobockyBezUctu(FIREMNI_CHYBA)}`,
+  stitekPobockyBezUctu(BEZ_FIREMNIHO) === 'Bez aktivního účtu — zůstatek appka nezná'
+    && stitekPobockyBezUctu(FIREMNI_CHYBA) === 'Bez aktivního účtu — zůstatek appka nezná')
+ok('krátký důvod „–" v KPI a Rozpočtech říká, kde čísla jsou', /^platí přes firemní účet — čísla jsou v přehledu za celou firmu$/.test(KRATCE_PRES_FIREMNI_UCET))
+
+console.log('\n== Zakázky a Platby: vypnutý účet (23514) jasnou větou ==')
+{
+  const migraceUctu = readFileSync(new URL('../supabase/migrations/20261121100000_pobocky_ucty.sql', import.meta.url), 'utf8')
+  const hlaskaSpouste = migraceUctu.match(/raise exception '(Platební účet je vypnutý[^']*)'\s*using errcode = 'check_violation'/)?.[1] ?? ''
+  ok(`spoušť vypnutého účtu: hláška se našla v migraci — naměřeno: ${hlaskaSpouste.slice(0, 40)}…`, hlaskaSpouste.length > 0)
+  const vypnuty = hlaskaZapisuPlatby({ code: '23514', message: hlaskaSpouste })
+  ok(`23514 ze spouště → věta „vyberte aktivní účet" — naměřeno: ${vypnuty}`,
+    vypnuty === VYPNUTY_UCET_ZAPIS && /vypnutý/.test(vypnuty) && /vyberte aktivní účet/.test(vypnuty))
+  ok('jiné 23514 (jiné omezení) → obecná věta, ne „vypnutý účet"',
+    hlaskaZapisuPlatby({ code: '23514', message: 'new row violates check constraint "transakce_castka_check"' }) === NEPODARILO_ZAPSAT_PLATBU)
+  ok('jiná chyba i chyba bez kódu → obecná věta',
+    hlaskaZapisuPlatby({ code: '42501', message: 'vypnutý' }) === NEPODARILO_ZAPSAT_PLATBU && hlaskaZapisuPlatby(null) === NEPODARILO_ZAPSAT_PLATBU)
+}
+
+console.log('\n== Přehled: chyba načtení poboček NENÍ „žádné pobočky" ==')
+ok('pobockyProKpi: chyba dotazu → null (KPI se nepočítají)',
+  pobockyProKpi({ data: null, error: { code: '42501', message: 'x' } }) === null
+    && pobockyProKpi({ data: [{ id: BERNARD, name: 'B' }], error: { message: 'x' } }) === null)
+ok('pobockyProKpi: data bez chyby, která nejsou seznam → null', pobockyProKpi({ data: null, error: null }) === null)
+ok('pobockyProKpi: seznam → pobočky beze změny, prázdný seznam = opravdu žádné',
+  pobockyProKpi({ data: [{ id: BERNARD, name: 'B' }], error: null })?.[0]?.id === BERNARD
+    && Array.isArray(pobockyProKpi({ data: [], error: null })) && pobockyProKpi({ data: [], error: null }).length === 0)
 
 console.log('\n== Sloupec „Účet / pobočka" a účty mimo aktivní pobočky ==')
 const POBOCKY = [
@@ -370,17 +515,29 @@ const STRANKY = {
 }
 for (const [jmeno, cesta] of Object.entries(STRANKY)) {
   const s = zdroj(cesta)
-  ok(`${jmeno}: „bez účtu" z nactiPobockyBezUctu a za celou firmu blok PobockyBezUctu se smiPrirazovat`,
+  ok(`${jmeno}: „bez účtu" z nactiPobockyBezUctu a za celou firmu blok PobockyBezUctu s firemním účtem a smiPrirazovat`,
     /nactiPobockyBezUctu\(\(fn, argumenty\) => supabase\.rpc\(fn, argumenty\), tenantId/.test(s)
-      && /<PobockyBezUctu vysledek=\{[^}]+\} smiPrirazovat=\{smiSpravovatUcty\}/.test(s)
+      && /<PobockyBezUctu vysledek=\{[^}]+\} firemni=\{firemni(Ucet)?\} smiPrirazovat=\{smiSpravovatUcty\}/.test(s)
       && /smiSpravovatUctyFirmy\(tenantId, pristup\.ctx\)/.test(s))
+  // Dodatek 3d: „platí firma přes firemní účet" jen z databázové funkce ano/ne,
+  // ne z vlastního čtení platebni_ucty (na pobočce by firemní účet přes RLS neviděla).
+  ok(`${jmeno}: firemní účet z nactiFiremniUcet (firma_ma_firemni_ucet), ne vlastním dotazem`,
+    /nactiFiremniUcet\(\(fn, argumenty\) => supabase\.rpc\(fn, argumenty\), tenantId\)/.test(s)
+      && !/\.is\('branch_id', null\)/.test(s))
   ok(`${jmeno}: nepočítá účty pobočky sám (žádné count platebni_ucty)`, !/from\('platebni_ucty'\)\s*\.select\('id', \{ count/.test(s))
 }
 
 const komponenta = zdroj('app/[rozsah]/finance/pobocky-bez-uctu.tsx')
 ok('PobockyBezUctu: odkaz na Platby celé firmy jen se smiPrirazovat, chyba se řekne',
   /\{smiPrirazovat \? \(/.test(komponenta) && /\/\$\{TENANT_SCOPE_SEGMENT\}\/finance\/platby#\$\{KOTVA_UCTU\}/.test(komponenta)
-    && /vysledek\.stav === 'chyba'/.test(komponenta) && KOTVA_UCTU === 'platebni-ucty')
+    && /const stav = rozhodnoutBezUctuFirmy\(vysledek, firemni\)/.test(komponenta)
+    && /if \(stav\.druh === 'chyba'\) chyby\.push\(stav\.text\)/.test(komponenta) && KOTVA_UCTU === 'platebni-ucty')
+ok('PobockyBezUctu: „nevíme" (chyba firemního účtu) = chyba A varování, ne vysvětlení',
+  /else if \(stav\.druh === 'nevime'\) \{\s*chyby\.push\(stav\.text\)\s*const veta = vetaPobockyBezUctu\(stav\.pobocky\)/.test(komponenta))
+ok('PobockyBezUctu: vysvětlení je klidná věta (muted, bez role="status") a odkaz ODKAZ_VLASTNI_UCET jen se smiPrirazovat',
+  /vysvetleni = vetaPobockyPresFiremniUcet\(stav\.pobocky\)/.test(komponenta)
+    && /\{vysvetleni \? \(\s*<p style=\{\{ margin: 0, fontSize: '13px', color: 'var\(--muted\)' \}\}>\s*\{vysvetleni\}\s*\{smiPrirazovat \? \(/.test(komponenta)
+    && /\{ODKAZ_VLASTNI_UCET\}<\/Link>/.test(komponenta) && ODKAZ_VLASTNI_UCET === 'Přiřadit pobočce vlastní účet')
 
 const platby = zdroj('app/[rozsah]/finance/platby/page.tsx')
 ok('Platby: sekce účtů celé firmy má kotvu, na kterou odkaz míří', /<section id=\{pobocka \? undefined : KOTVA_UCTU\}/.test(platby))
@@ -391,8 +548,11 @@ ok('Platby: úprava účtu jen za celou firmu a jen se Správou financí za celo
   /\{!pobocka && smiSpravovatUcty \? \(\s*<form\s+action=\{upravitPlatebniUcet\}/.test(platby))
 ok('Platby: sloupec „Účet / pobočka" jen za celou firmu',
   /\{!pobocka \? <th style=\{\{ padding: '6px 8px' \}\}>Účet \/ pobočka<\/th> : null\}/.test(platby) && /popisUctuPlatby\(/.test(platby))
-ok('Platby: pobočka bez účtu — věta s místem přiřazení přes hlaskaBezUctuPobocky(smiSpravovatUcty)',
-  /\{hlaskaBezUctuPobocky\(smiSpravovatUcty\)\}/.test(platby) && !/Existující účet přiřadíte pobočce v pohledu Celá firma/.test(platby))
+ok('Platby: pobočka bez účtu — věta s místem přiřazení přes hlaskaBezUctuPobocky(smiSpravovatUcty, firemni)',
+  /\{hlaskaBezUctuPobocky\(smiSpravovatUcty, firemni\)\}/.test(platby) && !/Existující účet přiřadíte pobočce v pohledu Celá firma/.test(platby))
+ok('Platby: pobočka u firmy s firemním účtem — nadpis „platí přes firemní účet", ne „zatím nemá"',
+  /const presFiremni = platiPresFiremniUcet\(firemni\)/.test(platby)
+    && /\{presFiremni \? `\$\{nazevPobocky\} platí přes firemní účet` : 'Pobočka zatím nemá aktivní platební účet'\}/.test(platby))
 
 const rozpocty = zdroj('app/[rozsah]/finance/rozpocty/page.tsx')
 ok('Rozpočty: chyba rozpocet_prehled i vydelky_prehled se čte z .error, ne tiše na nulu',
@@ -413,11 +573,68 @@ for (const [jmeno, cesta] of Object.entries({ 'Přehled': STRANKY['Přehled'], '
   const s = zdroj(cesta)
   ok(`${jmeno}: za celou firmu načte účty mimo aktivní pobočky a předá je bloku PobockyBezUctu`,
     /\? Promise\.resolve\(null\) : nactiUctyMimoPobocek\(supabase, tenantId\)/.test(s)
-      && /<PobockyBezUctu vysledek=\{[^}]+\} smiPrirazovat=\{smiSpravovatUcty\} mimoPobocky=\{mimoPobocky\} \/>/.test(s))
+      && /<PobockyBezUctu vysledek=\{[^}]+\} firemni=\{firemni(Ucet)?\} smiPrirazovat=\{smiSpravovatUcty\} mimoPobocky=\{mimoPobocky\} \/>/.test(s))
 }
-ok('PobockyBezUctu: věta o účtech mimo pobočky i chyba jejich načtení se vykreslí',
+ok('PobockyBezUctu: věta o účtech mimo pobočky i chyba jejich načtení se vykreslí — i u firmy s firemním účtem',
   /vetaUctuMimoPobocekFirmy\(mimoPobocky\.ucty\)/.test(komponenta) && /mimoPobocky\?\.stav === 'chyba'\) chyby\.push\(mimoPobocky\.text\)/.test(komponenta)
-    && /if \(chyby\.length === 0 && vety\.length === 0\) return null/.test(komponenta))
+    && /if \(chyby\.length === 0 && vety\.length === 0 && !vysvetleni\) return null/.test(komponenta)
+    // větev mimoPobocky není uvnitř rozhodnutí o firemním účtu
+    && komponenta.indexOf("if (mimoPobocky?.stav === 'chyba')") > komponenta.indexOf("} else if (stav.druh === 'vysvetleni') {"))
+
+console.log('\n== Zdroj: dodatek 3d na stránkách ==')
+const cashflow = zdroj(STRANKY['Cashflow'])
+ok('Cashflow: štítek pobočky bez účtu přes stitekPobockyBezUctu(firemni), ne napevno',
+  /\{stitekPobockyBezUctu\(firemni\)\}/.test(cashflow) && !/>\s*Bez aktivního účtu — zůstatek appka nezná\s*</.test(cashflow))
+ok('Cashflow: karta pobočky — „platí přes firemní účet" a věta s firemni',
+  /\{presFiremni \? `\$\{nazevPobocky\} platí přes firemní účet` :/.test(cashflow)
+    && /hlaskaBezUctuPobocky\(smiSpravovatUcty, firemni\)/.test(cashflow))
+ok('Rozpočty: buňky Tržby a Suroviny u pobočky bez účtu — „platí přes firemní účet" (2×), čísla dál skrytá',
+  (rozpocty.match(/\{presFiremni \? KRATCE_PRES_FIREMNI_UCET : 'bez platebního účtu pobočky'\}/g) ?? []).length === 2
+    && /const skrytSkutecnost = bezUctu\b/.test(rozpocty))
+ok('Rozpočty: věty o pobočce s firemním účtem (firemniUcet — `firemni` tu jsou firemní rozpočty)',
+  /const presFiremni = platiPresFiremniUcet\(firemniUcet\)/.test(rozpocty)
+    && /hlaskaBezUctuPobocky\(smiSpravovatUcty, firemniUcet\)/.test(rozpocty)
+    && /vetaPobockyPresFiremniUcet\(\[\{ branchId: branchId \?\? '', nazev: nazevPohledu \}\]\)/.test(rozpocty)
+    && /const firemni = branchId === null/.test(rozpocty))
+const prehled = zdroj(STRANKY['Přehled'])
+ok('Přehled: KPI Cashflow pobočky bez účtu — „–" a krátký důvod s firemním účtem',
+  /hodnota=\{kpi\.pobockaBezUctu \? '–' : koruny\(kpi\.cashflowHaleru\)\}/.test(prehled)
+    && /\? \(presFiremni \? KRATCE_PRES_FIREMNI_UCET : 'pobočka nemá aktivní platební účet'\)/.test(prehled)
+    && /hlaskaBezUctuPobocky\(smiSpravovatUcty, firemni\)/.test(prehled))
+ok('Přehled: pobočky pro KPI přes pobockyProKpi — chyba = KPI null („Přehled se nepodařilo načíst."), ne nuly',
+  /const branches = pobockyProKpi\(branchesRes\)/.test(prehled)
+    && /branches === null\s*\? Promise\.resolve<FinanceKpi \| null>\(null\)/.test(prehled)
+    && !/branchesData \?\? \[\]/.test(prehled)
+    && /Přehled se nepodařilo načíst\./.test(prehled))
+const zakazkyAkce = zdroj('app/[rozsah]/finance/zakazky/akce.ts')
+ok('Zakázky zapsatPlatbuZakazky: chyba zápisu přes hlaskaZapisuPlatby(error), ne napevno „nepodařilo se"',
+  /if \(error\) \{\s*redirect\(`\/\$\{rozsah\}\/finance\/zakazky\/\$\{zakazkaId\}\?chyba=\$\{encodeURIComponent\(hlaskaZapisuPlatby\(error\)\)\}`\)/.test(zakazkyAkce)
+    && !/'Platbu se nepodařilo zapsat\.'/.test(zakazkyAkce))
+ok('Platby zapsatTransakci: chyba zápisu přes hlaskaZapisuPlatby(error)',
+  /encodeURIComponent\(hlaskaZapisuPlatby\(error\)\)/.test(zdroj('app/[rozsah]/finance/platby/akce.ts')))
+{
+  // Otázka 160: hlášky párování jmenují právo z katalogu, ne „Správu financí".
+  const parovani = zdroj('supabase/migrations/20261120100000_parovani_pravidla.sql')
+  const hlasky = [...parovani.matchAll(/raise exception\s+'([^']*)'/g)].map((m) => m[1]).filter((t) => /párov/i.test(t))
+  const sPravem = hlasky.filter((t) => t.includes(`„${PRAVO_SPRAVY_FINANCI}"`))
+  ok(`otázka 160: hlášky párování bez práva jmenují „${PRAVO_SPRAVY_FINANCI}" — naměřeno: ${sPravem.length} z ${hlasky.length}`,
+    sPravem.length === 2
+      && sPravem.some((t) => t.startsWith('Nemáte oprávnění párovat'))
+      && sPravem.some((t) => t.startsWith('Rušit párování s fakturami smí')))
+  ok('otázka 160: žádná hláška (raise) v migraci párování neříká „Správa financí" v žádném pádě',
+    hlasky.length > 0 && ![...parovani.matchAll(/raise exception\s+'([^']*)'/g)].some((m) => /Správ(a|u|y|ě|ou) financí/.test(m[1])))
+}
+{
+  const fnFiremni = migrace.match(/create function public\.firma_ma_firemni_ucet[\s\S]*?\nend \$\$;/)?.[0] ?? ''
+  ok('migrace: firma_ma_firemni_ucet — SECURITY DEFINER, prázdná search_path, vrací jen boolean',
+    /returns boolean\s/.test(fnFiremni) && /security definer set search_path = ''/.test(fnFiremni) && !/returns (setof|table)/.test(fnFiremni))
+  ok('migrace: firma_ma_firemni_ucet — vlastní kontrola práva (42501), firma, bez pobočky, jen aktivní',
+    /app\.has_permission\(p_tenant, 'finance\.read'\)/.test(fnFiremni) && /errcode = '42501'/.test(fnFiremni)
+      && /u\.tenant_id = p_tenant/.test(fnFiremni) && /u\.branch_id is null/.test(fnFiremni) && /and u\.aktivni\b/.test(fnFiremni))
+  ok('migrace: firma_ma_firemni_ucet — revoke od public a anon, execute jen authenticated',
+    /revoke all on function public\.firma_ma_firemni_ucet\(uuid\) from public, anon;/.test(migrace)
+      && /grant execute on function public\.firma_ma_firemni_ucet\(uuid\) to authenticated;/.test(migrace))
+}
 ok('PobockyBezUctu: kdo nesmí, dostane jméno práva z katalogu (KDO_SPRAVUJE_UCTY)',
   /Pobočku účtu přiřadí nebo opraví \{KDO_SPRAVUJE_UCTY\}/.test(komponenta) && !/Správa financí“/.test(komponenta))
 
@@ -447,7 +664,7 @@ ok('upravitPlatebniUcet: beze změny zpět na kartu účtu, ne na začátek sekc
 
 const bezFaktury = zdroj(STRANKY['Platby bez faktury'])
 ok('Platby bez faktury: na pobočce věta přes vetaUctuPobocky — chyba zjištění se řekne, nemlčí',
-  /const vetaUctu = pobocka \? vetaUctuPobocky\(bezUctu, pobocka\) : null/.test(bezFaktury)
+  /const vetaUctu = pobocka \? vetaUctuPobocky\(bezUctu, pobocka, firemni\) : null/.test(bezFaktury)
     && /\{vetaUctu\?\.chyba \? <p role="status"/.test(bezFaktury) && !/maPobockaAktivniUcet\(bezUctu, pobocka\) === false/.test(bezFaktury))
 
 const banka = zdroj('app/[rozsah]/finance/integrace/banka/akce.ts')

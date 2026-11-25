@@ -12,7 +12,16 @@ import { nactiKombinovanyCashflowGraf } from '@/lib/finance-rolling-prehled'
 import { nactiPolozkyKPozornosti, type PolozkaPozornosti } from '@/lib/finance-pozornost'
 import { prazdnoPozornosti } from '@/lib/faktury-brana'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
-import { hlaskaBezUctuPobocky, nactiPobockyBezUctu, nactiUctyMimoPobocek, type PobockyBezUctu as VysledekBezUctu } from '@/lib/finance-ucty-pobocek'
+import {
+  hlaskaBezUctuPobocky,
+  KRATCE_PRES_FIREMNI_UCET,
+  nactiFiremniUcet,
+  nactiPobockyBezUctu,
+  nactiUctyMimoPobocek,
+  platiPresFiremniUcet,
+  pobockyProKpi,
+  type PobockyBezUctu as VysledekBezUctu,
+} from '@/lib/finance-ucty-pobocek'
 import { hraniceMesice, popisRozsahu, predchoziMesic, srovnaniMesice } from '@/lib/finance-obdobi'
 import { ZONA_VYCHOZI } from '@/lib/cas'
 import { provozniDen } from '@/lib/pokladna-cas'
@@ -162,16 +171,21 @@ export default async function FinancePrehled({
   const srovnaniS = srovnani.druh === 'stejne_dny' ? popisRozsahu(srovnani.predchozi) : nazevMesice(mesicPredchozi)
 
   const supabase = await getServerSupabase()
-  const { data: branchesData } = await supabase
+  const branchesRes = await supabase
     .from('branches')
     .select('id, name')
     .eq('tenant_id', tenantId)
     .eq('active', true)
     .is('deleted_at', null)
-  const branches = (branchesData ?? []) as { id: string; name: string }[]
+  // Chyba dotazu NENÍ „firma nemá pobočky" (dodatek 3d, jako Rozpočty):
+  // KPI nad prázdným seznamem by tiše ukázaly nuly. `null` = KPI se
+  // nepočítají a stránka řekne „Přehled se nepodařilo načíst.".
+  const branches = pobockyProKpi(branchesRes)
 
-  const [kpi, bodyGrafu, pozornost, integraceRes, bezUctu, smiSpravovatUcty, mimoPobocky] = await Promise.all([
-    nactiFinanceKpi(tenantId, pristup.ctx, branches, hraniceMesice(mesic), hraniceMesice(mesicPredchozi), srovnani, pobocka).catch((): FinanceKpi | null => null),
+  const [kpi, bodyGrafu, pozornost, integraceRes, bezUctu, smiSpravovatUcty, mimoPobocky, firemni] = await Promise.all([
+    branches === null
+      ? Promise.resolve<FinanceKpi | null>(null)
+      : nactiFinanceKpi(tenantId, pristup.ctx, branches, hraniceMesice(mesic), hraniceMesice(mesicPredchozi), srovnani, pobocka).catch((): FinanceKpi | null => null),
     nactiKombinovanyCashflowGraf(tenantId, 'zakladni', pobocka).catch(() => []),
     nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read'), pobocka)
       .catch(() => ({ polozky: [] as PolozkaPozornosti[], hlaska: prazdnoPozornosti({ stav: 'chyba_dotazu' }) })),
@@ -186,7 +200,11 @@ export default async function FinancePrehled({
     // Celá firma: účty na vypnuté nebo smazané pobočce — jejich platby
     // nejsou v Cashflow ani v součtech po pobočkách (krok 3).
     naPobocce ? Promise.resolve(null) : nactiUctyMimoPobocek(supabase, tenantId),
+    // Platí firma přes firemní účet (dodatek 3d)? Celá firma: vysvětlení
+    // místo varování; pobočka: „platby můžou chodit přes firemní účet".
+    nactiFiremniUcet((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId),
   ])
+  const presFiremni = platiPresFiremniUcet(firemni)
 
   type Pripojeni = { id: string; oblast: string; poskytovatel: string; nazev: string; stav: string; branch_id: string | null; externi_ucet: unknown }
   // Na pobočce jen pokladny, které posílají JEJÍ tržby (vlastní připojení,
@@ -222,10 +240,10 @@ export default async function FinancePrehled({
         {naPobocce ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{POZNAMKA_FIREMNI}</p> : null}
 
         {/* Celá firma: které aktivní pobočky nemají aktivní účet a že jejich platby v součtech po pobočkách nejsou (krok 3, bod 1). */}
-        {bezUctu ? <PobockyBezUctu vysledek={bezUctu} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
-        {/* Pobočka bez účtu: kde se účet přiřazuje, jen tomu, kdo to smí (krok 3, bod 5). */}
+        {bezUctu ? <PobockyBezUctu vysledek={bezUctu} firemni={firemni} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
+        {/* Pobočka bez účtu: kde se účet přiřazuje, jen tomu, kdo to smí (krok 3, bod 5); u firmy s firemním účtem jen klidná věta (dodatek 3d). */}
         {naPobocce && kpi?.pobockaBezUctu ? (
-          <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{hlaskaBezUctuPobocky(smiSpravovatUcty)}</p>
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{hlaskaBezUctuPobocky(smiSpravovatUcty, firemni)}</p>
         ) : null}
 
         {kpi ? (
@@ -238,10 +256,14 @@ export default async function FinancePrehled({
               trend={trend(kpi.trendTrzby, '%', true)}
               srovnaniS={srovnaniS}
             />
-            {/* Pobočka bez vlastního účtu cashflow NEMÁ — „0 Kč" by tvrdilo, že se nic nepohnulo. */}
+            {/* Pobočka bez vlastního účtu cashflow NEMÁ — „0 Kč" by tvrdilo, že se nic nepohnulo. Platí-li přes firemní účet, řekne se to (dodatek 3d). */}
             <FinanceKpiKarta
               ikona="blesk" titulek="Cashflow" hodnota={kpi.pobockaBezUctu ? '–' : koruny(kpi.cashflowHaleru)}
-              zdroj={kpi.pobockaBezUctu ? 'pobočka nemá aktivní platební účet' : naPobocce ? 'příjmy − výdaje z účtů pobočky' : 'příjmy − výdaje z plateb'}
+              zdroj={
+                kpi.pobockaBezUctu
+                  ? (presFiremni ? KRATCE_PRES_FIREMNI_UCET : 'pobočka nemá aktivní platební účet')
+                  : naPobocce ? 'příjmy − výdaje z účtů pobočky' : 'příjmy − výdaje z plateb'
+              }
               trend={trend(kpi.trendCashflow, '%', true)}
               srovnaniS={srovnaniS}
             />
@@ -291,7 +313,9 @@ export default async function FinancePrehled({
               formatovatHodnotu={koruny}
               prazdno={
                 naPobocce
-                  ? 'Pobočka zatím nemá vlastní aktivní platební účet, takže appka její zůstatek nezná. Účty celé firmy jsou v pohledu Celá firma.'
+                  ? kpi?.pobockaBezUctu && presFiremni
+                    ? 'Pobočka nemá vlastní účet a platí přes firemní účet, takže appka její zůstatek nezná — zůstatek firemního účtu je v přehledu za celou firmu.'
+                    : 'Pobočka zatím nemá vlastní aktivní platební účet, takže appka její zůstatek nezná. Účty celé firmy jsou v pohledu Celá firma.'
                   : 'Zatím bez platebních účtů nebo transakcí.'
               }
             />
@@ -304,7 +328,9 @@ export default async function FinancePrehled({
               }))}
               prazdno={
                 kpi?.pobockaBezUctu
-                  ? 'Pobočka zatím nemá aktivní platební účet — náklady z plateb za ni appka nemá.'
+                  ? presFiremni
+                    ? 'Pobočka platí přes firemní účet — náklady z jeho plateb jsou v přehledu za celou firmu.'
+                    : 'Pobočka zatím nemá aktivní platební účet — náklady z plateb za ni appka nemá.'
                   : 'Zatím žádné kategorizované náklady za tohle období.'
               }
             />

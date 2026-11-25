@@ -31,7 +31,9 @@ import {
   kotvaUctu,
   maPobockaAktivniUcet,
   mistoHlaskyUctu,
+  nactiFiremniUcet,
   nactiPobockyBezUctu,
+  platiPresFiremniUcet,
   popisUctuPlatby,
   uctyMimoAktivnichPobocek,
   vetaUctuMimoPobocky,
@@ -331,7 +333,7 @@ export default async function FinancePlatby({
   let dotazTransakci = supabase.from('transakce').select(sloupceTransakci).eq('tenant_id', tenantId)
   if (pobocka) dotazTransakci = dotazTransakci.eq('platebni_ucty.branch_id', pobocka)
 
-  const [ucty, transakceRes, alokaceRes, pobockyRes, bezUctu] = await Promise.all([
+  const [ucty, transakceRes, alokaceRes, pobockyRes, bezUctu, firemni] = await Promise.all([
     dotazUctu.order('nazev'),
     dotazTransakci
       .order('datum', { ascending: false })
@@ -352,6 +354,9 @@ export default async function FinancePlatby({
     // Kdo nemá aktivní účet — jedna definice pro všechny stránky Financí
     // (pobocky_bez_aktivniho_uctu, krok 3). Na pobočce se ptá jen na ni.
     nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId, pobocka),
+    // Platí firma přes firemní účet (dodatek 3d)? Mění jen to, co se
+    // o pobočce bez účtu říká; chyba = stav „chyba", ne „ne".
+    nactiFiremniUcet((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId),
   ])
 
   // Na pobočce věta „pobočka nemá účet" nesmí být spadlý dotaz
@@ -380,6 +385,7 @@ export default async function FinancePlatby({
   // Na pobočce: nemá aktivní účet? Rozhoduje táž funkce jako za celou firmu;
   // když se nepodařilo zjistit, rozhodne výpis aktivních účtů pobočky.
   const pobockaBezUctu = pobocka !== null && (maPobockaAktivniUcet(bezUctu, pobocka) ?? platebniUcty.length > 0) === false
+  const presFiremni = platiPresFiremniUcet(firemni)
 
   // Hláška po úpravě účtu (chyba i „Účet uložen"): stránka po ní sjede na
   // kartu upraveného účtu (kotvaUctu, adresaUctu v akce.ts), takže se
@@ -463,7 +469,7 @@ export default async function FinancePlatby({
         ) : null}
 
         {/* Celá firma: aktivní pobočky bez aktivního účtu (krok 3, bod 1). */}
-        {!pobocka ? <PobockyBezUctu vysledek={bezUctu} smiPrirazovat={smiSpravovatUcty} naPlatbach /> : null}
+        {!pobocka ? <PobockyBezUctu vysledek={bezUctu} firemni={firemni} smiPrirazovat={smiSpravovatUcty} naPlatbach /> : null}
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           {/* Import výpisu je jen za celou firmu (import/layout.tsx) — na pobočce odkaz nestojí. */}
@@ -476,15 +482,18 @@ export default async function FinancePlatby({
 
         {pobockaBezUctu ? (
           <div role="status" style={{ ...karta, display: 'grid', gap: '6px' }}>
-            <h2 style={{ margin: 0, fontSize: '15px' }}>Pobočka zatím nemá aktivní platební účet</h2>
+            {/* Firma platí přes firemní účet (dodatek 3d): normální stav, ne „zatím nemá". */}
+            <h2 style={{ margin: 0, fontSize: '15px' }}>
+              {presFiremni ? `${nazevPobocky} platí přes firemní účet` : 'Pobočka zatím nemá aktivní platební účet'}
+            </h2>
             <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
-              Platby patří pobočce přes platební účet a {nazevPobocky} zatím žádný aktivní nemá. Účty založené
-              dosud jsou firemní (bez pobočky) — jejich platby jsou v pohledu Celá firma, ne tady, takže prázdný
-              seznam neznamená, že pobočce nic nepřišlo.
+              {presFiremni
+                ? 'Platby patří pobočce přes platební účet a vlastní účet pobočka nemá. Platby firemního účtu jsou v pohledu Celá firma, ne tady, takže prázdný seznam neznamená, že pobočce nic nepřišlo.'
+                : `Platby patří pobočce přes platební účet a ${nazevPobocky} zatím žádný aktivní nemá. Účty založené dosud jsou firemní (bez pobočky) — jejich platby jsou v pohledu Celá firma, ne tady, takže prázdný seznam neznamená, že pobočce nic nepřišlo.`}
             </p>
             {/* Kde se účet přiřazuje — jen tomu, kdo to smí (krok 3, bod 5). */}
             <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
-              {hlaskaBezUctuPobocky(smiSpravovatUcty)}
+              {hlaskaBezUctuPobocky(smiSpravovatUcty, firemni)}
               {smiPsat ? ' Nový účet pobočky můžete založit i tady níž.' : ''}
             </p>
           </div>

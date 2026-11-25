@@ -15,6 +15,15 @@
  * databáze zvenku (`(fn, args) => supabase.rpc(fn, args)`), takže jde
  * zkoušet Nodem: scripts/finance-ucty-pobocek.test.mjs. Totéž
  * `nactiUctyMimoPobocek` — klient Supabase je jen typ, test podvrhne vlastní.
+ *
+ * SPOLEČNÝ FIREMNÍ ÚČET (dodatek 3d, rozhodnutí Šéfíka 25. 11. 2026 —
+ * otázky 98 a 114): Bernard Bar Tábor i Restaurace Černá Perla platí přes
+ * jeden firemní účet bez pobočky. Pobočka bez vlastního účtu je u firmy
+ * s AKTIVNÍM firemním účtem normální stav, ne chyba — stránky ji místo
+ * varováním jen klidně vysvětlí (`rozhodnoutBezUctuFirmy`). Jestli firma
+ * aktivní firemní účet má, říká zase jen databáze (`nactiFiremniUcet`,
+ * public.firma_ma_firemni_ucet) — i na pobočce, kde ho přes RLS vidět
+ * není. Platby firemního účtu se žádné pobočce nepřipisují (otázka 280).
  */
 
 import type { getServerSupabase } from './supabase/server.ts'
@@ -108,17 +117,128 @@ export function maPobockaAktivniUcet(vysledek: PobockyBezUctu, pobocka: string):
   return !vysledek.pobocky.some((p) => p.branchId === pobocka)
 }
 
+// ---------------------------------------------------------------------
+// Společný firemní účet (dodatek 3d)
+// ---------------------------------------------------------------------
+
+export type FiremniUcet =
+  | { stav: 'ok'; ma: boolean }
+  /** `kod` = SQLSTATE z databáze (42501 = bez práva), když nějaký přišel. */
+  | { stav: 'chyba'; text: string; kod?: string }
+
+export const CHYBA_FIREMNIHO_UCTU =
+  'Nepodařilo se zjistit, jestli má firma aktivní firemní účet (bez pobočky), přes který pobočky platí — zkuste stránku obnovit.'
+
+/**
+ * Má firma AKTIVNÍ platební účet bez pobočky? Jen ano/ne z databáze
+ * (public.firma_ma_firemni_ucet, migrace 20261121100000) — funguje i na
+ * pobočce, kde firemní účet přes RLS vidět není, a nic o účtu neprozradí.
+ *
+ * Chyba NIKDY není „ne": „ne" by stránku přepnulo na varování, jako by
+ * firma žádný účet neměla. Stránka chybu řekne (`CHYBA_FIREMNIHO_UCTU`).
+ */
+export async function nactiFiremniUcet(rpc: VolaniRpc, tenantId: string): Promise<FiremniUcet> {
+  let vysledek: VysledekRpc
+  try {
+    vysledek = await rpc('firma_ma_firemni_ucet', { p_tenant: tenantId })
+  } catch {
+    return { stav: 'chyba', text: CHYBA_FIREMNIHO_UCTU }
+  }
+  if (vysledek.error) return { stav: 'chyba', text: CHYBA_FIREMNIHO_UCTU, kod: vysledek.error.code ?? undefined }
+  if (typeof vysledek.data !== 'boolean') return { stav: 'chyba', text: CHYBA_FIREMNIHO_UCTU }
+  return { stav: 'ok', ma: vysledek.data }
+}
+
+/**
+ * Platí pobočky bez vlastního účtu přes firemní účet? `true` jen tehdy,
+ * když to databáze řekla. Chyba = `false` — stránka zůstane u dosavadní
+ * věty „nemá účet" a chybu řekne zvlášť (`hlaskaBezUctuPobocky`,
+ * `rozhodnoutBezUctuFirmy`); klidné vysvětlení se neukáže naslepo.
+ */
+export function platiPresFiremniUcet(firemni: FiremniUcet): boolean {
+  return firemni.stav === 'ok' && firemni.ma
+}
+
+/** Pohled pobočky: pobočka bez vlastního účtu u firmy, která platí přes firemní účet. */
+export const PRES_FIREMNI_UCET_POBOCKA =
+  'Platby pobočky můžou chodit přes firemní účet, který tady nevidíte; jsou v přehledu za celou firmu.'
+
+/** Krátký důvod „–" v kartě nebo buňce pobočky, která platí přes firemní účet (KPI, Rozpočty). */
+export const KRATCE_PRES_FIREMNI_UCET = 'platí přes firemní účet — čísla jsou v přehledu za celou firmu'
+
+/** Text odkazu na přiřazení vlastního účtu — jen nenápadná možnost pro toho, kdo smí, ne výzva. */
+export const ODKAZ_VLASTNI_UCET = 'Přiřadit pobočce vlastní účet'
+
+/**
+ * Štítek u pobočky bez vlastního aktivního účtu v Cashflow celé firmy.
+ * Čísla zůstávají, jak jsou — mění se jen to, co se o nich říká.
+ */
+export function stitekPobockyBezUctu(firemni: FiremniUcet): string {
+  return platiPresFiremniUcet(firemni)
+    ? 'Platí přes firemní účet — zůstatek je v přehledu za celou firmu'
+    : 'Bez aktivního účtu — zůstatek appka nezná'
+}
+
+/**
+ * Co stránka CELÉ FIRMY řekne o pobočkách bez vlastního aktivního účtu:
+ *   * `nic` — každá aktivní pobočka účet má;
+ *   * `chyba` — nepodařilo se zjistit, kdo účet nemá;
+ *   * `varovani` — firma nemá žádný aktivní firemní účet: pobočky bez
+ *     účtu se jmenují varováním (jako do dodatku 3d);
+ *   * `vysvetleni` — firma má aktivní firemní účet: pobočky platí přes
+ *     něj, to je normální stav, stačí klidná věta;
+ *   * `nevime` — nepodařilo se zjistit, jestli firma firemní účet má:
+ *     varování zůstane a k němu věta o chybě. Chyba není „ne".
+ */
+export type BezUctuFirmy =
+  | { druh: 'nic' }
+  | { druh: 'chyba'; text: string }
+  | { druh: 'varovani'; pobocky: PobockaBezUctu[] }
+  | { druh: 'vysvetleni'; pobocky: PobockaBezUctu[] }
+  | { druh: 'nevime'; pobocky: PobockaBezUctu[]; text: string }
+
+export function rozhodnoutBezUctuFirmy(bezUctu: PobockyBezUctu, firemni: FiremniUcet): BezUctuFirmy {
+  if (bezUctu.stav === 'chyba') return { druh: 'chyba', text: bezUctu.text }
+  if (bezUctu.pobocky.length === 0) return { druh: 'nic' }
+  if (firemni.stav === 'chyba') return { druh: 'nevime', pobocky: bezUctu.pobocky, text: firemni.text }
+  return firemni.ma
+    ? { druh: 'vysvetleni', pobocky: bezUctu.pobocky }
+    : { druh: 'varovani', pobocky: bezUctu.pobocky }
+}
+
+/**
+ * Klidná věta pro pohled Celá firma: pobočky bez vlastního účtu platí
+ * přes firemní účet. Jména poboček z dat. `null` = žádná taková.
+ */
+export function vetaPobockyPresFiremniUcet(pobocky: readonly PobockaBezUctu[]): string | null {
+  if (pobocky.length === 0) return null
+  const nazvy = pobocky.map((p) => p.nazev.trim() || 'Pobočka bez názvu')
+  const jedna = pobocky.length === 1
+  return `${vycet(nazvy)} ${jedna ? 'nemá' : 'nemají'} vlastní platební účet a platí přes firemní účet. `
+    + `Jeho platby jsou v přehledu za celou firmu, do čísel ${jedna ? 'pobočky' : 'poboček'} se nepočítají.`
+}
+
 /**
  * Krátká věta pro stránku POBOČKY (Platby bez faktury): nemá aktivní účet,
  * nebo se to nepodařilo zjistit. `null` = účet má, nic se neříká.
  * Chyba se řekne nahlas — prázdná fronta by jinak vypadala jako „žádné
  * platby bez faktury".
+ *
+ * Firma s aktivním firemním účtem (dodatek 3d): pobočka bez vlastního
+ * účtu platí přes něj — věta to řekne klidně. Nevíme-li, jestli firma
+ * firemní účet má, je to chyba, ne „nemá".
  */
-export function vetaUctuPobocky(vysledek: PobockyBezUctu, pobocka: string): { text: string; chyba: boolean } | null {
+export function vetaUctuPobocky(
+  vysledek: PobockyBezUctu,
+  pobocka: string,
+  firemni: FiremniUcet,
+): { text: string; chyba: boolean } | null {
   if (vysledek.stav === 'chyba') return { text: vysledek.text, chyba: true }
-  return maPobockaAktivniUcet(vysledek, pobocka) === false
-    ? { text: 'Pobočka nemá aktivní platební účet.', chyba: false }
-    : null
+  if (maPobockaAktivniUcet(vysledek, pobocka) !== false) return null
+  if (firemni.stav === 'chyba') return { text: `Pobočka nemá aktivní platební účet. ${firemni.text}`, chyba: true }
+  return firemni.ma
+    ? { text: PRES_FIREMNI_UCET_POBOCKA, chyba: false }
+    : { text: 'Pobočka nemá aktivní platební účet.', chyba: false }
 }
 
 /** „A", „A a B", „A, B a C". */
@@ -144,12 +264,35 @@ export function vetaPobockyBezUctu(pobocky: readonly PobockaBezUctu[]): string |
  * Věta pro stránku pobočky bez účtu — a KDE se účet přiřazuje, jen tomu,
  * kdo to smí (Správa financí za celou firmu). Ostatním se řekne, kdo to
  * udělá, ne cesta, na které by narazili na „nemáte oprávnění".
+ *
+ * Firma s aktivním firemním účtem (dodatek 3d): pobočka platí přes něj —
+ * žádná výzva k přiřazení, jen klidná věta; kdo smí, dostane cestu jako
+ * nenápadnou možnost. Nevíme-li, jestli firma firemní účet má, zůstane
+ * dosavadní věta a k ní, že se to nepodařilo zjistit.
  */
-export function hlaskaBezUctuPobocky(smiPrirazovat: boolean): string {
+export function hlaskaBezUctuPobocky(smiPrirazovat: boolean, firemni: FiremniUcet): string {
+  if (platiPresFiremniUcet(firemni)) {
+    return smiPrirazovat
+      ? `${PRES_FIREMNI_UCET_POBOCKA} Kdyby pobočka měla mít vlastní účet, přiřadíte ho v pohledu Celá firma → Platby → Platební účty.`
+      : PRES_FIREMNI_UCET_POBOCKA
+  }
   const zaklad = 'Pobočka zatím nemá aktivní platební účet, takže skutečné příjmy a výdaje se pro ni nedají spočítat.'
-  return smiPrirazovat
+  const veta = smiPrirazovat
     ? `${zaklad} Účet pobočce přiřadíte v pohledu Celá firma → Platby → Platební účty.`
     : `${zaklad} Účet pobočce může přiřadit ${KDO_SPRAVUJE_UCTY}.`
+  return firemni.stav === 'chyba' ? `${veta} ${firemni.text}` : veta
+}
+
+/**
+ * Aktivní pobočky firmy pro KPI Přehledu z odpovědi dotazu na `branches`.
+ * Chyba dotazu NENÍ „firma nemá pobočky" (dodatek 3d, stejně jako
+ * Rozpočty): KPI by se spočítaly nad prázdným seznamem a tiše ukázaly
+ * nuly a „0 z 0 provozoven". `null` = nepodařilo se načíst — stránka KPI
+ * nepočítá a řekne „Přehled se nepodařilo načíst.".
+ */
+export function pobockyProKpi(odpoved: { data: unknown; error: unknown }): { id: string; name: string }[] | null {
+  if (odpoved.error || !Array.isArray(odpoved.data)) return null
+  return odpoved.data as { id: string; name: string }[]
 }
 
 /** Pobočka firmy, jak ji čtou Platby (`branches`, bez smazaných). */
