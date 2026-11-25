@@ -10,8 +10,8 @@ import { pristupKFakturam } from '@/lib/faktury-pristup'
 import { hlaskaBrany } from '@/lib/faktury-brana'
 import { naHalere } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
-import { hlaskaUpravyUctu, NEPODARILO_ULOZIT_UCET, pobockaUctu, ucetPatriRozsahu, upravaUctu } from '@/lib/finance-platby-pobocka'
-import { FIREMNI_VOLBA, KOTVA_UCTU } from '@/lib/finance-ucty-pobocek'
+import { hlaskaUpravyUctu, NEPODARILO_ULOZIT_UCET, pobockaUctu, problemUctuProZapis, upravaUctu } from '@/lib/finance-platby-pobocka'
+import { adresaUctu, FIREMNI_VOLBA, KDO_SPRAVUJE_UCTY, KOTVA_UCTU } from '@/lib/finance-ucty-pobocek'
 import { overitCisloUctu } from '@/lib/banka/ucet'
 import { najitNavrhyParovani } from '@/lib/finance-navrhy-parovani'
 
@@ -141,21 +141,22 @@ export async function zapsatTransakci(formData: FormData): Promise<void> {
     redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Vyplňte účet, směr, částku a datum.')}`)
   }
 
-  // Na pobočce jen na účet TÉ pobočky — ověřené tady, ne podle toho,
-  // co výběr na stránce nabídl (`ucet_id` si kdokoli přepíše). Platba
-  // na firemní účet nebo účet jiné pobočky by se z Bernard Baru zapsala
-  // do čísel, která tahle stránka vůbec neukazuje.
-  if (pobocka) {
-    const { data: ucet } = await supabase
-      .from('platebni_ucty')
-      .select('branch_id')
-      .eq('id', ucetId)
-      .eq('tenant_id', tenantId)
-      .maybeSingle()
-    if (!ucetPatriRozsahu(pobocka, ucet)) {
-      redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Na pobočce jde platbu zapsat jen na platební účet této pobočky.')}`)
-    }
-  }
+  // Účet ověřený tady, ne podle toho, co výběr na stránce nabídl
+  // (`ucet_id` si kdokoli přepíše, formulář může být starý):
+  //   * na pobočce jen účet TÉ pobočky — platba na firemní účet nebo účet
+  //     jiné pobočky by se z Bernard Baru zapsala do čísel, která tahle
+  //     stránka vůbec neukazuje;
+  //   * nikde na VYPNUTÝ účet — součty (zůstatky, pobočky bez účtu) ho
+  //     nepočítají, platba by z čísel tiše zmizela (krok 3).
+  const { data: ucet, error: chybaUctu } = await supabase
+    .from('platebni_ucty')
+    .select('branch_id, aktivni')
+    .eq('id', ucetId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (chybaUctu) redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Platbu se nepodařilo zapsat.')}`)
+  const problemUctu = problemUctuProZapis(pobocka, ucet)
+  if (problemUctu) redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(problemUctu)}`)
 
   const { error } = await supabase.from('transakce').insert({
     tenant_id: tenantId,
@@ -175,9 +176,13 @@ export async function zapsatTransakci(formData: FormData): Promise<void> {
   redirect(`/${rozsah}/finance/platby`)
 }
 
-/** Zpět na Platební účty s chybou. Explicitní `never` — za voláním TS ví, že se nepokračuje. */
-function zpetNaUcty(rozsah: string, text: string): never {
-  redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(text)}#${KOTVA_UCTU}`)
+/**
+ * Zpět na Platební účty s chybou — hláška se ukáže U ÚČTU (`ucetId`),
+ * stránka totiž sjede na kotvu sekce účtů (adresaUctu). Explicitní
+ * `never` — za voláním TS ví, že se nepokračuje.
+ */
+function zpetNaUcty(rozsah: string, text: string, ucetId: string | null = null): never {
+  redirect(adresaUctu(rozsah, { chyba: text }, ucetId))
 }
 
 /**
@@ -200,7 +205,7 @@ export async function upravitPlatebniUcet(formData: FormData): Promise<void> {
   const { supabase, tenantId } = await pripravitFiremni(
     rozsah,
     'finance.manage',
-    'Platební účet upravuje jen ten, kdo má právo „Správa financí“ za celou firmu.',
+    `Platební účet upravuje jen ${KDO_SPRAVUJE_UCTY}.`,
   )
 
   const ucetId = String(formData.get('ucet_id') ?? '')
@@ -223,7 +228,7 @@ export async function upravitPlatebniUcet(formData: FormData): Promise<void> {
     },
     await aktivniPobockaFirmy(supabase, tenantId, vybrana),
   )
-  if (uprava.stav === 'chyba') zpetNaUcty(rozsah, uprava.text)
+  if (uprava.stav === 'chyba') zpetNaUcty(rozsah, uprava.text, ucet.id)
   // Beze změny se nic nezapisuje (ani do auditu).
   if (uprava.stav === 'beze_zmeny') redirect(`/${rozsah}/finance/platby#${KOTVA_UCTU}`)
 
@@ -238,11 +243,11 @@ export async function upravitPlatebniUcet(formData: FormData): Promise<void> {
   if (error || (zmenene ?? []).length !== 1) {
     // Připojení jiné pobočky, živé připojení u vypnutí, chybějící právo —
     // řekne se proč, ne jen „nepodařilo".
-    zpetNaUcty(rozsah, hlaskaUpravyUctu(error))
+    zpetNaUcty(rozsah, hlaskaUpravyUctu(error), ucet.id)
   }
 
   revalidatePath(`/${rozsah}/finance/platby`)
-  redirect(`/${rozsah}/finance/platby?ucet_upraven=1#${KOTVA_UCTU}`)
+  redirect(adresaUctu(rozsah, { upraveno: true }, ucet.id))
 }
 
 const VZOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -274,7 +279,7 @@ function duvodZFormulare(formData: FormData): string | null {
 
 /** Odmítnutí párování mimo celou firmu — viz `pripravitFiremni`. */
 const PAROVANI_JEN_FIRMA =
-  'Párování plateb s fakturami smí jen ten, kdo má právo „Správa financí“ za celou firmu — mění stav faktury celé firmy.'
+  `Párování plateb s fakturami smí jen ${KDO_SPRAVUJE_UCTY} — mění stav faktury celé firmy.`
 
 /**
  * Potvrzení párování — vždy lidský klik, nikdy automaticky (zadání,

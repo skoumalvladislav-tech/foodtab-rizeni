@@ -24,7 +24,7 @@
  */
 
 import { overitCisloUctu } from './banka/ucet.ts'
-import { FIREMNI_UCET, FIREMNI_VOLBA } from './finance-ucty-pobocek.ts'
+import { FIREMNI_UCET, FIREMNI_VOLBA, KDO_SPRAVUJE_UCTY } from './finance-ucty-pobocek.ts'
 
 export type VolbaPobocky = { stav: 'ok'; branchId: string | null } | { stav: 'chyba'; text: string }
 
@@ -78,6 +78,29 @@ export function ucetPatriRozsahu(
   return pobockaRozsahu === null || ucet.branch_id === pobockaRozsahu
 }
 
+/**
+ * Proč platbu na tenhle účet zapsat nejde (zapsatTransakci), nebo `null`.
+ *   * Účet musí patřit rozsahu (`ucetPatriRozsahu`).
+ *   * Vypnutý účet ne — vypnutý účet je totéž co žádný (krok 3): součty
+ *     ho nepočítají, platba by z čísel tiše zmizela. Stránka vypnuté účty
+ *     k zápisu nenabízí; tohle chytí starý formulář nebo ručně poslaný
+ *     požadavek.
+ */
+export function problemUctuProZapis(
+  pobockaRozsahu: string | null,
+  ucet: { branch_id: string | null; aktivni: boolean } | null | undefined,
+): string | null {
+  if (!ucet || !ucetPatriRozsahu(pobockaRozsahu, ucet)) {
+    return pobockaRozsahu
+      ? 'Na pobočce jde platbu zapsat jen na platební účet této pobočky.'
+      : 'Platební účet se nenašel.'
+  }
+  if (!ucet.aktivni) {
+    return 'Na vypnutý platební účet platbu zapsat nejde — vyberte aktivní účet, nebo tenhle nejdřív zapněte v Platebních účtech.'
+  }
+  return null
+}
+
 /** Kam účet patří — pro výpis účtů. Vypnutou pobočku řekne nahlas. */
 export function nazevPobockyUctu(branchId: string | null, pobocky: readonly PobockaFirmy[]): string {
   if (branchId === null) return FIREMNI_UCET
@@ -123,7 +146,7 @@ export const NEPODARILO_ULOZIT_UCET = 'Účet se nepodařilo uložit.'
  *   * Účet, na který míří živé připojení banky, nejde vypnout — pohyby
  *     by do něj dál chodily, ale v součtech by nebyly (spoušť
  *     app.hlida_vypnuti_platebniho_uctu, 20261121100000).
- *   * 42501 = politika nebo sloupcový grant: upravuje jen Správa financí
+ *   * 42501 = politika nebo sloupcový grant: upravuje jen finance.manage
  *     za celou firmu.
  * Jinak obecná věta.
  */
@@ -139,7 +162,7 @@ export function hlaskaUpravyUctu(chyba: { code?: string | null; message?: string
     return 'Vybraná pobočka nepatří této firmě.'
   }
   if (chyba?.code === '42501') {
-    return 'Účet upravuje jen ten, kdo má právo „Správa financí“ za celou firmu.'
+    return `Účet upravuje jen ${KDO_SPRAVUJE_UCTY}.`
   }
   return NEPODARILO_ULOZIT_UCET
 }

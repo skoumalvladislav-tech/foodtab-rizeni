@@ -22,6 +22,9 @@ import { adresaAutorizace, adresaRegistrace, konfiguraceKb, novyKlicSifrovani, t
 import { synchronizovatKbPripojeni } from '@/lib/kb-adaa-sync'
 import { vytvoritStavKb } from '@/lib/kb-adaa-stav'
 import { ucetKbJinde } from '@/lib/kb-adaa-ucty'
+// 23505 (účet už má připojení) i 23514 (účet je vypnutý — spoušť
+// trg_pripojeni_vypnuteho_uctu, krok 3) se řekne větou, ne „nepodařilo".
+import { hlaskaZalozeniPripojeni } from '@/lib/finance-ucty-pobocek'
 
 /**
  * Stejný vzor jako `zakladniAdresa` v nastaveni/lide/akce.ts (pozvánky
@@ -122,7 +125,7 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
     .single()
 
   if (chybaPripojeni || !pripojeni) {
-    const zprava = chybaPripojeni?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
+    const zprava = hlaskaZalozeniPripojeni(chybaPripojeni)
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(zprava)}`)
   }
 
@@ -194,7 +197,7 @@ export async function zahajitPripojeniEnableBanking(formData: FormData): Promise
     .single()
 
   if (chybaPripojeni || !pripojeni) {
-    const zprava = chybaPripojeni?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
+    const zprava = hlaskaZalozeniPripojeni(chybaPripojeni)
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(zprava)}`)
   }
 
@@ -254,7 +257,7 @@ export async function zahajitPripojeniSaltEdgeAkce(formData: FormData): Promise<
     .single()
 
   if (chybaPripojeni || !pripojeni) {
-    const zprava = chybaPripojeni?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
+    const zprava = hlaskaZalozeniPripojeni(chybaPripojeni)
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(zprava)}`)
   }
 
@@ -504,7 +507,7 @@ export async function zahajitPripojeniKb(formData: FormData): Promise<void> {
       .select('id')
       .single()
     if (error || !pripojeni) {
-      const zprava = error?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
+      const zprava = hlaskaZalozeniPripojeni(error)
       redirect(cestaBanky(rozsah, { chyba: zprava }))
     }
     pripojeniId = pripojeni.id as string

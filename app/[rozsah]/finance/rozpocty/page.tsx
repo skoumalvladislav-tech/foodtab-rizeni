@@ -9,7 +9,7 @@ import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { hodnotaPohleduRozpoctu, pohledRozpoctu, ROZPOCTY_FIRMY } from '@/lib/finance-evidence-pobocka'
-import { hlaskaBezUctuPobocky, maPobockaAktivniUcet, nactiPobockyBezUctu } from '@/lib/finance-ucty-pobocek'
+import { hlaskaBezUctuPobocky, maPobockaAktivniUcet, nactiPobockyBezUctu, nactiUctyMimoPobocek } from '@/lib/finance-ucty-pobocek'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
@@ -115,7 +115,17 @@ export default async function FinanceRozpocty({
   const pobocka = pobockaFinanci(pristup.scope)
 
   const supabase = await getServerSupabase()
-  const branchesRes = await supabase.from('branches').select('id, name').eq('tenant_id', tenantId).eq('active', true).is('deleted_at', null)
+  const branchesRes = await supabase
+    .from('branches')
+    .select('id, name')
+    .eq('tenant_id', tenantId)
+    .eq('active', true)
+    .is('deleted_at', null)
+    .order('name')
+  // Chyba dotazu NENÍ „firma nemá pobočky": prázdný seznam by tiše přepnul
+  // výběr na firemní rozpočty a plán pobočky by zmizel (lib/supabase/dotaz.ts).
+  if (branchesRes.error) throw new DotazSelhal('pobočky firmy', branchesRes.error)
+  // Seřazené podle jména — výchozí pobočka výběru (první) nezávisí na pořadí řádků v databázi.
   const branches = (branchesRes.data ?? []) as Branch[]
   // Čí rozpočty: na pobočce ta z rozsahu, za celou firmu výběr (`null` =
   // firemní rozpočty bez pobočky).
@@ -142,7 +152,12 @@ export default async function FinanceRozpocty({
   // Bez účtu se skutečnost neukazuje vůbec (věta místo „0 Kč") — na pobočce
   // i ve výběru pobočky za celou firmu (krok 3).
   const skrytSkutecnost = bezUctu
-  const smiSpravovatUcty = await smiSpravovatUctyFirmy(tenantId, pristup.ctx)
+  const [smiSpravovatUcty, mimoPobocky] = await Promise.all([
+    smiSpravovatUctyFirmy(tenantId, pristup.ctx),
+    // Celá firma: účty na vypnuté nebo smazané pobočce — jejich platby
+    // nejsou v žádném součtu (krok 3). Na pobočce se neptá.
+    pobocka ? Promise.resolve(null) : nactiUctyMimoPobocek(supabase, tenantId),
+  ])
   // Mzdy (a s nimi prime cost) jen s payroll.read — bez práva vrací
   // vydelky_prehled prázdno a prime cost by tiše vyšel bez mezd.
   const smiVidetMzdy = canSee(pristup.ctx, 'payroll.read')
@@ -215,7 +230,7 @@ export default async function FinanceRozpocty({
         {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
 
         {/* Celá firma: aktivní pobočky bez aktivního účtu (krok 3, bod 1). */}
-        {!pobocka ? <PobockyBezUctu vysledek={bezUctuVysledek} smiPrirazovat={smiSpravovatUcty} /> : null}
+        {!pobocka ? <PobockyBezUctu vysledek={bezUctuVysledek} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
 
         {bezUctu ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>

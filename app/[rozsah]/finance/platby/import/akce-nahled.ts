@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { KDO_SPRAVUJE_UCTY } from '@/lib/finance-ucty-pobocek'
 import type { ChybaImportu, RadekImportu } from '@/lib/finance-csv-import'
 import { naparsovatVypis } from '@/lib/banka/import-vypisu'
 
@@ -42,7 +43,7 @@ export async function naparsovatSoubor(_predchozi: StavNahledu, formData: FormDa
   // se proto ani nečte), stejně jako potvrzení v akce.ts.
   const pristup = await zkusPristup(tenantId, 'finance.manage', TENANT_SCOPE_SEGMENT)
   if (pristup.stav !== 'ok') {
-    return { stav: 'chyba', text: 'Výpisy importuje jen ten, kdo má právo „Správa financí“ za celou firmu.' }
+    return { stav: 'chyba', text: `Výpisy importuje jen ${KDO_SPRAVUJE_UCTY}.` }
   }
 
   const ucetId = String(formData.get('ucet_id') ?? '')

@@ -53,6 +53,22 @@ export async function potvrditImport(formData: FormData): Promise<void> {
 
   const supabase = await getServerSupabase()
 
+  // Na VYPNUTÝ účet ne (Finance Fáze 0, krok 3): součty (zůstatky, pobočky
+  // bez účtu) ho nepočítají, pohyby by z čísel tiše zmizely. Stránka vypnuté
+  // účty nenabízí — tohle chytí starý náhled nebo ručně poslaný formulář.
+  const { data: ucet, error: chybaUctu } = await supabase
+    .from('platebni_ucty')
+    .select('aktivni')
+    .eq('id', ucetId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (chybaUctu || !ucet) {
+    redirect(`/${rozsah}/finance/platby/import?chyba=${encodeURIComponent('Platební účet se nenašel.')}`)
+  }
+  if (!ucet.aktivni) {
+    redirect(`/${rozsah}/finance/platby/import?chyba=${encodeURIComponent('Na vypnutý platební účet výpis importovat nejde — vyberte aktivní účet, nebo tenhle nejdřív zapněte v Platebních účtech.')}`)
+  }
+
   // Dávka i pohyby v JEDNÉ transakci (`importovat_vypis`, migrace
   // 20261119100000). Dřív se dávka založila jako „zpracováno" dřív, než
   // se zapsaly řádky — a když zápis spadl, zůstala a stejný soubor pak

@@ -26,8 +26,10 @@ import {
   FIREMNI_UCET,
   FIREMNI_VOLBA,
   hlaskaBezUctuPobocky,
+  KDO_SPRAVUJE_UCTY,
   KOTVA_UCTU,
   maPobockaAktivniUcet,
+  mistoHlaskyUctu,
   nactiPobockyBezUctu,
   popisUctuPlatby,
   uctyMimoAktivnichPobocek,
@@ -288,10 +290,10 @@ export default async function FinancePlatby({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; importovano?: string; prebytek?: string; sparovano?: string; faktura?: string; ucet_upraven?: string }>
+  searchParams: Promise<{ chyba?: string; importovano?: string; prebytek?: string; sparovano?: string; faktura?: string; ucet_upraven?: string; ucet?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, importovano, prebytek, sparovano, faktura: fakturaFiltr, ucet_upraven: ucetUpraven } = await searchParams
+  const { chyba, importovano, prebytek, sparovano, faktura: fakturaFiltr, ucet_upraven: ucetUpraven, ucet: ucetHlasky } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -378,6 +380,24 @@ export default async function FinancePlatby({
   // když se nepodařilo zjistit, rozhodne výpis aktivních účtů pobočky.
   const pobockaBezUctu = pobocka !== null && (maPobockaAktivniUcet(bezUctu, pobocka) ?? platebniUcty.length > 0) === false
 
+  // Hláška po úpravě účtu (chyba i „Účet uložen"): stránka po ní sjede na
+  // sekci Platební účty (kotva), takže se kreslí U ÚČTU, ne nahoře mimo
+  // obrazovku (adresaUctu v akce.ts). Bez `ucet` v adrese nahoře jako dřív.
+  const mistoHlasky = pobocka ? { kde: 'nahore' as const } : mistoHlaskyUctu(ucetHlasky, vsechnyUcty.map((u) => u.id))
+  const hlaskaUctu = chyba
+    ? { text: chyba, barva: 'var(--bad)' }
+    : ucetUpraven
+      ? { text: 'Účet uložen. Když se změnila jeho pobočka, dosavadní i nové platby účtu se teď počítají tam.', barva: 'var(--dobre)' }
+      : null
+  /** Hláška z adresy, když patří sem: 'nahore', 'sekce', nebo id účtu. */
+  const hlaskaZde = (kde: string) => {
+    if (!hlaskaUctu) return null
+    const sedi = mistoHlasky.kde === 'ucet' ? kde === mistoHlasky.id : kde === mistoHlasky.kde
+    return sedi
+      ? <p role="status" style={{ margin: 0, fontSize: '13px', color: hlaskaUctu.barva }}>{hlaskaUctu.text}</p>
+      : null
+  }
+
   // Součet potvrzených alokací PER TRANSAKCE — appka podle toho pozná,
   // kolik z platby ještě zbývá nepárováno (zadání oddíl 7: hromadná
   // platba na víc faktur musí jít párovat opakovaně, dokud zbývá
@@ -420,7 +440,7 @@ export default async function FinancePlatby({
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px', maxWidth: '900px' }}>
-        {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
+        {hlaskaZde('nahore')}
         {importovano ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>
             Import hotový — zapsáno {importovano} {importovano === '1' ? 'nová platba' : 'nových plateb'}.
@@ -431,11 +451,6 @@ export default async function FinancePlatby({
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>
             Párování uloženo — faktura je přeplacená o {koruny(Number(prebytek))}. Appka to sama na jinou
             fakturu nepřevede, rozhodněte, co se s přebytkem stane (jiná faktura, dobropis, vrácení).
-          </p>
-        ) : null}
-        {ucetUpraven ? (
-          <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>
-            Účet uložen. Když se změnila jeho pobočka, dosavadní i nové platby účtu se teď počítají tam.
           </p>
         ) : null}
 
@@ -693,17 +708,19 @@ export default async function FinancePlatby({
           </form>
         ) : null}
 
-        {/* Na pobočce jen její aktivní účty; za celou firmu VŽDY (i prázdná nebo s chybou) — sem míří odkaz „Přiřadit účet pobočce". */}
+        {/* Na pobočce jen její aktivní účty; za celou firmu VŽDY (i prázdná nebo s chybou) — sem míří odkaz „Upravit platební účty" i návrat po úpravě účtu. */}
         {(pobocka ? platebniUcty.length > 0 : true) ? (
           <section id={pobocka ? undefined : KOTVA_UCTU} style={{ display: 'grid', gap: '10px', scrollMarginTop: '16px' }}>
             <div>
               <h2 style={{ margin: 0, fontSize: '15px' }}>Platební účty</h2>
               <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--muted)' }}>
                 {pobocka
-                  ? `Aktivní účty této pobočky. ${smiSpravovatUcty ? 'Pobočku účtu, číslo účtu a další údaje upravíte v pohledu Celá firma.' : 'Účty upravuje ten, kdo má právo „Správa financí“ za celou firmu.'}`
+                  ? `Aktivní účty této pobočky. ${smiSpravovatUcty ? 'Pobočku účtu, číslo účtu a další údaje upravíte v pohledu Celá firma.' : `Účty upravuje ${KDO_SPRAVUJE_UCTY}.`}`
                   : 'Pobočka účtu určuje, kam se počítají jeho platby. Když ji změníte, přesunou se k nové pobočce i všechny dosavadní platby účtu — v Platbách, Cashflow, Tržbách i v exportu pro účetního. Vypnutý účet se nenabízí k zápisu plateb a nepočítá se jako účet pobočky.'}
               </p>
             </div>
+            {/* Hláška úpravy účtu, který se nenašel nebo nejde přečíst — na začátek sekce, kam stránka sjede. */}
+            {hlaskaZde('sekce')}
             {chybaUctu ? (
               <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chybaUctu}</p>
             ) : (pobocka ? platebniUcty : vsechnyUcty).length === 0 ? (
@@ -734,6 +751,8 @@ export default async function FinancePlatby({
                           <p role="status" style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--pozor)' }}>{vetaUctuMimoPobocky(mimo)}</p>
                         ) : null}
                       </div>
+                      {/* Hláška úpravy TOHOTO účtu (chyba i „Účet uložen") — u něj, kde je vidět. */}
+                      {hlaskaZde(u.id)}
                       {/* Úprava účtu jen za celou firmu a jen se Správou financí za celou firmu (upravitPlatebniUcet + politika platebni_ucty_update). */}
                       {!pobocka && smiSpravovatUcty ? (
                         <form

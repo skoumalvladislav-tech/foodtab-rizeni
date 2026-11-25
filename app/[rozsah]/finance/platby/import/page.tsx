@@ -5,6 +5,7 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
+import { KDO_SPRAVUJE_UCTY } from '@/lib/finance-ucty-pobocek'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
@@ -39,7 +40,7 @@ export default async function FinancePlatbyImport({
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Platby vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
   if (!canSee(pristup.ctx, 'finance.manage')) {
-    return <Sdeleni nadpis="Na import nemáte oprávnění">Import výpisů smí ten, kdo má právo „Správa financí“.</Sdeleni>
+    return <Sdeleni nadpis="Na import nemáte oprávnění">Import výpisů smí {KDO_SPRAVUJE_UCTY}.</Sdeleni>
   }
 
   const supabase = await getServerSupabase()

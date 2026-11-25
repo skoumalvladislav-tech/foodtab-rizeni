@@ -12,7 +12,7 @@ import { nactiKombinovanyCashflowGraf } from '@/lib/finance-rolling-prehled'
 import { nactiPolozkyKPozornosti, type PolozkaPozornosti } from '@/lib/finance-pozornost'
 import { prazdnoPozornosti } from '@/lib/faktury-brana'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
-import { hlaskaBezUctuPobocky, nactiPobockyBezUctu, type PobockyBezUctu as VysledekBezUctu } from '@/lib/finance-ucty-pobocek'
+import { hlaskaBezUctuPobocky, nactiPobockyBezUctu, nactiUctyMimoPobocek, type PobockyBezUctu as VysledekBezUctu } from '@/lib/finance-ucty-pobocek'
 import { hraniceMesice, popisRozsahu, predchoziMesic, srovnaniMesice } from '@/lib/finance-obdobi'
 import { ZONA_VYCHOZI } from '@/lib/cas'
 import { provozniDen } from '@/lib/pokladna-cas'
@@ -170,7 +170,7 @@ export default async function FinancePrehled({
     .is('deleted_at', null)
   const branches = (branchesData ?? []) as { id: string; name: string }[]
 
-  const [kpi, bodyGrafu, pozornost, integraceRes, bezUctu, smiSpravovatUcty] = await Promise.all([
+  const [kpi, bodyGrafu, pozornost, integraceRes, bezUctu, smiSpravovatUcty, mimoPobocky] = await Promise.all([
     nactiFinanceKpi(tenantId, pristup.ctx, branches, hraniceMesice(mesic), hraniceMesice(mesicPredchozi), srovnani, pobocka).catch((): FinanceKpi | null => null),
     nactiKombinovanyCashflowGraf(tenantId, 'zakladni', pobocka).catch(() => []),
     nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read'), pobocka)
@@ -183,6 +183,9 @@ export default async function FinancePrehled({
       ? Promise.resolve<VysledekBezUctu | null>(null)
       : nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId),
     smiSpravovatUctyFirmy(tenantId, pristup.ctx),
+    // Celá firma: účty na vypnuté nebo smazané pobočce — jejich platby
+    // nejsou v Cashflow ani v součtech po pobočkách (krok 3).
+    naPobocce ? Promise.resolve(null) : nactiUctyMimoPobocek(supabase, tenantId),
   ])
 
   type Pripojeni = { id: string; oblast: string; poskytovatel: string; nazev: string; stav: string; branch_id: string | null; externi_ucet: unknown }
@@ -219,7 +222,7 @@ export default async function FinancePrehled({
         {naPobocce ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{POZNAMKA_FIREMNI}</p> : null}
 
         {/* Celá firma: které aktivní pobočky nemají aktivní účet a že jejich platby v součtech po pobočkách nejsou (krok 3, bod 1). */}
-        {bezUctu ? <PobockyBezUctu vysledek={bezUctu} smiPrirazovat={smiSpravovatUcty} /> : null}
+        {bezUctu ? <PobockyBezUctu vysledek={bezUctu} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
         {/* Pobočka bez účtu: kde se účet přiřazuje, jen tomu, kdo to smí (krok 3, bod 5). */}
         {naPobocce && kpi?.pobockaBezUctu ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{hlaskaBezUctuPobocky(smiSpravovatUcty)}</p>

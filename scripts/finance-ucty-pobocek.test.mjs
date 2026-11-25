@@ -25,6 +25,8 @@ import { readFileSync } from 'node:fs'
 const {
   nactiPobockyBezUctu, maPobockaAktivniUcet, vetaPobockyBezUctu, hlaskaBezUctuPobocky, popisUctuPlatby,
   uctyMimoAktivnichPobocek, vetaUctuMimoPobocky, CHYBA_POBOCEK_BEZ_UCTU, FIREMNI_UCET, FIREMNI_VOLBA, KOTVA_UCTU,
+  vetaUctuPobocky, nactiUctyMimoPobocek, vetaUctuMimoPobocekFirmy, CHYBA_UCTU_MIMO_POBOCKY, hlaskaZalozeniPripojeni,
+  adresaUctu, mistoHlaskyUctu, PRAVO_SPRAVY_FINANCI, KDO_SPRAVUJE_UCTY,
 } = await import('../lib/finance-ucty-pobocek.ts')
 const { upravaUctu, hodnotaPobockyUctu } = await import('../lib/finance-platby-pobocka.ts')
 
@@ -126,12 +128,32 @@ ok('pobočka bez jména se neztratí', /Pobočka bez názvu/.test(vetaPobockyBez
 console.log('\n== Věta pro pobočku bez účtu: kde se účet přiřazuje, jen tomu, kdo smí ==')
 const smi = hlaskaBezUctuPobocky(true)
 const nesmi = hlaskaBezUctuPobocky(false)
-ok(`kdo smí (Správa financí za celou firmu): cesta Celá firma → Platby → Platební účty — naměřeno: ${smi}`,
+ok(`kdo smí (finance.manage za celou firmu): cesta Celá firma → Platby → Platební účty — naměřeno: ${smi}`,
   /Celá firma → Platby → Platební účty/.test(smi))
 ok(`kdo nesmí: žádná cesta, jen kdo to udělá — naměřeno: ${nesmi}`,
-  !/→/.test(nesmi) && !/přiřadíte/.test(nesmi) && /„Správa financí“ za celou firmu/.test(nesmi))
+  !/→/.test(nesmi) && !/přiřadíte/.test(nesmi) && nesmi.includes(KDO_SPRAVUJE_UCTY))
 ok('obě řeknou, že pobočka nemá AKTIVNÍ účet a čísla se nedají spočítat',
   [smi, nesmi].every((t) => /nemá aktivní platební účet/.test(t) && /nedají spočítat/.test(t)))
+
+// Právo se jmenuje tak, jak ho majitel vidí v Nastavení → Role (katalog
+// permissions) — dřív hlášky psaly „Správa financí", právo, které tam není.
+{
+  const katalog = readFileSync(new URL('../supabase/migrations/20260823120100_catalog.sql', import.meta.url), 'utf8')
+  const nazev = katalog.match(/\('finance\.manage',\s*'finance',\s*'([^']+)'/)?.[1] ?? ''
+  ok(`název práva v hláškách = název finance.manage v katalogu — katalog: ${nazev}`,
+    nazev.length > 0 && PRAVO_SPRAVY_FINANCI === nazev && KDO_SPRAVUJE_UCTY === `ten, kdo má právo „${nazev}“ za celou firmu`)
+}
+
+console.log('\n== Věta pro stránku pobočky (Platby bez faktury): chyba se řekne ==')
+ok('nemá účet → „Pobočka nemá aktivní platební účet."',
+  vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, BERNARD)?.text === 'Pobočka nemá aktivní platební účet.'
+    && vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, BERNARD)?.chyba === false)
+ok('má účet → nic (null)', vetaUctuPobocky({ stav: 'ok', pobocky: [{ branchId: BERNARD, nazev: 'B' }] }, PERLA) === null)
+{
+  const v = vetaUctuPobocky({ stav: 'chyba', text: CHYBA_POBOCEK_BEZ_UCTU }, BERNARD)
+  ok('chyba zjištění → věta o chybě (chyba: true), NE mlčení jako u pobočky s účtem',
+    v !== null && v.chyba === true && v.text === CHYBA_POBOCEK_BEZ_UCTU)
+}
 
 console.log('\n== Sloupec „Účet / pobočka" a účty mimo aktivní pobočky ==')
 const POBOCKY = [
@@ -155,6 +177,93 @@ ok(`najde účty na vypnuté a smazané/cizí pobočce, ne firemní ani aktivní
   mimo.length === 2 && mimo[0].id === 'u-vypnuta' && mimo[0].duvod === 'vypnuta' && mimo[1].id === 'u-smazana' && mimo[1].duvod === 'mimo_seznam')
 ok('věta u účtu mimo pobočky: platby nejsou v součtech, nic se nepřesune samo',
   mimo.every((u) => /nepočítají do součtů/.test(vetaUctuMimoPobocky(u)) && /sám se nepřesune/.test(vetaUctuMimoPobocky(u))))
+
+console.log('\n== Účty mimo aktivní pobočky pro stránky celé firmy (Přehled, Cashflow, Rozpočty) ==')
+/**
+ * Podvržený klient Supabase: `from(tabulka)` vrátí řetěz, který si
+ * pamatuje filtry a na `await` vrátí odpověď pro tu tabulku.
+ */
+const klient = (odpovedi) => {
+  const filtry = []
+  return {
+    filtry,
+    from(tabulka) {
+      const retez = {
+        select() { return retez },
+        eq(sloupec, hodnota) { filtry.push(`${tabulka}.${sloupec}=${hodnota}`); return retez },
+        is(sloupec, hodnota) { filtry.push(`${tabulka}.${sloupec} is ${hodnota}`); return retez },
+        then(ano, ne) {
+          const o = odpovedi[tabulka]
+          return (o instanceof Error ? Promise.reject(o) : Promise.resolve(o)).then(ano, ne)
+        },
+      }
+      return retez
+    },
+  }
+}
+const UCTY = [
+  { id: 'u-firma', nazev: 'Firemní', branch_id: null },
+  { id: 'u-bernard', nazev: 'Bernard', branch_id: BERNARD },
+  { id: 'u-vypnuta', nazev: 'Výdejna', branch_id: VYPNUTA },
+  { id: 'u-smazana', nazev: 'Smazaná', branch_id: 'b-smazana' },
+]
+await okAsync('načte účty a nesmazané pobočky firmy a najde účty na vypnuté a smazané pobočce', async () => {
+  const k = klient({ platebni_ucty: { data: UCTY, error: null }, branches: { data: POBOCKY, error: null } })
+  const v = await nactiUctyMimoPobocek(k, FIRMA)
+  return v.stav === 'ok' && v.ucty.map((u) => u.id).join(',') === 'u-vypnuta,u-smazana'
+    && k.filtry.includes(`platebni_ucty.tenant_id=${FIRMA}`) && k.filtry.includes(`branches.tenant_id=${FIRMA}`)
+    && k.filtry.includes('branches.deleted_at is null')
+})
+await okAsync('chyba dotazu na účty → stav chyba, NE „žádný účet mimo pobočky"', async () => {
+  const v = await nactiUctyMimoPobocek(klient({ platebni_ucty: { data: null, error: { code: '42501' } }, branches: { data: POBOCKY, error: null } }), FIRMA)
+  return v.stav === 'chyba' && v.text === CHYBA_UCTU_MIMO_POBOCKY
+})
+await okAsync('chyba dotazu na pobočky → stav chyba (jinak by každý účet pobočky vypadal „mimo seznam")', async () => {
+  const v = await nactiUctyMimoPobocek(klient({ platebni_ucty: { data: UCTY, error: null }, branches: { data: null, error: { code: 'XX000' } } }), FIRMA)
+  return v.stav === 'chyba'
+})
+await okAsync('výjimka nebo data, která nejsou seznam → stav chyba, ne výjimka ven', async () => {
+  const a = await nactiUctyMimoPobocek(klient({ platebni_ucty: new Error('spojení'), branches: { data: POBOCKY, error: null } }), FIRMA)
+  const b = await nactiUctyMimoPobocek(klient({ platebni_ucty: { data: {}, error: null }, branches: { data: POBOCKY, error: null } }), FIRMA)
+  return a.stav === 'chyba' && b.stav === 'chyba'
+})
+{
+  const jeden = vetaUctuMimoPobocekFirmy([{ id: 'u', nazev: 'KB Výdejna', duvod: 'vypnuta', pobocka: 'Výdejna' }])
+  const dva = vetaUctuMimoPobocekFirmy([{ id: 'u', nazev: 'A', duvod: 'vypnuta', pobocka: 'X' }, { id: 'v', nazev: 'B', duvod: 'mimo_seznam', pobocka: null }])
+  ok('žádný účet mimo pobočky → nic (null)', vetaUctuMimoPobocekFirmy([]) === null)
+  ok(`jeden účet: jménem, že jeho platby nejsou v součtech po pobočkách ani ve firemních účtech — naměřeno: ${jeden}`,
+    /^Platební účet „KB Výdejna“ patří vypnuté nebo smazané pobočce/.test(jeden ?? '') && /nejsou v součtech po pobočkách ani ve firemních účtech/.test(jeden ?? ''))
+  ok(`dva účty: „A“ a „B“, množné číslo — naměřeno: ${dva}`, /^Platební účty „A“ a „B“ patří/.test(dva ?? '') && /jejich platby/.test(dva ?? ''))
+}
+
+console.log('\n== Připojení banky k vypnutému účtu: věta, ne „nepodařilo" ==')
+{
+  const migraceKroku = readFileSync(new URL('../supabase/migrations/20261121100000_pobocky_ucty.sql', import.meta.url), 'utf8')
+  const hlaskaSpouste = migraceKroku.match(/raise exception '(Platební účet je vypnutý[^']*)'/)?.[1] ?? ''
+  ok('hláška spouště připojení k vypnutému účtu se v migraci našla', hlaskaSpouste.length > 0)
+  const v = hlaskaZalozeniPripojeni({ code: '23514', message: hlaskaSpouste })
+  ok(`23514 ze spouště → účet je vypnutý a kde ho zapnout — naměřeno: ${v}`,
+    /vypnutý/.test(v) && /Celá firma → Platby → Platební účty/.test(v))
+  ok('23505 → účet už má živé připojení', hlaskaZalozeniPripojeni({ code: '23505', message: 'duplicate' }) === 'Tenhle platební účet už má živé bankovní připojení.')
+  ok('jiná chyba i žádná → obecná věta',
+    hlaskaZalozeniPripojeni(null) === 'Připojení se nepodařilo založit.'
+      && hlaskaZalozeniPripojeni({ code: '23514', message: 'Pobočka nepatří této firmě.' }) === 'Připojení se nepodařilo založit.')
+}
+
+console.log('\n== Hláška po úpravě účtu: u účtu, kam stránka sjede ==')
+{
+  const chybaAdresa = adresaUctu('firma', { chyba: 'IBAN nesedí' }, 'u-1')
+  ok(`chyba: adresa s textem, id účtu a kotvou sekce účtů — naměřeno: ${chybaAdresa}`,
+    chybaAdresa === `/firma/finance/platby?chyba=${encodeURIComponent('IBAN nesedí')}&ucet=u-1#${KOTVA_UCTU}`)
+  ok('uloženo: ucet_upraven=1 a id účtu', adresaUctu('firma', { upraveno: true }, 'u-1') === `/firma/finance/platby?ucet_upraven=1&ucet=u-1#${KOTVA_UCTU}`)
+  ok('účet neznámý: prázdné ucet (hláška na začátek sekce)', adresaUctu('firma', { chyba: 'x' }, null).endsWith(`&ucet=#${KOTVA_UCTU}`))
+  ok('bez ucet v adrese → nahoře (zápis platby, import…)', mistoHlaskyUctu(undefined, ['u-1']).kde === 'nahore')
+  const u = mistoHlaskyUctu('u-1', ['u-0', 'u-1'])
+  ok('ucet jednoho z vypsaných účtů → u něj', u.kde === 'ucet' && u.id === 'u-1')
+  ok('ucet prázdné nebo neznámé → začátek sekce účtů, ne nahoře',
+    mistoHlaskyUctu('', ['u-1']).kde === 'sekce' && mistoHlaskyUctu('u-cizi', ['u-1']).kde === 'sekce')
+  ok('ucet dvakrát v adrese (pole) → nahoře, nic se nehádá', mistoHlaskyUctu(['u-1', 'u-1'], ['u-1']).kde === 'nahore')
+}
 
 console.log('\n== upravaUctu: jen změny, současná pobočka se nepřesune ==')
 // Číslo účtu tak, jak ho ukládá appka (overitCisloUctu → IBAN).
@@ -279,6 +388,62 @@ ok('Rozpočty: prime cost bez načtených mezd ani s chybou se nepočítá',
   /const primeCostProcento = !chybaPrehledu && mzdyHaleru !== null && trzby > 0/.test(rozpocty))
 ok('Rozpočty: „chybí tržby" vysvětluje zdroj tržeb a nese ROZHODNOUT (otázka 151)',
   /ROZHODNOUT: \(otázka 151\)/.test(rozpocty) && /Tržby se v Rozpočtech berou jen z plateb zařazených do kategorie Tržby/.test(rozpocty))
+ok('Rozpočty: chyba dotazu na pobočky se nemění na prázdný výběr (DotazSelhal), pobočky seřazené podle jména',
+  /\.from\('branches'\)\s*\.select\('id, name'\)[^;]*\.order\('name'\)/.test(rozpocty)
+    && /if \(branchesRes\.error\) throw new DotazSelhal\(/.test(rozpocty)
+    && rozpocty.indexOf('if (branchesRes.error) throw') < rozpocty.indexOf('const branches = (branchesRes.data'))
+
+console.log('\n== Zdroj: opravy po revizi kroku 3 ==')
+// Účty mimo aktivní pobočky na stránkách celé firmy (Platby to říkají u účtu).
+for (const [jmeno, cesta] of Object.entries({ 'Přehled': STRANKY['Přehled'], 'Cashflow': STRANKY['Cashflow'], 'Rozpočty': STRANKY['Rozpočty'] })) {
+  const s = zdroj(cesta)
+  ok(`${jmeno}: za celou firmu načte účty mimo aktivní pobočky a předá je bloku PobockyBezUctu`,
+    /\? Promise\.resolve\(null\) : nactiUctyMimoPobocek\(supabase, tenantId\)/.test(s)
+      && /<PobockyBezUctu vysledek=\{[^}]+\} smiPrirazovat=\{smiSpravovatUcty\} mimoPobocky=\{mimoPobocky\} \/>/.test(s))
+}
+ok('PobockyBezUctu: věta o účtech mimo pobočky i chyba jejich načtení se vykreslí',
+  /vetaUctuMimoPobocekFirmy\(mimoPobocky\.ucty\)/.test(komponenta) && /mimoPobocky\?\.stav === 'chyba'\) chyby\.push\(mimoPobocky\.text\)/.test(komponenta)
+    && /if \(chyby\.length === 0 && vety\.length === 0\) return null/.test(komponenta))
+ok('PobockyBezUctu: kdo nesmí, dostane jméno práva z katalogu (KDO_SPRAVUJE_UCTY)',
+  /Pobočku účtu přiřadí nebo opraví \{KDO_SPRAVUJE_UCTY\}/.test(komponenta) && !/Správa financí“/.test(komponenta))
+
+ok('Platby: hláška z adresy se kreslí tam, kam patří — nahoře, na začátku sekce účtů a u účtu',
+  /\{hlaskaZde\('nahore'\)\}/.test(platby) && /\{hlaskaZde\('sekce'\)\}/.test(platby) && /\{hlaskaZde\(u\.id\)\}/.test(platby)
+    && /mistoHlaskyUctu\(ucetHlasky, vsechnyUcty\.map\(\(u\) => u\.id\)\)/.test(platby)
+    && !/\{chyba \? <p/.test(platby) && !/\{ucetUpraven \? \(/.test(platby))
+ok('Platby: hláška u účtu je za údaji účtu, před formulářem úpravy',
+  platby.indexOf('{hlaskaZde(u.id)}') > platby.indexOf('vetaUctuMimoPobocky(mimo)')
+    && platby.indexOf('{hlaskaZde(u.id)}') < platby.indexOf('action={upravitPlatebniUcet}'))
+
+const bezFaktury = zdroj(STRANKY['Platby bez faktury'])
+ok('Platby bez faktury: na pobočce věta přes vetaUctuPobocky — chyba zjištění se řekne, nemlčí',
+  /const vetaUctu = pobocka \? vetaUctuPobocky\(bezUctu, pobocka\) : null/.test(bezFaktury)
+    && /\{vetaUctu\?\.chyba \? <p role="status"/.test(bezFaktury) && !/maPobockaAktivniUcet\(bezUctu, pobocka\) === false/.test(bezFaktury))
+
+const banka = zdroj('app/[rozsah]/finance/integrace/banka/akce.ts')
+ok(`banka: všechna 4 založení připojení hlásí přes hlaskaZalozeniPripojeni (vypnutý účet, 23505) — naměřeno: ${(banka.match(/hlaskaZalozeniPripojeni\((chybaPripojeni|error)\)/g) ?? []).length}`,
+  (banka.match(/hlaskaZalozeniPripojeni\((chybaPripojeni|error)\)/g) ?? []).length === 4
+    && !/code === '23505' \? 'Tenhle platební účet už má živé bankovní připojení\.' : 'Připojení se nepodařilo založit\.'/.test(banka))
+
+const importAkce = zdroj('app/[rozsah]/finance/platby/import/akce.ts')
+ok('import výpisu: na vypnutý účet nic nezapíše — kontrola aktivni před zapsatVypis',
+  /\.from\('platebni_ucty'\)\s*\.select\('aktivni'\)/.test(importAkce) && /if \(!ucet\.aktivni\) \{\s*redirect\(/.test(importAkce)
+    && importAkce.indexOf('if (!ucet.aktivni)') < importAkce.indexOf('await zapsatVypis('))
+
+// Žádný text pro člověka nejmenuje právo „Správa financí" (na obrazovce Role není).
+for (const cesta of [
+  'lib/finance-ucty-pobocek.ts', 'lib/finance-platby-pobocka.ts', 'app/[rozsah]/finance/platby/akce.ts',
+  STRANKY['Platby'], STRANKY['Přehled'], STRANKY['Cashflow'], STRANKY['Rozpočty'], STRANKY['Platby bez faktury'],
+  'app/[rozsah]/finance/pobocky-bez-uctu.tsx', 'app/[rozsah]/finance/platby/import/page.tsx',
+  'app/[rozsah]/finance/platby/import/akce-nahled.ts', 'app/[rozsah]/finance/integrace/prodeje/page.tsx',
+]) {
+  ok(`${cesta}: žádné „Správa financí“ v textu`, !/„Správa financí“/.test(zdroj(cesta)))
+}
+
+ok('migrace: založení účtu jen se sloupci formuláře (revoke insert, grant insert na 5 sloupců)',
+  /revoke insert on public\.platebni_ucty from authenticated;\s*grant insert \(tenant_id, branch_id, nazev, typ, cislo_uctu\) on public\.platebni_ucty to authenticated;/.test(migrace))
+ok('migrace: spoušť připojení k vypnutému účtu na založení i změnu účtu, stavu a času odpojení',
+  /create trigger trg_pripojeni_vypnuteho_uctu\s+before insert or update of platebni_ucet_id, stav, odpojeno_kdy on public\.integrace_pripojeni/.test(migrace))
 
 console.log(chyb === 0 ? '\nVŠECHNO PROŠLO' : `\nSELHALO: ${chyb}`)
 process.exit(chyb === 0 ? 0 : 1)

@@ -8,7 +8,7 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { nactiRollingVyhledy } from '@/lib/finance-rolling-prehled'
 import { KOEFICIENTY_SCENARU, type Scenar } from '@/lib/finance-rolling-vyhled'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
-import { hlaskaBezUctuPobocky, maPobockaAktivniUcet, nactiPobockyBezUctu } from '@/lib/finance-ucty-pobocek'
+import { hlaskaBezUctuPobocky, maPobockaAktivniUcet, nactiPobockyBezUctu, nactiUctyMimoPobocek } from '@/lib/finance-ucty-pobocek'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { koruny } from '@/lib/mzdy'
 import Sdeleni from '@/app/sdeleni'
@@ -87,10 +87,13 @@ export default async function FinanceCashflow({
   let vyhledy: Awaited<ReturnType<typeof nactiRollingVyhledy>> = []
   let chybaNacteni = false
   const supabase = await getServerSupabase()
-  const [vyhledyRes, bezUctuVysledek, smiSpravovatUcty] = await Promise.all([
+  const [vyhledyRes, bezUctuVysledek, smiSpravovatUcty, mimoPobocky] = await Promise.all([
     nactiRollingVyhledy(tenantId, scenar, pobocka).then((v) => ({ ok: true as const, v }), () => ({ ok: false as const })),
     nactiPobockyBezUctu((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId, pobocka),
     smiSpravovatUctyFirmy(tenantId, pristup.ctx),
+    // Celá firma: účty na vypnuté nebo smazané pobočce — výhled je
+    // nepočítá (app.cashflow_prehled bere jen aktivní pobočky), krok 3.
+    pobocka ? Promise.resolve(null) : nactiUctyMimoPobocek(supabase, tenantId),
   ])
   if (vyhledyRes.ok) vyhledy = vyhledyRes.v
   else chybaNacteni = true
@@ -134,7 +137,7 @@ export default async function FinanceCashflow({
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '20px' }}>
         {naPobocce ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{POZNAMKA_FIREMNI}</p> : null}
         {/* Celá firma: aktivní pobočky bez aktivního účtu (krok 3, bod 1). */}
-        {!naPobocce ? <PobockyBezUctu vysledek={bezUctuVysledek} smiPrirazovat={smiSpravovatUcty} /> : null}
+        {!naPobocce ? <PobockyBezUctu vysledek={bezUctuVysledek} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
 
         {bezUctu ? (
           <div style={karta}>

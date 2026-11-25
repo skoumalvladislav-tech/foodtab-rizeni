@@ -24,9 +24,9 @@
 
 import { readFileSync } from 'node:fs'
 
-const { pobockaUctu, ucetPatriRozsahu, nazevPobockyUctu, volbyPobockyUctu, hlaskaUpravyUctu, hodnotaPobockyUctu, VYBERTE_POBOCKU_UCTU, NEPODARILO_ULOZIT_UCET } =
+const { pobockaUctu, ucetPatriRozsahu, problemUctuProZapis, nazevPobockyUctu, volbyPobockyUctu, hlaskaUpravyUctu, hodnotaPobockyUctu, VYBERTE_POBOCKU_UCTU, NEPODARILO_ULOZIT_UCET } =
   await import('../lib/finance-platby-pobocka.ts')
-const { FIREMNI_UCET, FIREMNI_VOLBA } = await import('../lib/finance-ucty-pobocek.ts')
+const { FIREMNI_UCET, FIREMNI_VOLBA, PRAVO_SPRAVY_FINANCI } = await import('../lib/finance-ucty-pobocek.ts')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -85,6 +85,24 @@ ok('Bernard Bar: FIREMNÍ účet (branch_id null) nesmí', !ucetPatriRozsahu(BER
 ok('Bernard Bar: účet Kavárny nesmí', !ucetPatriRozsahu(BERNARD, { branch_id: KAVARNA }))
 ok('Bernard Bar: nenalezený účet nesmí (null i undefined)',
   !ucetPatriRozsahu(BERNARD, null) && !ucetPatriRozsahu(BERNARD, undefined))
+
+// Krok 3: na VYPNUTÝ účet platbu nezapíše nikdo — ani za celou firmu
+// (součty ho nepočítají, platba by z čísel zmizela). Starý formulář nebo
+// ručně poslané `ucet_id` to jinak obejde.
+ok('zápis: aktivní účet v rozsahu → bez námitky (null)',
+  problemUctuProZapis(null, { branch_id: null, aktivni: true }) === null
+    && problemUctuProZapis(BERNARD, { branch_id: BERNARD, aktivni: true }) === null)
+{
+  const celaFirma = problemUctuProZapis(null, { branch_id: null, aktivni: false })
+  const naPobocce = problemUctuProZapis(BERNARD, { branch_id: BERNARD, aktivni: false })
+  ok(`zápis: VYPNUTÝ účet odmítne i za celou firmu, i na pobočce — naměřeno: ${celaFirma}`,
+    typeof celaFirma === 'string' && /vypnutý/.test(celaFirma) && typeof naPobocce === 'string' && /vypnutý/.test(naPobocce))
+}
+ok('zápis: účet jiné pobočky na Bernard Baru → věta o účtu pobočky, i když je vypnutý',
+  /jen na platební účet této pobočky/.test(problemUctuProZapis(BERNARD, { branch_id: KAVARNA, aktivni: true }) ?? '')
+    && /jen na platební účet této pobočky/.test(problemUctuProZapis(BERNARD, { branch_id: null, aktivni: false }) ?? ''))
+ok('zápis: nenalezený účet → odmítnout (celá firma i pobočka)',
+  typeof problemUctuProZapis(null, null) === 'string' && typeof problemUctuProZapis(BERNARD, undefined) === 'string')
 
 console.log('\n== Název pobočky účtu ==')
 
@@ -146,15 +164,25 @@ ok('pripravit: pobočka z rozsahu a na pobočce brána finance.read za celou fir
 const zalozit = telo(akce, 'zalozitPlatebniUcet')
 ok('zalozitPlatebniUcet: pobočka přes pobockaUctu(pobocka, …) a do insertu jde jen její výsledek',
   /pobockaUctu\(pobocka,/.test(zalozit) && /branch_id: volba\.branchId/.test(zalozit) && !/branch_id: branchId/.test(zalozit))
-ok('zapsatTransakci: na pobočce ověřuje účet přes ucetPatriRozsahu',
-  /if \(pobocka\)/.test(telo(akce, 'zapsatTransakci')) && /ucetPatriRozsahu\(pobocka, ucet\)/.test(telo(akce, 'zapsatTransakci')))
+{
+  const t = telo(akce, 'zapsatTransakci')
+  ok('zapsatTransakci: účet (pobočku i aktivní) ověří VŽDY přes problemUctuProZapis, před zápisem',
+    /\.select\('branch_id, aktivni'\)/.test(t) && /problemUctuProZapis\(pobocka, ucet\)/.test(t)
+      && /if \(problemUctu\) redirect\(/.test(t) && !/if \(pobocka\) \{\s*const \{ data: ucet/.test(t)
+      && t.indexOf('problemUctuProZapis(') < t.indexOf(".from('transakce').insert("))
+}
 const upravit = telo(akce, 'upravitPlatebniUcet')
 ok('upravitPlatebniUcet: pobočka přes upravaUctu s aktivními pobočkami firmy a kontroluje vrácený řádek (.select)',
   /upravaUctu\(/.test(upravit) && /aktivniPobockaFirmy\(/.test(upravit) && /\.select\('id'\)/.test(upravit) && /\.length !== 1/.test(upravit))
 ok('upravitPlatebniUcet: do UPDATE jdou jen změny z upravaUctu, nic z formuláře napřímo',
   /\.update\(uprava\.zmeny\)/.test(upravit) && !/\.update\(\{/.test(upravit))
-ok('upravitPlatebniUcet: odmítnutí databáze řekne přes hlaskaUpravyUctu(error)',
-  /zpetNaUcty\(rozsah, hlaskaUpravyUctu\(error\)\)/.test(upravit))
+ok('upravitPlatebniUcet: odmítnutí databáze řekne přes hlaskaUpravyUctu(error), u účtu',
+  /zpetNaUcty\(rozsah, hlaskaUpravyUctu\(error\), ucet\.id\)/.test(upravit))
+ok('upravitPlatebniUcet: hláška chyby i úspěchu míří k účtu (adresaUctu s jeho id), ne nahoru mimo obrazovku',
+  /zpetNaUcty\(rozsah, uprava\.text, ucet\.id\)/.test(upravit)
+    && /redirect\(adresaUctu\(rozsah, \{ upraveno: true \}, ucet\.id\)\)/.test(upravit)
+    && !/ucet_upraven=1#/.test(akce)
+    && /function zpetNaUcty\([^)]*\): never \{\s*redirect\(adresaUctu\(rozsah, \{ chyba: text \}, ucetId\)\)/.test(akce))
 ok('aktivniPobockaFirmy: „Firemní účet" ani ne-uuid do databáze neposílá',
   /branchId === FIREMNI_VOLBA \|\| !VZOR_UUID\.test\(branchId\)\) return \[\]/.test(telo(akce, 'aktivniPobockaFirmy')))
 
@@ -172,8 +200,9 @@ ok('spoušť odmítla vypnutí kvůli živému připojení → věta o odpojení
   /odpojte/.test(hlaskaVypnuti) && /vypněte/.test(hlaskaVypnuti) && !/přesuňte/.test(hlaskaVypnuti))
 ok('cizí pobočka (spoušť kroku 1) → věta o pobočce jiné firmy',
   hlaskaUpravyUctu({ code: '23514', message: 'Pobočka nepatří této firmě.' }) === 'Vybraná pobočka nepatří této firmě.')
-ok('bez práva (42501, politika nebo sloupcový grant) → kdo účet upravuje',
-  /Správa financí/.test(hlaskaUpravyUctu({ code: '42501', message: 'permission denied for table platebni_ucty' })))
+ok('bez práva (42501, politika nebo sloupcový grant) → kdo účet upravuje, právem z obrazovky Role',
+  hlaskaUpravyUctu({ code: '42501', message: 'permission denied for table platebni_ucty' }).includes(`„${PRAVO_SPRAVY_FINANCI}“ za celou firmu`)
+    && !/Správa financí/.test(hlaskaUpravyUctu({ code: '42501', message: 'x' })))
 ok('jiná chyba i žádná → obecná věta',
   hlaskaUpravyUctu(null) === NEPODARILO_ULOZIT_UCET
     && hlaskaUpravyUctu({ code: '23505', message: 'připojení' }) === NEPODARILO_ULOZIT_UCET)

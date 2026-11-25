@@ -10,7 +10,7 @@ import { jeVKorunach } from '@/lib/finance-parovani'
 import { nactiPlatbyBezFaktury, nactiUctyFronty } from '@/lib/finance-bez-faktury-nacteni'
 import { filtrUctuFronty } from '@/lib/finance-bez-faktury'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
-import { FIREMNI_UCET, maPobockaAktivniUcet, nactiPobockyBezUctu } from '@/lib/finance-ucty-pobocek'
+import { FIREMNI_UCET, nactiPobockyBezUctu, vetaUctuPobocky } from '@/lib/finance-ucty-pobocek'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../../pobocka-bez-firmy'
 import PobockyBezUctu from '../../pobocky-bez-uctu'
@@ -100,6 +100,9 @@ export default async function PlatbyBezFaktury({
   const soucetKc = vysledek.stav === 'ok'
     ? vysledek.platby.filter((p) => jeVKorunach(p.mena)).reduce((s, p) => s + p.zbyvaHaleru, 0)
     : 0
+  // Na pobočce: věta „nemá aktivní účet", nebo že se to nepodařilo zjistit
+  // (chyba není „má účet" — lib/finance-ucty-pobocek.ts).
+  const vetaUctu = pobocka ? vetaUctuPobocky(bezUctu, pobocka) : null
 
   return (
     <Navigace rozsah={rozsah}>
@@ -135,9 +138,13 @@ export default async function PlatbyBezFaktury({
         </form>
 
         {pobocka ? (
-          <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
-            {maPobockaAktivniUcet(bezUctu, pobocka) === false ? 'Pobočka nemá aktivní platební účet. ' : ''}{POZNAMKA_FIREMNI}
-          </p>
+          <div style={{ display: 'grid', gap: '6px' }}>
+            {/* Nepodařilo se zjistit, jestli pobočka účet má — řekne se to, prázdná fronta by jinak vypadala jako „nic bez faktury". */}
+            {vetaUctu?.chyba ? <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>{vetaUctu.text}</p> : null}
+            <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
+              {vetaUctu && !vetaUctu.chyba ? `${vetaUctu.text} ` : ''}{POZNAMKA_FIREMNI}
+            </p>
+          </div>
         ) : (
           <PobockyBezUctu vysledek={bezUctu} smiPrirazovat={smiSpravovatUcty} />
         )}
