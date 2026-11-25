@@ -1,5 +1,8 @@
 # Stav k 24. 11. 2026 — Finance Fáze 0: krok 2 (párování plateb s fakturami) hotový
 
+> **Doplněno 25. 11.:** přehled toho, co ze zadání ještě chybí, a jak se zbylé kroky dělají souběžně, je
+> v `stav-2026-11-25-finance-faze0.md`. Krok 3 je od 25. 11. naprogramovaný a prochází kontrolou.
+
 ## Nejdřív to podstatné
 
 - **Nic jsem nenasazoval ani nesloučil a `db push` neproběhl, ani nasucho.** Na ostrá data jsem nesahal.
