@@ -782,6 +782,12 @@ select set_config('test.user_id', :'fin', false);
 select pg_temp.check('párování: finance bez Faktur nesmí',
   pg_temp.spadne_hlaskou(format('select * from public.sparovat_platbu_s_fakturou(%L, %L, %L, 1000, null)', :'firma', :'t_x', :'f_u1'),
                          '42501', 'Vidět přijaté faktury'));
+-- Otázka 160 (dodatek 3d): hláška jmenuje právo jako katalog a obrazovka
+-- Role — „Zadávat faktury a náklady", ne „Správu financí", která tam není.
+-- Začátek „Nemáte oprávnění párovat" zůstává, podle něj ji pozná krok99.
+select pg_temp.check('párování bez práva: hláška začíná „Nemáte oprávnění párovat" a jmenuje právo z katalogu',
+  pg_temp.spadne_hlaskou(format('select * from public.sparovat_platbu_s_fakturou(%L, %L, %L, 1000, null)', :'firma', :'t_x', :'f_u1'),
+                         '42501', 'Nemáte oprávnění párovat platby s fakturami — smí to ten, kdo má právo „Zadávat faktury a náklady" k účtu'));
 reset role;
 select set_config('test.user_id', '', false);
 select pg_temp.check('párování neschválených: k platbě nic nezapsáno, stavy beze změny',
@@ -1241,6 +1247,9 @@ select set_config('test.user_id', :'fin', false);
 select pg_temp.check('zrušení párování: finance bez Faktur nesmí',
   pg_temp.spadne_hlaskou(format($s$select public.zrusit_parovani_faktury(%L, %L, 'Zkouška práva')$s$, :'firma', :'a_h3'),
                          '42501', 'Rušit párování s fakturami'));
+select pg_temp.check('zrušení párování bez práva: hláška jmenuje právo z katalogu „Zadávat faktury a náklady"',
+  pg_temp.spadne_hlaskou(format($s$select public.zrusit_parovani_faktury(%L, %L, 'Zkouška práva')$s$, :'firma', :'a_h3'),
+                         '42501', 'Rušit párování s fakturami smí ten, kdo má právo „Zadávat faktury a náklady" k účtu'));
 reset role;
 select set_config('test.user_id', '', false);
 

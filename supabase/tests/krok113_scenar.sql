@@ -35,6 +35,16 @@
 --      výpis přes importovat_vypis ani uzávěrku pokladny přes
 --      importovat_transakce; služba dál stahuje;
 --      ruční platba v dnešním tvaru appky na zapnutý účet beze změny;
+--   3d. společný firemní účet (dodatek 3d, rozhodnutí Šéfíka 25. 11.):
+--      public.firma_ma_firemni_ucet — jen ano/ne, i pro pobočku:
+--      * aktivní firemní účet → ano; jen vypnutý firemní → ne; jen
+--        pobočkový → ne; firma bez jediného účtu → ne, i když jiná firma
+--        aktivní firemní účet má — filtr firmy ve funkci;
+--      * čtenář pobočky dostane odpověď, ale řádek firemního účtu dál
+--        nevidí — ověří CI;
+--      * bez finance.read, cizí firma a prázdná firma 42501; anonym ji
+--        nespustí — ověří CI;
+--      * vrací jen boolean, s právy vlastníka a prázdnou search_path;
 --   4. zkouška 11 — živé tvary účtů (firemní bez čísla, účet pobočky
 --      s číslem ve starém zápisu) po všech zkouškách beze změny.
 --
@@ -117,6 +127,19 @@ begin
   select coalesce(string_agg(f.nazev, ', ' order by f.nazev collate "C"), '(nic)') into v
     from public.pobocky_bez_aktivniho_uctu(p_tenant, p_branch) f;
   return v;
+exception when others then
+  return 'chyba ' || sqlstate;
+end $$;
+
+-- Odpověď public.firma_ma_firemni_ucet jako text: 'ano', 'ne', nebo
+-- 'chyba SQLSTATE', když funkce spadne — kontrola pak spadne SVÝM jménem.
+create or replace function pg_temp.firemni(p_tenant uuid)
+returns text language plpgsql as $$
+declare
+  v boolean;
+begin
+  v := public.firma_ma_firemni_ucet(p_tenant);
+  return case when v then 'ano' when not v then 'ne' else 'prázdno' end;
 exception when others then
   return 'chyba ' || sqlstate;
 end $$;
@@ -720,6 +743,120 @@ select pg_temp.check('spoušť zápisu na vypnutý účet: před založením pla
   and not (select prosecdef from pg_proc where oid = 'app.hlida_zapis_na_vypnuty_ucet()'::regprocedure)
   and not has_function_privilege('authenticated', 'app.hlida_zapis_na_vypnuty_ucet()', 'execute')
   and not has_function_privilege('anon', 'app.hlida_zapis_na_vypnuty_ucet()', 'execute'));
+
+
+\echo ''
+\echo '== 3d. Společný firemní účet: jen ano, nebo ne =========================='
+
+-- Rozhodnutí Šéfíka 25. 11. (otázky 98 a 114): pobočky platí přes jeden
+-- firemní účet bez pobočky. Appka potřebuje jen ANO/NE „firma má aktivní
+-- firemní účet" — i na pobočce, kde firemní účet přes RLS vidět není.
+-- Funkce je SECURITY DEFINER: RLS v ní neplatí, firmu, firemní účet
+-- a aktivní si filtruje sama. Každý filtr proto má vlastní kontrolu.
+--
+-- Firma A má aktivní firemní účet (firemní účet z přípravy a firemní
+-- z formuláře). Firma B se tu staví krok za krokem: bez jediného účtu,
+-- jen vypnutý firemní, jen pobočkový, pak aktivní firemní a jeho vypnutí.
+-- Účty firmy B zakládá vlastník databáze (Bohdan by vypnutý účet ani
+-- přímým zápisem nezaložil — sloupcový grant), ptá se přihlášený Bohdan.
+reset role;
+select set_config('test.user_id', '', false);
+delete from public.platebni_ucty where tenant_id = :'firma_b';
+select pg_temp.check('příprava 3d: firma A má aktivní firemní účet, firma B žádný účet',
+  exists (select 1 from public.platebni_ucty where tenant_id = :'firma' and branch_id is null and aktivni)
+  and not exists (select 1 from public.platebni_ucty where tenant_id = :'firma_b'));
+
+set role authenticated;
+select set_config('test.user_id', :'maj', false);
+select pg_temp.check('majitelka A: firma má aktivní firemní účet, ano — naměřeno: ' || pg_temp.firemni(:'firma'),
+  pg_temp.firemni(:'firma') = 'ano');
+select set_config('test.user_id', :'cte_firma', false);
+select pg_temp.check('čtenář celé firmy: ano — naměřeno: ' || pg_temp.firemni(:'firma'),
+  pg_temp.firemni(:'firma') = 'ano');
+
+-- Pavla má finance.read jen na Betě: odpověď dostane, řádek účtu ne.
+select set_config('test.user_id', :'cte_pob', false);
+select pg_temp.check('čtenář pobočky dostane odpověď, ano — naměřeno: ' || pg_temp.firemni(:'firma'),
+  pg_temp.firemni(:'firma') = 'ano');
+select pg_temp.check('… ale řádek firemního účtu, jeho název ani číslo dál nevidí — ověří CI',
+  not exists (select 1 from public.platebni_ucty where tenant_id = :'firma' and branch_id is null));
+select set_config('test.user_id', :'spr_pob', false);
+select pg_temp.check('správce pobočky: ano — naměřeno: ' || pg_temp.firemni(:'firma'),
+  pg_temp.firemni(:'firma') = 'ano');
+
+-- Bez finance.read v té firmě 42501 — ne „ne", které by se tvářilo jako
+-- odpověď.
+select set_config('test.user_id', :'jen_sprava', false);
+select pg_temp.check('jen správa na Betě, bez finance.read: 42501 — naměřeno: ' || pg_temp.firemni(:'firma'),
+  pg_temp.spadne_hlaskou(format('select public.firma_ma_firemni_ucet(%L)', :'firma'), '42501', 'Nemáte oprávnění'));
+select set_config('test.user_id', :'cizi', false);
+select pg_temp.check('cizí firma: 42501 — naměřeno: ' || pg_temp.firemni(:'firma'),
+  pg_temp.spadne_hlaskou(format('select public.firma_ma_firemni_ucet(%L)', :'firma'), '42501', 'Nemáte oprávnění'));
+select set_config('test.user_id', :'maj', false);
+select pg_temp.check('prázdná firma: 42501 — naměřeno: ' || pg_temp.firemni(null),
+  pg_temp.spadne_hlaskou('select public.firma_ma_firemni_ucet(null)', '42501', 'Nemáte oprávnění'));
+
+-- Firma B bez jediného účtu: aktivní firemní účet firmy A se jí nesmí
+-- započítat — filtr firmy ve funkci, RLS ho uvnitř definer neudělá.
+select set_config('test.user_id', :'cizi', false);
+select pg_temp.check('firma B bez jediného účtu: ne, firemní účet firmy A se nepočítá — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ne');
+
+reset role;
+select set_config('test.user_id', '', false);
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ, aktivni)
+values (:'firma_b', null, 'Krok113 3d vypnutý firemní B', 'banka', false) returning id as u_b_vypnuty \gset
+set role authenticated;
+select set_config('test.user_id', :'cizi', false);
+select pg_temp.check('jen vypnutý firemní účet: ne, vypnutý je jako žádný — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ne');
+
+reset role;
+select set_config('test.user_id', '', false);
+delete from public.platebni_ucty where id = :'u_b_vypnuty';
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_b', :'pg', 'Krok113 3d účet Gamy', 'banka') returning id as u_b_gama \gset
+set role authenticated;
+select set_config('test.user_id', :'cizi', false);
+select pg_temp.check('jen aktivní účet pobočky: ne, účet pobočky není firemní — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ne');
+
+reset role;
+select set_config('test.user_id', '', false);
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_b', null, 'Krok113 3d firemní B', 'banka') returning id as u_b_firemni \gset
+set role authenticated;
+select set_config('test.user_id', :'cizi', false);
+select pg_temp.check('aktivní firemní účet přibude: ano hned — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ano');
+
+reset role;
+select set_config('test.user_id', '', false);
+update public.platebni_ucty set aktivni = false where id = :'u_b_firemni';
+set role authenticated;
+select set_config('test.user_id', :'cizi', false);
+select pg_temp.check('firemní účet se vypne: ne hned — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ne');
+
+set role anon;
+select pg_temp.check('anonym funkci nespustí: permission denied — ověří CI',
+  pg_temp.spadne_hlaskou(format('select public.firma_ma_firemni_ucet(%L)', :'firma'), '42501', 'permission denied'));
+
+reset role;
+select set_config('test.user_id', '', false);
+
+-- Katalog až za chováním.
+select pg_temp.check('funkce vrací jen boolean, ne řádky — nic o čísle, názvu ani zůstatku účtu',
+  (select prorettype = 'boolean'::regtype and not proretset
+     from pg_proc where oid = 'public.firma_ma_firemni_ucet(uuid)'::regprocedure));
+select pg_temp.check('funkce běží s právy vlastníka a prázdnou search_path, přihlášený ji spustí, anonym ani public ne',
+  (select coalesce(prosecdef and proconfig = array['search_path=""'], false)
+     from pg_proc where oid = 'public.firma_ma_firemni_ucet(uuid)'::regprocedure)
+  and has_function_privilege('authenticated', 'public.firma_ma_firemni_ucet(uuid)', 'execute')
+  and not has_function_privilege('anon', 'public.firma_ma_firemni_ucet(uuid)', 'execute')
+  and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+                   where p.oid = 'public.firma_ma_firemni_ucet(uuid)'::regprocedure
+                     and a.grantee = 0 and a.privilege_type = 'EXECUTE'));
 
 
 \echo ''

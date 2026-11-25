@@ -64,8 +64,18 @@
 --      ROZHODNOUT: (otázka 159) smí se na vypnutý účet dopsat platba
 --      (doplnění historie zavřeného účtu)? Teď ne — nejdřív účet zapnout.
 --
+--   5. Společný firemní účet (rozhodnutí Šéfíka 25. 11. 2026, otázky 98
+--      a 114 — dodatek 3d): obě pobočky platí přes JEDEN firemní účet bez
+--      pobočky. Pobočka bez vlastního účtu proto u firmy s aktivním
+--      firemním účtem není chyba — stránky místo varování vysvětlí, že
+--      její platby jsou v přehledu za celou firmu. Appka k tomu potřebuje
+--      jen ANO/NE, i na pobočce, kde firemní účet přes RLS vidět není:
+--      public.firma_ma_firemni_ucet(firma). Vrací JEN boolean.
+--
 -- Co se záměrně NEDĚLÁ:
 --   * Žádný účet se nikomu nepřiřazuje (otázka 98) a nic se nepřepisuje.
+--     Platby firemního účtu se žádné pobočce nepřipisují — to je budoucí
+--     funkce (otázka 280), ne tahle migrace.
 --     Ostrá data se nemění: jen funkce, politiky, granty a spouště.
 --     Vypnutý účet, na který už dnes míří živé připojení, migrace jen
 --     ohlásí (raise warning s počtem) — neodpojuje ho ani účet nezapíná.
@@ -114,6 +124,61 @@ comment on function public.pobocky_bez_aktivniho_uctu(uuid, uuid) is
 
 revoke all on function public.pobocky_bez_aktivniho_uctu(uuid, uuid) from public, anon;
 grant execute on function public.pobocky_bez_aktivniho_uctu(uuid, uuid) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 1b. Má firma aktivní firemní účet? Jen ANO/NE (dodatek 3d)
+--
+-- Rozhodnutí Šéfíka 25. 11. 2026 (otázky 98 a 114): Bernard Bar Tábor
+-- i Restaurace Černá Perla platí přes JEDEN společný firemní účet. Účet
+-- zůstává bez pobočky a jeho platby se žádné pobočce nepřipisují
+-- (připsání pobočce = budoucí funkce, otázka 280). Stránky podle téhle
+-- odpovědi rozhodnou, jestli pobočku bez vlastního účtu VAROVÁNÍM
+-- jmenují (firma nemá žádný aktivní účet bez pobočky), nebo jen klidně
+-- vysvětlí, že platí přes firemní účet.
+--
+-- Firemní účet = bez pobočky (branch_id null) a AKTIVNÍ: vypnutý je totéž
+-- co žádný, stejně jako v pobocky_bez_aktivniho_uctu. Smazaný účet
+-- neexistuje — účty se nemažou (grant DELETE odebrán v 20261006120000)
+-- a sloupec pro označení smazání tabulka nemá.
+--
+-- SECURITY DEFINER schválně: kdo má finance.read jen na pobočce, firemní
+-- účet přes RLS nevidí (platebni_ucty_read) a vidět ho nemá — appka mu
+-- přesto má říct „platby pobočky můžou chodit přes firemní účet, který
+-- tady nevidíte", ne „pobočka nemá účet". Proto:
+--   * vrací JEN ano/ne — nic o čísle, názvu ani zůstatku;
+--   * právo si kontroluje sama: finance.read na JAKÉKOLI úrovni v té
+--     firmě (app.has_permission — za celou firmu i na pobočce), jinak
+--     42501 jako pobocky_bez_aktivniho_uctu (ne „ne", které by se tvářilo
+--     jako odpověď);
+--   * uvnitř definer RLS neplatí — firmu filtruje dotaz sám, jednou.
+-- ---------------------------------------------------------------------
+
+create function public.firma_ma_firemni_ucet(p_tenant uuid)
+returns boolean
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not coalesce(app.has_permission(p_tenant, 'finance.read'), false) then
+    raise exception 'Nemáte oprávnění vidět finance této firmy.' using errcode = '42501';
+  end if;
+
+  return exists (
+    select 1
+      from public.platebni_ucty u
+     where u.tenant_id = p_tenant
+       and u.branch_id is null
+       and u.aktivni
+  );
+end $$;
+
+comment on function public.firma_ma_firemni_ucet(uuid) is
+  'Má firma AKTIVNÍ platební účet bez pobočky (firemní účet)? Jen ano/ne — '
+  'i pro toho, kdo má finance.read jen na pobočce a firemní účet přes RLS '
+  'nevidí. 42501 bez finance.read v té firmě. Dodatek 3d (otázky 98, 114).';
+
+revoke all on function public.firma_ma_firemni_ucet(uuid) from public, anon;
+grant execute on function public.firma_ma_firemni_ucet(uuid) to authenticated;
 
 
 -- ---------------------------------------------------------------------
