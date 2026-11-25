@@ -231,7 +231,7 @@ function databaze() {
         order() { return q },
         limit(n) { dotaz.podminky.push(['limit', n]); return q },
         then(hotovo, chyba) {
-          const vynuceno = globalThis.__tChyba?.[tabulka]
+          const vynuceno = globalThis.__tChyba?.(dotaz)
           if (vynuceno) return Promise.resolve({ data: null, error: vynuceno }).then(hotovo, chyba)
           let radky = (globalThis.__tTabulky[tabulka] ?? []).filter((r) =>
             dotaz.podminky.every(([op, k, v]) =>
@@ -387,14 +387,36 @@ await zkus('bez od/do: tento týden podle provozního dne první pobočky', asyn
   const v = await tisk({ hledani: {} })
   return v.provozni.join() === B && podminka(hlavni(v), 'gte', 'den') === '2026-11-23' && podminka(hlavni(v), 'lte', 'den') === '2026-11-29'
 })
-await zkus('víc než strop řádků: sdělení „moc“, ŽÁDNÝ zkrácený list', async () => {
+// Strop: vždy přeteče JEN JEDEN dotaz (jen čtení = na telefony se neptá),
+// ať každou podmínku stropu drží její vlastní kontrola.
+await zkus('víc rezervací než strop: sdělení „moc“, ŽÁDNÝ zkrácený list (dotaz si řekne o strop + 1)', async () => {
   const mnoho = Array.from({ length: 3001 }, (_, i) => R(`m${i}`, B, '2026-11-27', '2026-11-27T18:00:00+00:00'))
-  const v = await tisk({ tabulky: { rezervace: mnoho, rezervace_poznamky: [] } })
-  return v.html.includes('Na jeden přehled je toho moc') && !v.html.includes('ds-tisk-list') && podminka(hlavni(v), 'limit', undefined) === undefined
+  const v = await tisk({ prava: JEN_CTENI, tabulky: { rezervace: mnoho, rezervace_poznamky: [] } })
+  return v.html.includes('Na jeden přehled je toho moc') && !v.html.includes('ds-tisk-list') && !telefonni(v)
+    && hlavni(v).podminky.some(([o, n]) => o === 'limit' && n === 3001)
 })
-await zkus('chyba dotazu se nespolkne (výjimka s popisem), nevytiskne se prázdný list', async () => {
-  const v = await tisk({ chyba: { rezervace: { code: '42501', message: 'permission denied' } } })
-  return !!v.vyjimka && String(v.vyjimka.message).includes('k tisku') && v.html === ''
+await zkus('víc poznámek ke dnům než strop: taky sdělení „moc“, ne zkrácený list', async () => {
+  const mnoho = Array.from({ length: 3001 }, (_, i) => PZ(B, '2026-11-27', '', `poznámka ${i}`))
+  const v = await tisk({ prava: JEN_CTENI, tabulky: { rezervace: REZERVACE, rezervace_poznamky: mnoho } })
+  return v.html.includes('Na jeden přehled je toho moc') && !v.html.includes('ds-tisk-list')
+})
+// Chyba každého ze tří dotazů zvlášť — výjimka musí jmenovat PRÁVĚ ten dotaz.
+const ODEPRENO = { code: '42501', message: 'permission denied' }
+const chybaDotazu = async (ktery) => {
+  const v = await tisk({ chyba: (d) => (ktery(d) ? ODEPRENO : null) })
+  return { zprava: String(v.vyjimka?.message ?? ''), html: v.html }
+}
+await zkus('chyba dotazu na rezervace se nespolkne (výjimka „rezervace k tisku“), nevytiskne se prázdný list', async () => {
+  const c = await chybaDotazu((d) => d.tabulka === 'rezervace' && d.select.includes('menu'))
+  return c.zprava.includes('„rezervace k tisku“') && c.html === ''
+})
+await zkus('chyba dotazu na poznámky ke dnům se nespolkne (výjimka „poznámky ke dnům k tisku“)', async () => {
+  const c = await chybaDotazu((d) => d.tabulka === 'rezervace_poznamky')
+  return c.zprava.includes('„poznámky ke dnům k tisku“') && c.html === ''
+})
+await zkus('chyba dotazu na telefony se nespolkne (výjimka „telefony k tisku“), netiskne se bez nich', async () => {
+  const c = await chybaDotazu((d) => d.select.includes('rezervace_kontakty'))
+  return c.zprava.includes('„telefony k tisku“') && c.html === ''
 })
 await zkus('cizí firma v téže pobočce (jiný tenant_id) se netiskne', async () => {
   const v = await tisk()

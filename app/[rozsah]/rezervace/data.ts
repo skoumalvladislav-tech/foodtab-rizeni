@@ -168,7 +168,9 @@ export async function nacistTisk(tenantId: string, pobocky: PobockaRezervaci[], 
   })[]
   const poznamkyDnu = (dny.data ?? []) as PoznamkaDneKTisku[]
   const sKontakty = (kontakty.data ?? []) as { id: string; rezervace_kontakty: { telefon: string } | { telefon: string }[] | null }[]
-  if (radky.length > STROP_TISKU || poznamkyDnu.length > STROP_TISKU || sKontakty.length > STROP_TISKU) return { stav: 'prilisMnoho' }
+  // Telefonů nemůže být víc než rezervací (tytéž řádky, jen část poboček) —
+  // jejich počet tedy strop nerozhoduje; rozhodují rezervace a poznámky ke dnům.
+  if (radky.length > STROP_TISKU || poznamkyDnu.length > STROP_TISKU) return { stav: 'prilisMnoho' }
 
   const telefony = new Map<string, string>()
   for (const r of sKontakty) {
