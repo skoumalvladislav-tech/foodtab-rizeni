@@ -3,6 +3,7 @@ import 'server-only'
 import { denVPasmu } from '@/lib/cas'
 import { provozniDen } from '@/lib/provozni-den'
 import { KBELIK_REZERVACI, dokumentyRezervace, type DokumentRezervace } from '@/lib/rezervace-prilohy'
+import type { PoznamkaDneKTisku, PoznamkaKTisku, RezervaceKTisku } from '@/lib/rezervace-tisk'
 import { DotazSelhal, sloupecNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -91,6 +92,103 @@ export async function nacistRezervace(tenantId: string, pobocky: PobockaRezervac
     radky.map(({ rezervace_prilohy, ...r }) => ({ ...r, dokumenty: dokumentyRezervace(rezervace_prilohy) })),
     pobocky,
   )
+}
+
+/**
+ * Kolik záznamů (rezervací, poznámek ke dnům) se nejvýš vytiskne. Víc =
+ * `prilisMnoho`, ŽÁDNÝ zkrácený přehled: vytištěný papír, kterému chybí
+ * půlka akcí, vypadá jako úplný.
+ */
+export const STROP_TISKU = 3000
+
+export type DataTisku =
+  | { stav: 'ok'; rezervace: RezervaceKTisku[]; poznamkyDnu: PoznamkaDneKTisku[]; telefony: Map<string, string> }
+  | { stav: 'prilisMnoho' }
+
+/** Vnořený řádek PostgREST: vztah 1:1 přijde jako objekt (nebo null), starší verze dávaly pole. */
+function jedenVnoreny<T>(v: T | T[] | null | undefined): T | null {
+  return Array.isArray(v) ? (v[0] ?? null) : (v ?? null)
+}
+
+/**
+ * Přehled k tisku (tisk/page.tsx): rezervace období i s poznámkami
+ * obsluhy, poznámky ke dnům pobočky a telefony. Všechno uživatelským
+ * klientem — RLS (`rezervace_cist`, `rezervace_poznamky_cist`) je druhá
+ * linie pod tím, že se ptá jen na pobočky z `zkusPristupRezervacim`.
+ *
+ * TELEFON jen z poboček, kde člověk zapisuje (`rezervace.manage`) —
+ * stejně jako detail rezervace (`nacistKontakt`). Na ostatní pobočky se
+ * `rezervace_kontakty` vůbec neptá; druhá linie je politika
+ * `rezervace_kontakty_cist` (jen manage). E-mail se netiskne.
+ */
+export async function nacistTisk(tenantId: string, pobocky: PobockaRezervaci[], od: string, doDne: string): Promise<DataTisku> {
+  const supabase = await getServerSupabase()
+  const ids = pobocky.map((p) => p.id)
+  const sTelefonem = pobocky.filter((p) => p.zapis).map((p) => p.id)
+
+  const [hlavni, dny, kontakty] = await Promise.all([
+    sloupciZdroje(SLOUPCE_ZDROJE.kalendar, (navic) =>
+      supabase
+        .from('rezervace')
+        .select(`${SLOUPCE_REZERVACE}, menu, poznamka_zdroje${navic}, rezervace_poznamky(nadpis, obsah, vytvoreno_kdy)`)
+        .eq('tenant_id', tenantId)
+        .in('branch_id', ids)
+        .gte('den', od)
+        .lte('den', doDne)
+        .order('zacatek')
+        .limit(STROP_TISKU + 1),
+    ),
+    supabase
+      .from('rezervace_poznamky')
+      .select('branch_id, den, nadpis, obsah, vytvoreno_kdy')
+      .eq('tenant_id', tenantId)
+      .in('branch_id', ids)
+      .gte('den', od)
+      .lte('den', doDne)
+      .limit(STROP_TISKU + 1),
+    sTelefonem.length === 0
+      ? Promise.resolve({ data: [] as unknown[], error: null })
+      : supabase
+          .from('rezervace')
+          .select('id, rezervace_kontakty(telefon)')
+          .eq('tenant_id', tenantId)
+          .in('branch_id', sTelefonem)
+          .gte('den', od)
+          .lte('den', doDne)
+          .limit(STROP_TISKU + 1),
+  ])
+  if (hlavni.error) throw new DotazSelhal('rezervace k tisku', hlavni.error)
+  if (dny.error) throw new DotazSelhal('poznámky ke dnům k tisku', dny.error)
+  if (kontakty.error) throw new DotazSelhal('telefony k tisku', kontakty.error)
+
+  const radky = (hlavni.data ?? []) as unknown as (RadekDb & {
+    menu: string | null
+    poznamka_zdroje: string | null
+    rezervace_poznamky: PoznamkaKTisku[] | null
+  })[]
+  const poznamkyDnu = (dny.data ?? []) as PoznamkaDneKTisku[]
+  const sKontakty = (kontakty.data ?? []) as { id: string; rezervace_kontakty: { telefon: string } | { telefon: string }[] | null }[]
+  // Telefonů nemůže být víc než rezervací (tytéž řádky, jen část poboček) —
+  // jejich počet tedy strop nerozhoduje; rozhodují rezervace a poznámky ke dnům.
+  if (radky.length > STROP_TISKU || poznamkyDnu.length > STROP_TISKU) return { stav: 'prilisMnoho' }
+
+  const telefony = new Map<string, string>()
+  for (const r of sKontakty) {
+    const telefon = jedenVnoreny(r.rezervace_kontakty)?.telefon ?? ''
+    if (telefon) telefony.set(r.id, telefon)
+  }
+
+  return {
+    stav: 'ok',
+    rezervace: sZonou(radky, pobocky).map(({ rezervace_poznamky, menu, poznamka_zdroje, ...r }) => ({
+      ...r,
+      menu: menu ?? '',
+      poznamka_zdroje: poznamka_zdroje ?? '',
+      poznamky: rezervace_poznamky ?? [],
+    })),
+    poznamkyDnu,
+    telefony,
+  }
 }
 
 export async function nacistRezervaci(tenantId: string, id: string, pobocky: PobockaRezervaci[]) {

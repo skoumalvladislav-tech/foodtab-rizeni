@@ -229,11 +229,21 @@ export function zkontrolovatPoznamku(nadpis: string, obsah: string): string | nu
  */
 export function bezpecnaZpatky(rozsah: string, zpet: string | null | undefined): string {
   const zaklad = `/${rozsah}/rezervace`
+  return adresaPod(zaklad, zpet) ?? zaklad
+}
+
+/**
+ * Jádro `bezpecnaZpatky` pro libovolnou složku: `zpet`, jen když leží
+ * pod `zaklad` (`/perla/rezervace`, `/perla/smeny`) a prohlížeč ji
+ * nezmění; jinak `null`. Tisk přehledu (lib/rezervace-tisk.ts) se tak
+ * může vracet do Rezervací i do Rozpisu směn stejnou kontrolou.
+ */
+export function adresaPod(zaklad: string, zpet: string | null | undefined): string | null {
   const z = String(zpet ?? '')
-  if (z !== zaklad && !z.startsWith(`${zaklad}/`) && !z.startsWith(`${zaklad}?`)) return zaklad
-  if (z.includes('//') || z.includes('\\')) return zaklad
+  if (z !== zaklad && !z.startsWith(`${zaklad}/`) && !z.startsWith(`${zaklad}?`)) return null
+  if (z.includes('//') || z.includes('\\')) return null
   const u = new URL(z, 'http://foodtab.invalid')
-  return u.pathname + u.search === z ? z : zaklad
+  return u.pathname + u.search === z ? z : null
 }
 
 /**

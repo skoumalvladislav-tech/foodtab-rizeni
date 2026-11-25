@@ -1,0 +1,137 @@
+/* =====================================================================
+   Tisk přehledu akcí a rezervací (app/[rozsah]/rezervace/tisk).
+
+   Na obrazovce: náhled listu s ovládáním nahoře, v tokenech (světlý
+   i tmavý režim). Na papíře (@media print): jen list — A4 na výšku,
+   černé písmo na bílé, bez navigace aplikace a bez tlačítek. Stav
+   (Předběžná, Zrušená) je SLOVEM a přeškrtnutím, nikdy jen barvou:
+   na černobílé tiskárně by se barva ztratila.
+
+   Tisková pravidla platí jen na stránce, která má `.ds-tisk`
+   (`html:has(.ds-tisk)`), ostatní obrazovky se tisknou jako dřív.
+   ===================================================================== */
+
+.ds-tisk { max-width: 1000px; margin: 0 auto; padding: 0 16px 32px; display: grid; gap: 14px; }
+
+/* --- ovládání (jen na obrazovce) ----------------------------------- */
+.ds-tisk-ovladani { display: grid; gap: 10px; }
+.ds-tisk-radek { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.ds-tisk-volby { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 14px; color: var(--ink); }
+.ds-tisk-volba { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; border: 0; margin: 0; padding: 0; min-width: 0; }
+.ds-tisk-volba legend { float: left; padding: 0; margin-right: 4px; font-weight: 600; }
+.ds-tisk-volba label, label.ds-tisk-volba { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; cursor: pointer; }
+.ds-tisk-volba input { accent-color: var(--mosaz); width: 16px; height: 16px; }
+.ds-tisk-napoveda { margin: 0; font-size: 13px; color: var(--muted); }
+
+/* --- list ------------------------------------------------------------ */
+.ds-tisk-list {
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-sm);
+  padding: 28px 28px 18px;
+  font-size: 13px; line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.ds-tisk-hlava { border-bottom: 2px solid var(--ink); padding-bottom: 10px; margin-bottom: 6px; }
+.ds-tisk-hlava h1 { margin: 0; font-size: 26px; line-height: 1.15; }
+.ds-tisk-obdobi { margin: 2px 0 0; font-size: 17px; font-weight: 600; }
+.ds-tisk-meta { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+
+.ds-tisk-pobocka {
+  margin: 18px 0 2px; padding-bottom: 4px; border-bottom: 1px solid var(--ink);
+  font-size: 20px; line-height: 1.2;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px;
+}
+.ds-tisk-den { margin-top: 12px; }
+.ds-tisk-den-nadpis {
+  margin: 0 0 4px; font-size: 16px; line-height: 1.25;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px;
+}
+/* Souhrn v nadpisu je text, ne nadpis — Archivo, ne patkové. */
+.ds-tisk-souhrn { font-family: var(--font-archivo), system-ui, sans-serif; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.ds-tisk-prazdno { margin: 12px 0 0; color: var(--muted); }
+
+.ds-tisk-den-poznamky { margin: 0 0 6px; padding: 6px 10px; list-style: none; border-left: 3px solid var(--line-2); }
+.ds-tisk-den-poznamky li { white-space: pre-line; }
+.ds-tisk-den-poznamky li + li { margin-top: 2px; }
+
+.ds-tisk-tabulka { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
+.ds-tisk-s-cas { width: 12%; }
+.ds-tisk-s-nazev { width: 20%; }
+.ds-tisk-s-hoste { width: 7%; }
+.ds-tisk-s-misto { width: 15%; }
+.ds-tisk-s-kontakt { width: 17%; }
+.ds-tisk-tabulka th {
+  text-align: left; vertical-align: bottom; padding: 4px 6px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--muted); border-bottom: 1px solid var(--ink);
+}
+.ds-tisk-tabulka td { vertical-align: top; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+.ds-tisk-tabulka th:first-child, .ds-tisk-tabulka td:first-child { padding-left: 0; }
+.ds-tisk-tabulka th.ds-tisk-cislo, .ds-tisk-tabulka td.ds-tisk-cislo { text-align: right; }
+.ds-tisk-cas { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+.ds-tisk-cislo { font-variant-numeric: tabular-nums; font-weight: 600; }
+.ds-tisk-nazev { display: block; font-weight: 600; }
+.ds-tisk-popis, .ds-tisk-telefon { display: block; font-size: 11.5px; color: var(--muted); }
+.ds-tisk-telefon { font-variant-numeric: tabular-nums; }
+.ds-tisk-poznamky p { margin: 0; white-space: pre-line; }
+.ds-tisk-poznamky p + p { margin-top: 3px; }
+/* Zrušená / nedorazili: přeškrtnutý název a čas, stav slovem v popisu. */
+.ds-tisk-tabulka tr[data-zrusena] .ds-tisk-nazev,
+.ds-tisk-tabulka tr[data-zrusena] .ds-tisk-cas { text-decoration: line-through; }
+.ds-tisk-tabulka tr[data-zrusena] .ds-tisk-popis { font-weight: 700; color: var(--ink); }
+
+.ds-tisk-pata { margin-top: 16px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+
+/* Úzký displej: tabulka se nevejde — položka pod sebe (jen obrazovka). */
+@media screen and (max-width: 640px) {
+  .ds-tisk { padding: 0 0 24px; }
+  .ds-tisk-list { padding: 18px 14px 12px; border-radius: 10px; }
+  .ds-tisk-tabulka, .ds-tisk-tabulka tbody, .ds-tisk-tabulka tr, .ds-tisk-tabulka td { display: block; width: auto; }
+  .ds-tisk-tabulka thead, .ds-tisk-tabulka colgroup { display: none; }
+  .ds-tisk-tabulka tr { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .ds-tisk-tabulka td { border: 0; padding: 1px 0; text-align: left; }
+  .ds-tisk-tabulka td.ds-tisk-cislo { text-align: left; }
+  .ds-tisk-tabulka td.ds-tisk-cislo::before { content: "Hosté: "; font-weight: 400; color: var(--muted); }
+}
+
+/* --- papír ------------------------------------------------------------ */
+@media print {
+  @page { size: A4 portrait; margin: 12mm 12mm 14mm; }
+
+  /* Na papír jen list: horní lišta, sloupec, spodní lišta, oznámení,
+     ovládání a cokoli dalšího v <main> pryč. */
+  html:has(.ds-tisk) .ft-shell > :not(.ft-body),
+  html:has(.ds-tisk) .ft-body > :not(.ft-main),
+  html:has(.ds-tisk) .ft-main > :not(.ds-tisk),
+  html:has(.ds-tisk) .ds-toast-region,
+  html:has(.ds-tisk) .install-help,
+  .ds-tisk-ovladani { display: none !important; }
+
+  html:has(.ds-tisk), html:has(.ds-tisk) body { background: #fff !important; color: #000 !important; }
+  html:has(.ds-tisk) .ft-shell, html:has(.ds-tisk) .ft-body { display: block; min-height: 0; }
+  html:has(.ds-tisk) .ft-main { padding: 0 !important; background: none !important; }
+
+  .ds-tisk { max-width: none; margin: 0; padding: 0; display: block; }
+  /* Černá na bílé i z tmavého režimu: barvy z tokenů by na papíře zůstaly světlé. */
+  .ds-tisk-list, .ds-tisk-list * { color: #000 !important; background: transparent !important; box-shadow: none !important; }
+  .ds-tisk-list { border: 0; border-radius: 0; padding: 0; font-size: 9.5pt; line-height: 1.35; }
+  .ds-tisk-hlava { border-bottom: 1.5pt solid #000; }
+  .ds-tisk-hlava h1 { font-size: 17pt; }
+  .ds-tisk-obdobi { font-size: 12pt; }
+  .ds-tisk-meta, .ds-tisk-pata { font-size: 8pt; }
+  .ds-tisk-pobocka { font-size: 13pt; border-bottom: 1pt solid #000; }
+  .ds-tisk-den-nadpis { font-size: 11.5pt; }
+  .ds-tisk-souhrn { font-size: 9pt; }
+  .ds-tisk-tabulka { font-size: 9pt; }
+  .ds-tisk-tabulka th { font-size: 7.5pt; border-bottom: 1pt solid #000; }
+  .ds-tisk-tabulka td { border-bottom: .5pt solid #000; }
+  .ds-tisk-popis, .ds-tisk-telefon { font-size: 8.5pt; }
+  .ds-tisk-den-poznamky { border-left: 2pt solid #000; }
+  .ds-tisk-pata { border-top: .5pt solid #000; }
+
+  /* Každá pobočka od nové stránky — každá kuchyně dostane svůj list. */
+  .ds-tisk-oddil + .ds-tisk-oddil { break-before: page; }
+  .ds-tisk-den-nadpis, .ds-tisk-pobocka { break-after: avoid; }
+  .ds-tisk-tabulka tr { break-inside: avoid; }
+  .ds-tisk-tabulka thead { display: table-header-group; }
+}

@@ -76,6 +76,8 @@ export type IkonaKlic =
   // Rezervace a akce — kalendář s fajfkou, ať se v nabídce nepletou
   // s Rozpisem směn (prostý kalendář).
   | 'rezervace'
+  // Tisk přehledu akcí a rezervací (kalendář Rezervací, Rozpis směn).
+  | 'tisk'
 
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */
