@@ -2919,3 +2919,19 @@ krok 1. Nic jsem na něm neměnil.**
 - **Když to má být jinak:** má-li se počítat jen bankovní účet, přibude ve funkci jedna podmínka na druh
   účtu. Firma, která má bez pobočky jen pokladnu nebo kartu, pak dostane zase varování. Čísla v přehledech se
   tím nezmění, jen to, co stránky řeknou.
+
+## 282. Smí odpověď „má firma firemní účet" dostat i člověk s Financemi jen na pobočce?
+
+**Vzniklo:** 26. 11. 2026 (Finance Fáze 0, nezávislá kontrola dodatku ke kroku 3).
+
+- **Teď:** nová databázová funkce `public.firma_ma_firemni_ucet` odpoví ano/ne každému, kdo má právo vidět
+  finance aspoň na jedné pobočce. Víc než ano/ne z ní nikdo nedostane (číslo, název ani zůstatek účtu ne).
+  Žádná stránka ji dnes takovému člověku nenabízí: Finance na pobočce pouští jen toho, kdo má finance za celou
+  firmu, a ten firemní účet vidí i sám. Kdo má finance jen na pobočce, by se ale přímým voláním databáze
+  dozvěděl, jestli firma má firemní účet, který on sám nevidí.
+- **Volím:** nechat to tak, protože zadání dodatku tu odpověď výslovně chtělo pro den, kdy se Finance otevřou
+  i lidem na pobočkách. V kódu je to označené `ROZHODNOUT` v migraci `20261121100000_pobocky_ucty.sql`
+  (oddíl 1b) a v `lib/finance-ucty-pobocek.ts`.
+- **Když to má být jinak:** funkce pustí jen toho, kdo má finance za celou firmu. Člověk s Financemi jen na
+  pobočce dostane odmítnutí. Stránky se nezmění, protože mu ji dnes nevolají. Ve scénáři `krok113` se otočí
+  kontroly pobočkových čtenářů.
