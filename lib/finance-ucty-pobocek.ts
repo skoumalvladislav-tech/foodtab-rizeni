@@ -22,8 +22,13 @@
  * s AKTIVNÍM firemním účtem normální stav, ne chyba — stránky ji místo
  * varováním jen klidně vysvětlí (`rozhodnoutBezUctuFirmy`). Jestli firma
  * aktivní firemní účet má, říká zase jen databáze (`nactiFiremniUcet`,
- * public.firma_ma_firemni_ucet) — i na pobočce, kde ho přes RLS vidět
- * není. Platby firemního účtu se žádné pobočce nepřipisují (otázka 280).
+ * public.firma_ma_firemni_ucet). Platby firemního účtu se žádné pobočce
+ * nepřipisují (otázka 280).
+ *
+ * Pobočka bez vlastního AKTIVNÍHO účtu může mít vlastní účet vypnutý
+ * (pobocky_bez_aktivniho_uctu ho počítá jako žádný) — proto věty říkají
+ * „nemá vlastní aktivní účet", ne „nemá vlastní účet", ať stránka
+ * neodporuje výpisu účtů, kde ten vypnutý účet je.
  */
 
 import type { getServerSupabase } from './supabase/server.ts'
@@ -131,8 +136,14 @@ export const CHYBA_FIREMNIHO_UCTU =
 
 /**
  * Má firma AKTIVNÍ platební účet bez pobočky? Jen ano/ne z databáze
- * (public.firma_ma_firemni_ucet, migrace 20261121100000) — funguje i na
- * pobočce, kde firemní účet přes RLS vidět není, a nic o účtu neprozradí.
+ * (public.firma_ma_firemni_ucet, migrace 20261121100000) — nic o účtu
+ * neprozradí.
+ *
+ * Kdo to volá: stránky Financí. Na pobočku je ale pustí jen ten, kdo má
+ * finance.read ZA CELOU FIRMU (`zkusPristupFinanci`, lib/finance-pristup.ts),
+ * a ten firemní účet přes RLS vidí i sám. Že funkce odpoví i tomu, kdo má
+ * finance.read jen na pobočce, dnes žádná stránka nevyužívá — je to pro
+ * den, kdy se Finance pobočkovým lidem otevřou (otázka 282).
  *
  * Chyba NIKDY není „ne": „ne" by stránku přepnulo na varování, jako by
  * firma žádný účet neměla. Stránka chybu řekne (`CHYBA_FIREMNIHO_UCTU`).
@@ -210,14 +221,16 @@ export function rozhodnoutBezUctuFirmy(bezUctu: PobockyBezUctu, firemni: Firemni
 }
 
 /**
- * Klidná věta pro pohled Celá firma: pobočky bez vlastního účtu platí
- * přes firemní účet. Jména poboček z dat. `null` = žádná taková.
+ * Klidná věta pro pohled Celá firma: pobočky bez vlastního AKTIVNÍHO účtu
+ * platí přes firemní účet. Jména poboček z dat. `null` = žádná taková.
+ * „Aktivní" schválně: pobočka může mít vlastní účet vypnutý a výpis účtů
+ * v Platbách ho ukazuje — věta „nemá vlastní účet" by mu odporovala.
  */
 export function vetaPobockyPresFiremniUcet(pobocky: readonly PobockaBezUctu[]): string | null {
   if (pobocky.length === 0) return null
   const nazvy = pobocky.map((p) => p.nazev.trim() || 'Pobočka bez názvu')
   const jedna = pobocky.length === 1
-  return `${vycet(nazvy)} ${jedna ? 'nemá' : 'nemají'} vlastní platební účet a platí přes firemní účet. `
+  return `${vycet(nazvy)} ${jedna ? 'nemá' : 'nemají'} vlastní aktivní platební účet a platí přes firemní účet. `
     + `Jeho platby jsou v přehledu za celou firmu, do čísel ${jedna ? 'pobočky' : 'poboček'} se nepočítají.`
 }
 
@@ -284,6 +297,28 @@ export function hlaskaBezUctuPobocky(smiPrirazovat: boolean, firemni: FiremniUce
     ? `${zaklad} Účet pobočce přiřadíte v pohledu Celá firma → Platby → Platební účty.`
     : `${zaklad} Účet pobočce může přiřadit ${KDO_SPRAVUJE_UCTY}.`
   return firemni.stav === 'chyba' ? `${veta} ${firemni.text}` : veta
+}
+
+/**
+ * Věta k VYBRANÉ pobočce bez vlastního aktivního účtu v Rozpočtech.
+ *   * na pobočce: `hlaskaBezUctuPobocky`;
+ *   * za celou firmu u firmy s firemním účtem: `null` — vybranou pobočku
+ *     už jmenuje klidné vysvětlení nahoře (PobockyBezUctu počítá z téhož
+ *     seznamu poboček bez účtu) a buňky Tržby a Suroviny říkají, kde čísla
+ *     jsou. Druhá skoro stejná věta hned pod první by jen opakovala
+ *     (revize dodatku 3d);
+ *   * za celou firmu jinak: jméno pobočky + `hlaskaBezUctuPobocky` (kde se
+ *     účet přiřazuje, případně že se nepodařilo zjistit firemní účet).
+ */
+export function vetaVybranePobockyBezUctu(
+  naPobocce: boolean,
+  nazev: string,
+  smiPrirazovat: boolean,
+  firemni: FiremniUcet,
+): string | null {
+  if (naPobocce) return hlaskaBezUctuPobocky(smiPrirazovat, firemni)
+  if (platiPresFiremniUcet(firemni)) return null
+  return `${nazev}: ${hlaskaBezUctuPobocky(smiPrirazovat, firemni)}`
 }
 
 /**

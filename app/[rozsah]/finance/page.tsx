@@ -314,7 +314,7 @@ export default async function FinancePrehled({
               prazdno={
                 naPobocce
                   ? kpi?.pobockaBezUctu && presFiremni
-                    ? 'Pobočka nemá vlastní účet a platí přes firemní účet, takže appka její zůstatek nezná — zůstatek firemního účtu je v přehledu za celou firmu.'
+                    ? 'Pobočka nemá vlastní aktivní účet a platí přes firemní účet, takže appka její zůstatek nezná — zůstatek firemního účtu je v přehledu za celou firmu.'
                     : 'Pobočka zatím nemá vlastní aktivní platební účet, takže appka její zůstatek nezná. Účty celé firmy jsou v pohledu Celá firma.'
                   : 'Zatím bez platebních účtů nebo transakcí.'
               }

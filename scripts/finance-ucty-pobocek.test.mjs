@@ -29,6 +29,7 @@ const {
   adresaUctu, mistoHlaskyUctu, PRAVO_SPRAVY_FINANCI, KDO_SPRAVUJE_UCTY, kotvaUctu, PRAVO_CIST_FAKTURY, KDO_PARUJE,
   nactiFiremniUcet, platiPresFiremniUcet, rozhodnoutBezUctuFirmy, vetaPobockyPresFiremniUcet, stitekPobockyBezUctu,
   CHYBA_FIREMNIHO_UCTU, PRES_FIREMNI_UCET_POBOCKA, KRATCE_PRES_FIREMNI_UCET, ODKAZ_VLASTNI_UCET, pobockyProKpi,
+  vetaVybranePobockyBezUctu,
 } = await import('../lib/finance-ucty-pobocek.ts')
 const { upravaUctu, hodnotaPobockyUctu, hlaskaZapisuPlatby, VYPNUTY_UCET_ZAPIS, NEPODARILO_ZAPSAT_PLATBU } =
   await import('../lib/finance-platby-pobocka.ts')
@@ -240,13 +241,36 @@ console.log('\n== Texty dodatku 3d ==')
 {
   const dve = vetaPobockyPresFiremniUcet(OBE)
   const jednaP = vetaPobockyPresFiremniUcet([OBE[0]])
-  ok(`celá firma, dvě pobočky: jména z dat, „nemají vlastní účet a platí přes firemní účet", čísla poboček — naměřeno: ${dve}`,
-    dve === 'Bernard Bar Tábor a Restaurace Černá Perla nemají vlastní platební účet a platí přes firemní účet. '
+  ok(`celá firma, dvě pobočky: jména z dat, „nemají vlastní aktivní účet a platí přes firemní účet", čísla poboček — naměřeno: ${dve}`,
+    dve === 'Bernard Bar Tábor a Restaurace Černá Perla nemají vlastní aktivní platební účet a platí přes firemní účet. '
       + 'Jeho platby jsou v přehledu za celou firmu, do čísel poboček se nepočítají.')
-  ok(`celá firma, jedna pobočka: „nemá … do čísel pobočky" — naměřeno: ${jednaP}`,
-    /^Bernard Bar Tábor nemá vlastní platební účet a platí přes firemní účet\./.test(jednaP ?? '') && /do čísel pobočky se nepočítají/.test(jednaP ?? ''))
+  ok(`celá firma, jedna pobočka: „nemá vlastní aktivní … do čísel pobočky" — naměřeno: ${jednaP}`,
+    /^Bernard Bar Tábor nemá vlastní aktivní platební účet a platí přes firemní účet\./.test(jednaP ?? '') && /do čísel pobočky se nepočítají/.test(jednaP ?? ''))
   ok('celá firma, žádná pobočka → nic (null)', vetaPobockyPresFiremniUcet([]) === null)
-  ok('vysvětlení nepoužívá slova varování („nemají aktivní", „nejsou")', !/aktivní platební účet|nejsou\./.test(dve ?? ''))
+  // Varování říká „…, takže jejich příjmy a výdaje v součtech po pobočkách
+  // nejsou". Slovo „aktivní" ve vysvětlení naopak být MÁ (níž).
+  ok('vysvětlení nepoužívá slova varování („takže", „nejsou", „v součtech po pobočkách")',
+    !/takže|nejsou|v součtech po pobočkách/.test(`${dve ?? ''} ${jednaP ?? ''}`))
+  // Do vysvětlení patří i pobočka, jejíž vlastní účet je VYPNUTÝ
+  // (pobocky_bez_aktivniho_uctu) — „nemá vlastní účet" by odporovalo
+  // výpisu účtů, kde ten vypnutý účet je (revize dodatku 3d).
+  ok(`vysvětlení neříká „nemá vlastní (platební) účet" bez „aktivní" — naměřeno: ${jednaP}`,
+    ![dve, jednaP].some((t) => /nemá(ji)? vlastní (platební )?účet/.test(t ?? '')))
+}
+{
+  // Rozpočty: věta k VYBRANÉ pobočce bez vlastního aktivního účtu.
+  const naPob = vetaVybranePobockyBezUctu(true, 'Bernard Bar Tábor', true, MA_FIREMNI)
+  const firmaPres = vetaVybranePobockyBezUctu(false, 'Bernard Bar Tábor', true, MA_FIREMNI)
+  const firmaBez = vetaVybranePobockyBezUctu(false, 'Bernard Bar Tábor', true, BEZ_FIREMNIHO)
+  const firmaChyba = vetaVybranePobockyBezUctu(false, 'Bernard Bar Tábor', false, FIREMNI_CHYBA)
+  ok(`Rozpočty, celá firma s firemním účtem, vybraná pobočka bez účtu → nic navíc (vysvětlení nahoře ji jmenuje) — naměřeno: ${firmaPres}`,
+    firmaPres === null)
+  ok(`Rozpočty, na pobočce → hlaskaBezUctuPobocky — naměřeno: ${naPob}`,
+    naPob === hlaskaBezUctuPobocky(true, MA_FIREMNI))
+  ok(`Rozpočty, celá firma bez firemního účtu → jméno pobočky a kde se účet přiřazuje — naměřeno: ${firmaBez}`,
+    firmaBez === `Bernard Bar Tábor: ${hlaskaBezUctuPobocky(true, BEZ_FIREMNIHO)}` && /Platební účty/.test(firmaBez ?? ''))
+  ok(`Rozpočty, celá firma, chyba firemního účtu → věta i s chybou, ne nic — naměřeno: ${firmaChyba}`,
+    firmaChyba === `Bernard Bar Tábor: ${hlaskaBezUctuPobocky(false, FIREMNI_CHYBA)}` && (firmaChyba ?? '').endsWith(FIREMNI_CHYBA.text))
 }
 {
   const smiF = hlaskaBezUctuPobocky(true, MA_FIREMNI)
@@ -593,9 +617,24 @@ ok('Rozpočty: buňky Tržby a Suroviny u pobočky bez účtu — „platí pře
     && /const skrytSkutecnost = bezUctu\b/.test(rozpocty))
 ok('Rozpočty: věty o pobočce s firemním účtem (firemniUcet — `firemni` tu jsou firemní rozpočty)',
   /const presFiremni = platiPresFiremniUcet\(firemniUcet\)/.test(rozpocty)
-    && /hlaskaBezUctuPobocky\(smiSpravovatUcty, firemniUcet\)/.test(rozpocty)
-    && /vetaPobockyPresFiremniUcet\(\[\{ branchId: branchId \?\? '', nazev: nazevPohledu \}\]\)/.test(rozpocty)
     && /const firemni = branchId === null/.test(rozpocty))
+// Revize 3d: za celou firmu s firemním účtem stála pod vysvětlením
+// (PobockyBezUctu) skoro stejná věta jen pro vybranou pobočku.
+ok('Rozpočty: věta k vybrané pobočce jen přes vetaVybranePobockyBezUctu, žádná druhá věta „platí přes firemní účet" pod vysvětlením',
+  /const vetaVybranePobocky = bezUctu\s*\?\s*vetaVybranePobockyBezUctu\(pobocka !== null, nazevPohledu, smiSpravovatUcty, firemniUcet\)\s*:\s*null/.test(rozpocty)
+    && /\{vetaVybranePobocky \? \(/.test(rozpocty)
+    && !/vetaPobockyPresFiremniUcet|hlaskaBezUctuPobocky\(/.test(rozpocty.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')))
+// Revize 3d: pobočka s VYPNUTÝM vlastním účtem je taky „bez účtu" — věty
+// na stránkách pobočky říkají „vlastní aktivní účet", ne „vlastní účet".
+for (const [jmeno, veta] of [
+  ['Platby', 'Platby patří pobočce přes platební účet a vlastní aktivní účet pobočka nemá.'],
+  ['Cashflow', 'Pobočka nemá vlastní aktivní účet, takže appka nezná její zůstatek'],
+  ['Přehled', 'Pobočka nemá vlastní aktivní účet a platí přes firemní účet'],
+]) {
+  const s = zdroj(STRANKY[jmeno])
+  ok(`${jmeno}: pobočka u firmy s firemním účtem — „nemá vlastní aktivní účet", ne „nemá vlastní účet"`,
+    s.includes(veta) && !/nemá vlastní (platební )?účet|vlastní (platební )?účet pobočka nemá/.test(s))
+}
 const prehled = zdroj(STRANKY['Přehled'])
 ok('Přehled: KPI Cashflow pobočky bez účtu — „–" a krátký důvod s firemním účtem',
   /hodnota=\{kpi\.pobockaBezUctu \? '–' : koruny\(kpi\.cashflowHaleru\)\}/.test(prehled)

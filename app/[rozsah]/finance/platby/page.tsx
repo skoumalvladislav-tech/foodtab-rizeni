@@ -488,7 +488,7 @@ export default async function FinancePlatby({
             </h2>
             <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
               {presFiremni
-                ? 'Platby patří pobočce přes platební účet a vlastní účet pobočka nemá. Platby firemního účtu jsou v pohledu Celá firma, ne tady, takže prázdný seznam neznamená, že pobočce nic nepřišlo.'
+                ? 'Platby patří pobočce přes platební účet a vlastní aktivní účet pobočka nemá. Platby firemního účtu jsou v pohledu Celá firma, ne tady, takže prázdný seznam neznamená, že pobočce nic nepřišlo.'
                 : `Platby patří pobočce přes platební účet a ${nazevPobocky} zatím žádný aktivní nemá. Účty založené dosud jsou firemní (bez pobočky) — jejich platby jsou v pohledu Celá firma, ne tady, takže prázdný seznam neznamená, že pobočce nic nepřišlo.`}
             </p>
             {/* Kde se účet přiřazuje — jen tomu, kdo to smí (krok 3, bod 5). */}

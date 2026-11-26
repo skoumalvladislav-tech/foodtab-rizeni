@@ -41,7 +41,8 @@
 --        pobočkový → ne; firma bez jediného účtu → ne, i když jiná firma
 --        aktivní firemní účet má — filtr firmy ve funkci;
 --      * čtenář pobočky dostane odpověď, ale řádek firemního účtu dál
---        nevidí — ověří CI;
+--        nevidí — ověří CI; a dostane i „ne" (čtenářka Gamy ve firmě B
+--        u každého kroku firmy B), ne vždycky „ano";
 --      * bez finance.read, cizí firma a prázdná firma 42501; anonym ji
 --        nespustí — ověří CI;
 --      * vrací jen boolean, s právy vlastníka a prázdnou search_path;
@@ -169,7 +170,8 @@ select set_config('test.user_id', '', false);
 --   Filip  — finance.read za celou firmu;
 --   Simona — finance.read + finance.manage za celou firmu (ne majitelka);
 --   Jan    — jen finance.manage na Betě, bez čtení.
--- Firma B (cizí): Bohdan — majitel; pobočka Gama bez účtu.
+-- Firma B (cizí): Bohdan — majitel; pobočka Gama bez účtu;
+--   Gabriela — finance.read jen na Gamě (oddíl 3d).
 -- =====================================================================
 
 \set maj       11130000-0000-0000-0000-000000000001
@@ -179,6 +181,7 @@ select set_config('test.user_id', '', false);
 \set spr_firma 11130000-0000-0000-0000-000000000005
 \set jen_sprava 11130000-0000-0000-0000-000000000006
 \set cizi      11130000-0000-0000-0000-000000000007
+\set cte_pob_b 11130000-0000-0000-0000-000000000008
 
 insert into auth.users (id, email, raw_user_meta_data) values
   (:'maj',        'marie113@foodtab.cz',  '{"full_name":"Marie Stotřináctá"}'),
@@ -187,7 +190,8 @@ insert into auth.users (id, email, raw_user_meta_data) values
   (:'cte_firma',  'filip113@foodtab.cz',  '{"full_name":"Filip Stotřináctý"}'),
   (:'spr_firma',  'simona113@foodtab.cz', '{"full_name":"Simona Stotřináctá"}'),
   (:'jen_sprava', 'jan113@foodtab.cz',    '{"full_name":"Jan Stotřináctý"}'),
-  (:'cizi',       'bohdan113@foodtab.cz', '{"full_name":"Bohdan Stotřináctý"}');
+  (:'cizi',       'bohdan113@foodtab.cz', '{"full_name":"Bohdan Stotřináctý"}'),
+  (:'cte_pob_b',  'gabriela113@foodtab.cz', '{"full_name":"Gabriela Stotřináctá"}');
 
 insert into public.tenants (name, legal_name, currency, timezone)
 values ('Krok113 Alfa s.r.o.', 'Krok113 Alfa s.r.o.', 'CZK', 'Europe/Prague') returning id as firma \gset
@@ -253,6 +257,20 @@ insert into public.employees (tenant_id, branch_id, user_id, full_name, employme
 values (:'firma_b', :'pg', :'cizi', 'Bohdan Stotřináctý', 'hpp', true) returning id as e_cizi \gset
 insert into public.memberships (tenant_id, user_id, role_id, scope, status)
 values (:'firma_b', :'cizi', null, 'tenant', 'active');
+-- Gabriela: finance.read jen na Gamě (rozsah pobočky) — pobočkový čtenář
+-- firmy B, která firemní účet střídavě má a nemá (oddíl 3d).
+insert into public.positions (tenant_id, key, label, department, active)
+values (:'firma_b', 'krok113_cteni_b', 'Krok113 — čtení financí B', 'provoz', true) returning id as z_cteni_b \gset
+insert into public.position_permissions (tenant_id, position_id, permission_key)
+values (:'firma_b', :'z_cteni_b', 'finance.read');
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name, employment_type)
+values (:'firma_b', :'pg', :'cte_pob_b', :'z_cteni_b', 'Gabriela Stotřináctá', 'hpp') returning id as e_cte_pob_b \gset
+insert into public.memberships (tenant_id, user_id, role_id, scope, status)
+values (:'firma_b', :'cte_pob_b', null, 'branch', 'active');
+insert into public.membership_branches (membership_id, branch_id)
+select m.id, :'pg'::uuid
+  from public.memberships m
+ where m.tenant_id = :'firma_b' and m.user_id = :'cte_pob_b';
 
 -- Účty firmy A. Firemní a Beta jsou v živém tvaru (zkouška 11).
 insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
@@ -801,6 +819,11 @@ select pg_temp.check('prázdná firma: 42501 — naměřeno: ' || pg_temp.firemn
 select set_config('test.user_id', :'cizi', false);
 select pg_temp.check('firma B bez jediného účtu: ne, firemní účet firmy A se nepočítá — naměřeno: ' || pg_temp.firemni(:'firma_b'),
   pg_temp.firemni(:'firma_b') = 'ne');
+-- Pobočkový čtenář dostane i „ne" — odpověď se pro něj nezjednodušuje
+-- na „ano" (revize 3d). Gabriela má finance.read jen na Gamě.
+select set_config('test.user_id', :'cte_pob_b', false);
+select pg_temp.check('čtenářka pobočky Gama, firma B bez jediného účtu: ne — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ne');
 
 reset role;
 select set_config('test.user_id', '', false);
@@ -809,6 +832,9 @@ values (:'firma_b', null, 'Krok113 3d vypnutý firemní B', 'banka', false) retu
 set role authenticated;
 select set_config('test.user_id', :'cizi', false);
 select pg_temp.check('jen vypnutý firemní účet: ne, vypnutý je jako žádný — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ne');
+select set_config('test.user_id', :'cte_pob_b', false);
+select pg_temp.check('čtenářka pobočky Gama, jen vypnutý firemní účet: ne — naměřeno: ' || pg_temp.firemni(:'firma_b'),
   pg_temp.firemni(:'firma_b') = 'ne');
 
 reset role;
@@ -820,6 +846,10 @@ set role authenticated;
 select set_config('test.user_id', :'cizi', false);
 select pg_temp.check('jen aktivní účet pobočky: ne, účet pobočky není firemní — naměřeno: ' || pg_temp.firemni(:'firma_b'),
   pg_temp.firemni(:'firma_b') = 'ne');
+-- Účet Gamy Gabriela vidí (je její pobočky) — firemní z něj být nesmí.
+select set_config('test.user_id', :'cte_pob_b', false);
+select pg_temp.check('čtenářka pobočky Gama, jen aktivní účet její pobočky: ne, účet pobočky není firemní — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ne');
 
 reset role;
 select set_config('test.user_id', '', false);
@@ -829,6 +859,9 @@ set role authenticated;
 select set_config('test.user_id', :'cizi', false);
 select pg_temp.check('aktivní firemní účet přibude: ano hned — naměřeno: ' || pg_temp.firemni(:'firma_b'),
   pg_temp.firemni(:'firma_b') = 'ano');
+select set_config('test.user_id', :'cte_pob_b', false);
+select pg_temp.check('čtenářka pobočky Gama, aktivní firemní účet přibude: ano — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ano');
 
 reset role;
 select set_config('test.user_id', '', false);
@@ -836,6 +869,9 @@ update public.platebni_ucty set aktivni = false where id = :'u_b_firemni';
 set role authenticated;
 select set_config('test.user_id', :'cizi', false);
 select pg_temp.check('firemní účet se vypne: ne hned — naměřeno: ' || pg_temp.firemni(:'firma_b'),
+  pg_temp.firemni(:'firma_b') = 'ne');
+select set_config('test.user_id', :'cte_pob_b', false);
+select pg_temp.check('čtenářka pobočky Gama, firemní účet se vypne: ne — naměřeno: ' || pg_temp.firemni(:'firma_b'),
   pg_temp.firemni(:'firma_b') = 'ne');
 
 set role anon;
@@ -884,8 +920,13 @@ delete from public.membership_branches
 delete from public.memberships
  where tenant_id = :'firma' and user_id in (:'spr_pob', :'cte_pob', :'cte_firma', :'spr_firma', :'jen_sprava');
 delete from public.employees where id in (:'e_spr_pob', :'e_cte_pob', :'e_cte_firma', :'e_spr_firma', :'e_jen_sprava');
-delete from public.position_permissions where position_id in (:'z_sprava', :'z_cteni', :'z_jen_sprava');
-delete from public.positions where id in (:'z_sprava', :'z_cteni', :'z_jen_sprava');
+delete from public.membership_branches
+ where membership_id in (select id from public.memberships
+                          where tenant_id = :'firma_b' and user_id = :'cte_pob_b');
+delete from public.memberships where tenant_id = :'firma_b' and user_id = :'cte_pob_b';
+delete from public.employees where id = :'e_cte_pob_b';
+delete from public.position_permissions where position_id in (:'z_sprava', :'z_cteni', :'z_jen_sprava', :'z_cteni_b');
+delete from public.positions where id in (:'z_sprava', :'z_cteni', :'z_jen_sprava', :'z_cteni_b');
 
 select pg_temp.check('úklid: účty, platby, dávky a připojení kroku 113 pryč, spouště účtu zapnuté',
   not exists (select 1 from public.platebni_ucty where tenant_id in (:'firma', :'firma_b'))

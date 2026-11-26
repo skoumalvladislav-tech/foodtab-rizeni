@@ -10,14 +10,13 @@ import { koruny } from '@/lib/mzdy'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { hodnotaPohleduRozpoctu, pohledRozpoctu, ROZPOCTY_FIRMY } from '@/lib/finance-evidence-pobocka'
 import {
-  hlaskaBezUctuPobocky,
   KRATCE_PRES_FIREMNI_UCET,
   maPobockaAktivniUcet,
   nactiFiremniUcet,
   nactiPobockyBezUctu,
   nactiUctyMimoPobocek,
   platiPresFiremniUcet,
-  vetaPobockyPresFiremniUcet,
+  vetaVybranePobockyBezUctu,
 } from '@/lib/finance-ucty-pobocek'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
@@ -174,6 +173,9 @@ export default async function FinanceRozpocty({
     nactiFiremniUcet((fn, argumenty) => supabase.rpc(fn, argumenty), tenantId),
   ])
   const presFiremni = platiPresFiremniUcet(firemniUcet)
+  const vetaVybranePobocky = bezUctu
+    ? vetaVybranePobockyBezUctu(pobocka !== null, nazevPohledu, smiSpravovatUcty, firemniUcet)
+    : null
   // Mzdy (a s nimi prime cost) jen s payroll.read — bez práva vrací
   // vydelky_prehled prázdno a prime cost by tiše vyšel bez mezd.
   const smiVidetMzdy = canSee(pristup.ctx, 'payroll.read')
@@ -248,15 +250,13 @@ export default async function FinanceRozpocty({
         {/* Celá firma: aktivní pobočky bez aktivního účtu (krok 3, bod 1). */}
         {!pobocka ? <PobockyBezUctu vysledek={bezUctuVysledek} firemni={firemniUcet} smiPrirazovat={smiSpravovatUcty} mimoPobocky={mimoPobocky} /> : null}
 
-        {/* Za celou firmu u vybrané pobočky s firemním účtem věta „platí přes firemní účet" (dodatek 3d). */}
-        {bezUctu ? (
-          <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-            {pobocka
-              ? hlaskaBezUctuPobocky(smiSpravovatUcty, firemniUcet)
-              : presFiremni
-                ? vetaPobockyPresFiremniUcet([{ branchId: branchId ?? '', nazev: nazevPohledu }])
-                : `${nazevPohledu}: ${hlaskaBezUctuPobocky(smiSpravovatUcty, firemniUcet)}`}
-          </p>
+        {/* Vybraná pobočka bez vlastního aktivního účtu. Za celou firmu
+            u firmy s firemním účtem nic navíc (vetaVybranePobockyBezUctu
+            vrátí null, dodatek 3d): pobočku už jmenuje vysvětlení nahoře
+            (PobockyBezUctu — bezUctu se počítá z téhož seznamu) a buňky
+            Tržby a Suroviny říkají, kde čísla jsou. */}
+        {vetaVybranePobocky ? (
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{vetaVybranePobocky}</p>
         ) : null}
 
         {chybaPrehledu ? (

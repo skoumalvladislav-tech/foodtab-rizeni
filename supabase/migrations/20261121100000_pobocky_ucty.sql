@@ -158,6 +158,16 @@ grant execute on function public.pobocky_bez_aktivniho_uctu(uuid, uuid) to authe
 --     42501 jako pobocky_bez_aktivniho_uctu (ne „ne", které by se tvářilo
 --     jako odpověď);
 --   * uvnitř definer RLS neplatí — firmu filtruje dotaz sám, jednou.
+--
+-- DNES to žádná stránka nevyužívá: Finance na pobočce pouští jen toho, kdo
+-- má finance.read ZA CELOU FIRMU (zkusPristupFinanci, lib/finance-pristup.ts),
+-- a ten firemní účet přes RLS vidí i sám. Kdo má finance.read jen na
+-- pobočce, se na stránky Financí nedostane — přímým voláním /rpc se dozví
+-- jen to jedno ano/ne. Zadání dodatku 3d to výslovně chtělo (pro den, kdy
+-- se Finance pobočkovým lidem otevřou).
+-- ROZHODNOUT: (otázka 282) nechat odpověď i pro finance.read jen na
+-- pobočce, nebo ji odebrat (security invoker + app.has_access(p_tenant,
+-- 'finance.read', null) — pobočkový čtenář pak dostane 42501)?
 -- ---------------------------------------------------------------------
 
 create function public.firma_ma_firemni_ucet(p_tenant uuid)

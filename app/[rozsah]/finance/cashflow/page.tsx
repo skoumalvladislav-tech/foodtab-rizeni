@@ -159,7 +159,7 @@ export default async function FinanceCashflow({
             </h2>
             <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
               {presFiremni
-                ? 'Pobočka nemá vlastní účet, takže appka nezná její zůstatek a výhled by začínal vymyšlenou nulou.'
+                ? 'Pobočka nemá vlastní aktivní účet, takže appka nezná její zůstatek a výhled by začínal vymyšlenou nulou.'
                 : 'Bez aktivního účtu pobočky appka nezná její zůstatek, takže výhled by začínal vymyšlenou nulou. Platební účty jsou zatím vedené za celou firmu — výhled společných účtů je v pohledu Celá firma.'}
             </p>
             <p style={{ margin: '6px 0 0', fontSize: '13.5px', color: 'var(--muted)' }}>{hlaskaBezUctuPobocky(smiSpravovatUcty, firemni)}</p>
