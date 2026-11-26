@@ -429,9 +429,13 @@ ok('rozpočty: výběr pobočky jen za celou firmu a v něm volba firemních roz
   /<option value=\{ROZPOCTY_FIRMY\}>/.test(stranaRozpoctu))
 // Krok 3: i ve výběru pobočky za celou firmu, věta s místem přiřazení jen
 // pro toho, kdo smí, a „bez účtu" z jedné funkce pro všechny Finance.
+// Věta k vybrané pobočce je od revize dodatku 3d ve
+// vetaVybranePobockyBezUctu (lib/finance-ucty-pobocek.ts, zkouší
+// scripts/finance-ucty-pobocek.test.mjs).
 ok('rozpočty: pobočka bez účtu → věta místo „0 Kč" skutečnosti (na pobočce i ve výběru za celou firmu)',
   /const skrytSkutecnost = bezUctu\n/.test(stranaRozpoctu) &&
-  /\{skrytSkutecnost \? \(/.test(stranaRozpoctu) && /hlaskaBezUctuPobocky\(smiSpravovatUcty, firemniUcet\)/.test(stranaRozpoctu) &&
+  /\{skrytSkutecnost \? \(/.test(stranaRozpoctu)
+  && /vetaVybranePobockyBezUctu\(pobocka !== null, nazevPohledu, smiSpravovatUcty, firemniUcet\)/.test(stranaRozpoctu) &&
   /nactiPobockyBezUctu\(/.test(stranaRozpoctu) && !/from\('platebni_ucty'\)/.test(stranaRozpoctu))
 
 console.log(chyb === 0 ? '\nVše v pořádku.' : `\n${chyb} kontrol selhalo.`)
