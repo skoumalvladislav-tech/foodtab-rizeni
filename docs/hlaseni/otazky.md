@@ -2369,6 +2369,11 @@ od 25. 6. 2025; automatické párování sahá 180 dní zpět).
 > faktura vystavená na jiné IČO (zatím jich přišlo 11) půjde do kontroly. Kód dál nic natvrdo nepíše
 > a pojistka „sporné IČO" zůstává.
 >
+> **ZAPSÁNO (26. 11.) na pokyn Šéfíka „zapiš ičo":** IČO firmy Foodtab s.r.o. v ostré databázi je teď
+> 21249946 (jediný řádek, ověřeno čtením po zápisu; 21249946 projde kontrolní číslicí). Od teď příjem faktur
+> pošle do kontroly doklad, jehož odběratel má platné IČO jiné než 21249946. Doklady bez IČO odběratele se tím
+> nemění a už přijaté doklady se znovu nepřepočítávají.
+>
 > **Šéfík doplnil (25. 11.): některé faktury a doklady mohou být bez IČO.** V ostré databázi nemá IČO
 > dodavatele 2 324 z 3 177 faktur. Chybějící IČO proto samo není chyba ani důvod ke kontrole; dodavatel bez
 > IČO se pozná podle názvu a nikdy se sám nesloučí s jiným (platí pro kroky 5–8).

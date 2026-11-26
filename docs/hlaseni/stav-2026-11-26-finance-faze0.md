@@ -6,8 +6,9 @@ jsou zapsaná v `otazky.md` u otázek 98, 100, 110 a 114.
 
 ## Nejdřív to podstatné
 
-- **Nic z Fáze 0 není nasazené ani sloučené. `db push` neproběhl ani nasucho a v ostré databázi jsem nic
-  neměnil.** Z ostré databáze jsem 25. 11. jen četl, a to údaje k IČO.
+- **Nic z Fáze 0 není nasazené ani sloučené. `db push` neproběhl ani nasucho.** V ostré databázi jsem na
+  pokyn „zapiš ičo" změnil jediný údaj: IČO firmy je teď 21249946 (viz „Zapsáno do ostré databáze"). Jinak
+  jsem z ní jen četl.
 - **V noci opakovaně nefungovalo připojení k internetu.** Wi-Fi byla připojená, ale počítač nedokázal
   přeložit adresy (DNS), takže žádná práce nemohla mluvit s AI. Výpadky začaly 25. 11. kolem 22:00
   a ve 23:40 pořád trvaly. V 0:37 spadl poslední noční pokus. Ráno ve 12:07 už připojení fungovalo.
@@ -55,12 +56,20 @@ U dodatku ke kroku 3 (stav na `504c05a`):
 
 ## Co čeká na Šéfíka
 
-- **„zapiš IČO"** (otázka 110). V nastavení firmy je IČO, které neprojde kontrolní číslicí, takže příjem
-  faktur dnes vůbec nehlídá, na koho je faktura vystavená. Oprava na 21249946 je jeden zápis do ostré
-  databáze a udělám ji jen na výslovné „zapiš IČO".
 - **Otázka 281:** co se počítá jako firemní účet (nová, viz níže).
 - **Otázka 280:** jestli se mají platby společného účtu připisovat pobočkám.
 - **Otázka 148:** vymyšlený výpis by mohl „zaplatit" fakturu. Je potřeba rozhodnout před nasazením.
+
+## Zapsáno do ostré databáze
+
+Na pokyn Šéfíka „zapiš ičo" (26. 11.) jsem v ostré databázi změnil jeden řádek: IČO firmy Foodtab s.r.o.
+je teď 21249946 (otázka 110). Zápis byl pojištěný tak, aby změnil přesně jeden řádek, jinak by se vrátil.
+První pokus vypršel dřív, než se spojení s databází rozjelo, a nic nezměnil, což jsem ověřil čtením. Druhý
+pokus prošel a čtení po zápisu ukázalo 21249946 u jediné firmy.
+
+Co se tím mění: příjem faktur od teď pošle do kontroly doklad, jehož odběratel má platné IČO jiné než
+21249946 (dosud takových přišlo 11). Doklady bez IČO odběratele se nemění. Už přijaté doklady se znovu
+nepřepočítávají.
 
 ## Otázky
 
@@ -91,5 +100,5 @@ Do `otazky.md` přibyla otázka 281. Otázka 160 je vyřízená v `937c69d`.
 
 ## Nenasazoval jsem
 
-Žádný `db push` (ani nasucho), žádné sloučení do `main`, žádný zásah do Vercelu, žádný zápis do ostré
-databáze. Všechny migrace Fáze 0 (`20261119100000` … `20261123100000` a další z kroků 4–9) čekají.
+Žádný `db push` (ani nasucho), žádné sloučení do `main`, žádný zásah do Vercelu. Do ostré databáze jen
+jeden zápis IČO na výslovný pokyn (výše). Všechny migrace Fáze 0 (`20261119100000` … `20261123100000` a další z kroků 4–9) čekají.
