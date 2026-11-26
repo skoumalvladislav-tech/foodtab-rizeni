@@ -2888,6 +2888,8 @@ krok 1. Nic jsem na něm neměnil.**
   párovat" zůstane, podle něj hlášku poznává jeden scénář). Dělá se v dodatku ke kroku 3.
 - **Když to má být jinak:** nechat a opravit později novou migrací.
 
+> **Vyřízeno (26. 11.):** text opraven v dodatku ke kroku 3 (`937c69d`), hlášky teď jmenují právo „Zadávat faktury a náklady"; začátek „Nemáte oprávnění párovat" zůstal.
+
 ## 280. Platby společného firemního účtu po pobočkách
 
 **Vzniklo:** 25. 11. 2026 (po rozhodnutí k otázkám 98 a 114).
@@ -2898,3 +2900,17 @@ krok 1. Nic jsem na něm neměnil.**
 - **Když to má být jinak:** obě možnosti jsou nová funkce. (a) U jednotlivé platby ručně vybrat pobočku,
   třeba nájem Perly. (b) Rozpočítat klíčem, třeba podle podílu tržeb nebo pevným procentem. Napište,
   kterou.
+
+## 281. Co se počítá jako firemní účet
+
+**Vzniklo:** 25. 11. 2026 (Finance Fáze 0, dodatek ke kroku 3, po rozhodnutí k otázkám 98 a 114).
+
+- **Teď:** stránky Financí místo varování „pobočky nemají účet" jen vysvětlí, že pobočky platí přes firemní
+  účet, když má firma aspoň jeden **aktivní účet bez pobočky** — bez ohledu na druh účtu (banka, pokladna,
+  karta). V kódu je to označené `ROZHODNOUT` ve funkci `public.firma_ma_firemni_ucet` (migrace
+  `20261121100000_pobocky_ucty.sql`) a v `lib/finance-ucty-pobocek.ts`.
+- **Volím:** každý aktivní účet bez pobočky, protože tak firemní účet popisuje zadání. V ostré databázi je
+  dnes jediný aktivní účet bez pobočky (bez čísla); jeho druh jsem nečetl.
+- **Když to má být jinak:** má-li se počítat jen bankovní účet, přibude ve funkci jedna podmínka na druh
+  účtu. Firma, která má bez pobočky jen pokladnu nebo kartu, pak dostane zase varování. Čísla v přehledech se
+  tím nezmění, jen to, co stránky řeknou.
