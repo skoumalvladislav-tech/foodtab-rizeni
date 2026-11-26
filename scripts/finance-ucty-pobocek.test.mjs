@@ -254,8 +254,11 @@ console.log('\n== Texty dodatku 3d ==')
   // Do vysvětlení patří i pobočka, jejíž vlastní účet je VYPNUTÝ
   // (pobocky_bez_aktivniho_uctu) — „nemá vlastní účet" by odporovalo
   // výpisu účtů, kde ten vypnutý účet je (revize dodatku 3d).
-  ok(`vysvětlení neříká „nemá vlastní (platební) účet" bez „aktivní" — naměřeno: ${jednaP}`,
-    ![dve, jednaP].some((t) => /nemá(ji)? vlastní (platební )?účet/.test(t ?? '')))
+  // Obě čísla: „nemá" (jedna pobočka) i „nemají" (víc poboček) — množné
+  // se píše s krátkým „a", vzor „nemá(ji)" by na něj nikdy nezabral
+  // (2. kolo kontroly dodatku 3d).
+  ok(`vysvětlení neříká „nemá vlastní (platební) účet" bez „aktivní" — naměřeno: ${jednaP} | ${dve}`,
+    ![dve, jednaP].some((t) => /nem(á|ají) vlastní (platební )?účet/.test(t ?? '')))
 }
 {
   // Rozpočty: věta k VYBRANÉ pobočce bez vlastního aktivního účtu.
